@@ -104,6 +104,7 @@ class TuquiOAuth(http.Controller):
         auth="none",
         methods=["POST"],
         csrf=False,
+        readonly=False,
     )
     def token(self, **post):
         grant_type = (post.get("grant_type") or "").strip()
@@ -134,6 +135,7 @@ class TuquiOAuth(http.Controller):
         auth="none",
         methods=["POST"],
         csrf=False,
+        readonly=False,
     )
     def revoke(self, **post):
         """Rotate the signing key, which invalidates every outstanding access token.
