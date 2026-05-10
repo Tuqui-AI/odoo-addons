@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+    <record id="param_access_log_max_rows" model="ir.config_parameter">
+        <field name="key">tuqui.access_log.max_rows</field>
+        <field name="value">10000</field>
+    </record>
+
+</odoo>

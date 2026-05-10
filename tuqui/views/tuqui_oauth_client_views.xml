@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_tuqui_oauth_client_form" model="ir.ui.view">
+        <field name="name">tuqui.oauth.client.form</field>
+        <field name="model">tuqui.oauth.client</field>
+        <field name="arch" type="xml">
+            <form string="Tuqui Connection" create="false" delete="false">
+                <header>
+                    <button name="action_rotate_secret" type="object"
+                            string="Rotate secret"
+                            class="oe_highlight"
+                            confirm="Rotating the secret will invalidate Tuqui's current session. You will need to paste the new secret into Tuqui. Continue?"/>
+                    <button name="action_disconnect" type="object"
+                            string="Disconnect"
+                            confirm="Disconnect this Odoo from Tuqui? Tuqui will lose access until you re-activate."
+                            invisible="state == 'disconnected'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="pending,active,disconnected"/>
+                </header>
+                <sheet>
+                    <group>
+                        <field name="client_id" readonly="1"/>
+                        <field name="tuqui_url"/>
+                        <field name="workspace_id_external" readonly="1"/>
+                        <field name="activated_at" readonly="1"/>
+                        <field name="last_seen_at" readonly="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_tuqui_oauth_client" model="ir.actions.act_window">
+        <field name="name">Tuqui</field>
+        <field name="res_model">tuqui.oauth.client</field>
+        <field name="view_mode">form</field>
+        <field name="target">current</field>
+    </record>
+
+</odoo>

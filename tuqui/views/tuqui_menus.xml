@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <menuitem id="menu_tuqui_root"
+              name="Tuqui"
+              sequence="80"
+              groups="base.group_system"/>
+
+    <menuitem id="menu_tuqui_connection"
+              parent="menu_tuqui_root"
+              name="Connection"
+              action="action_tuqui_oauth_client"
+              sequence="10"/>
+
+    <menuitem id="menu_tuqui_access_log"
+              parent="menu_tuqui_root"
+              name="Access Log"
+              action="action_tuqui_access_log"
+              sequence="20"/>
+
+</odoo>
