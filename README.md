@@ -12,9 +12,7 @@ Addons mantenidos por Tuqui-AI para extender / acompañar la conexión entre Odo
 
 ## Convención de branches
 
-Una rama por versión soportada de Odoo (`18.0`, `19.0`, …) — no hay `main` con código. La rama `main` aloja sólo metadocs (este `README.md`, `LICENSE`, `.gitignore`, `CONTRIBUTING.md`).
-
-Esto sigue el patrón de los repos de Adhoc (`ingadhoc/account-financial-tools`, etc.).
+Una rama por versión soportada de Odoo (`19.0`, `18.0`, …) — no hay `main`. La rama default es la versión activa más reciente (hoy `19.0`). Patrón estándar en repos de addons Odoo.
 
 ## Cómo se usa en desarrollo
 
@@ -33,4 +31,4 @@ Spec orquestadora cross-repo (cuando exista): `Tuqui-AI/tuqui-workspace` → `sp
 
 ## Licencia
 
-Privado mientras dure la fase de bring-up. Cuando se publique en `apps.odoo.com` se ajusta a LGPL-3 (estándar Odoo).
+LGPL-3.0 — estándar de los addons Odoo. Ver `LICENSE`.
