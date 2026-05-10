@@ -39,9 +39,10 @@ class TuquiOAuthClient(models.Model):
         help="Identifier returned by Tuqui after the first successful handshake.",
     )
 
-    _sql_constraints = [
-        ("client_id_unique", "unique(client_id)", "Tuqui client_id must be unique."),
-    ]
+    _client_id_unique = models.Constraint(
+        "unique(client_id)",
+        "Tuqui client_id must be unique.",
+    )
 
     # ---------- Singleton helpers ----------
 
