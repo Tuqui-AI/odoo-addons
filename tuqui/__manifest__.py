@@ -27,6 +27,8 @@ or any MCP-compatible client.
         "data/ir_config_parameter_data.xml",
         "views/tuqui_oauth_client_views.xml",
         "views/tuqui_access_log_views.xml",
+        "views/tuqui_rpc_rule_views.xml",
+        "views/tuqui_rpc_policy_views.xml",
         "views/tuqui_menus.xml",
     ],
     "installable": True,

@@ -1,5 +1,5 @@
 from odoo import _, api, fields, models
-from odoo.exceptions import UserError
+from odoo.exceptions import ValidationError
 
 
 # Default deny rules created by the "Solo lectura" preset. Keep the
@@ -103,17 +103,36 @@ class TuquiRpcPolicy(models.Model):
             },
         }
 
-    def action_switch_to_advanced(self):
-        self.ensure_one()
-        self.write({"policy_mode": "advanced"})
+    def action_open_form(self):
+        """Server-action target for the Tuqui > Security menu.
 
-    def action_switch_to_default(self):
-        self.ensure_one()
-        if self.allow_private_methods:
-            raise UserError(
-                _(
-                    "Disable 'allow_private_methods' before switching back to default — "
-                    "the flag only has meaning in advanced mode."
+        Auto-creates the singleton on first access so the menu never
+        opens an empty form on a fresh install.
+        """
+        rec = self.sudo()._get_singleton()
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Tuqui Security"),
+            "res_model": self._name,
+            "view_mode": "form",
+            "res_id": rec.id,
+            "target": "current",
+        }
+
+    @api.constrains("policy_mode", "allow_private_methods")
+    def _check_allow_private_only_in_advanced(self):
+        """``allow_private_methods`` has no meaning in default mode — keep them in sync.
+
+        Enforced as a constraint instead of a button guard so the admin
+        can edit either field via the radio/checkbox directly without
+        a footgun where the flag is left True after switching back to
+        default and silently does nothing.
+        """
+        for rec in self:
+            if rec.policy_mode == "default" and rec.allow_private_methods:
+                raise ValidationError(
+                    _(
+                        "'allow_private_methods' only takes effect in advanced mode. "
+                        "Disable it before switching back to default."
+                    )
                 )
-            )
-        self.write({"policy_mode": "default"})
