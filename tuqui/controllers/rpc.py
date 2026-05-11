@@ -1,45 +1,205 @@
+import fnmatch
 import json
 import logging
+import time
+from collections.abc import Mapping
 
 from odoo import http
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.http import Response, request
+from odoo.models import BaseModel
+from odoo.tools.json import json_default as odoo_json_default
 
 from .oauth import verify_access_token
 
 
 _LOG = logging.getLogger(__name__)
 
-# Hardcoded perimeter — operations the module is willing to execute on
-# behalf of Tuqui. Model-level allowlist lives in Tuqui (already enforced
-# server-side). Any operation outside this set is rejected here as a
-# defense-in-depth measure (e.g. should Tuqui be compromised).
-_ALLOWED_OPERATIONS = frozenset(
-    {
-        "search_read",
-        "read_group",
-        "name_search",
-        "fields_get",
-        "model_list",
-        "read",
-        "name_get",
-    }
+
+# ─── Absolute blocks ─────────────────────────────────────────────────
+# Methods that bypass ACL or reach into the ORM internals. Hardcoded
+# block regardless of policy mode — these aren't business operations,
+# they're escape hatches that have no place behind an RPC. Even an
+# admin authoring an allow rule for them should be a friction event.
+
+_ABSOLUTE_METHOD_BLOCKS = frozenset({"sudo", "with_user", "with_env", "with_company"})
+_ABSOLUTE_METHOD_PREFIXES = ("flush", "invalidate")
+
+
+def _is_absolutely_blocked(method: str) -> bool:
+    if method in _ABSOLUTE_METHOD_BLOCKS:
+        return True
+    return method.startswith(_ABSOLUTE_METHOD_PREFIXES)
+
+
+# ─── Classification ──────────────────────────────────────────────────
+# Each inbound method gets one of four operation types. The classifier
+# is intentionally pattern-light: most cases fall into private/_-prefix,
+# explicit write set, or the read prefix family. Business methods and
+# actions land in `execute` and only get bouncing by explicit rules.
+
+_WRITE_METHODS = frozenset({"create", "write", "unlink", "copy", "name_create"})
+_READ_METHODS = frozenset(
+    {"name_search", "name_get", "fields_get", "default_get", "models_list", "model_list"}
 )
+_READ_PREFIXES = ("search", "read")
+
+
+def _classify(method: str) -> str:
+    if method.startswith("_"):
+        return "private_execute"
+    if method in _WRITE_METHODS:
+        return "write"
+    if method in _READ_METHODS or method.startswith(_READ_PREFIXES):
+        return "read"
+    return "execute"
+
+
+# ─── Rule matching ───────────────────────────────────────────────────
+
+
+def _rule_matches(rule, model: str, method: str, op_type: str) -> bool:
+    """A rule matches when its op_type filter passes and both globs match.
+
+    ``operation_type == 'any'`` is the catch-all bucket. Case-sensitive
+    matching is intentional — model names are lowercase by convention
+    and a stray uppercase character should not silently change a
+    rule's reach.
+    """
+    if rule.operation_type != "any" and rule.operation_type != op_type:
+        return False
+    return fnmatch.fnmatchcase(model, rule.model_pattern) and fnmatch.fnmatchcase(
+        method, rule.method_pattern
+    )
+
+
+# ─── Policy gate ─────────────────────────────────────────────────────
+
+
+def _evaluate_policy(env, policy, model: str, method: str, op_type: str):
+    """Return ``(allowed, denied_reason)``.
+
+    ``allowed=True`` means the call may proceed to the ORM. ``denied_reason``
+    is set only when ``allowed=False``; otherwise it is ``None``.
+    """
+    # 1. Hard blocks first — apply in both default and advanced modes.
+    if _is_absolutely_blocked(method):
+        return False, "method_blocked"
+
+    # 2. Default mode: privados bloqueados, todo lo demás pasa al ACL de Odoo.
+    if policy.policy_mode == "default":
+        if op_type == "private_execute":
+            return False, "private_method_blocked"
+        return True, None
+
+    # 3. Advanced mode — rules table is consulted.
+    if op_type == "private_execute" and not policy.allow_private_methods:
+        return False, "private_method_blocked"
+
+    rules = env["tuqui.rpc.rule"].sudo().search([("active", "=", True)])
+    # Single pass; deny wins, allow remembered.
+    matched_deny = False
+    matched_allow = False
+    for rule in rules:
+        if not _rule_matches(rule, model, method, op_type):
+            continue
+        if rule.effect == "deny":
+            matched_deny = True
+            break
+        matched_allow = True
+
+    if matched_deny:
+        return False, "deny_rule_matched"
+
+    # For private_execute the allow MUST be explicit (no allow-by-default).
+    if op_type == "private_execute" and not matched_allow:
+        return False, "no_allow_rule"
+
+    return True, None
+
+
+# ─── Dispatch ────────────────────────────────────────────────────────
+# Mirrors odoo.service.model.call_kw — same args[0]=ids semantics for
+# record methods, same context popping, same recordset → ids result
+# adaptation. The deliberate divergence is that call_kw rejects all
+# private (``_``-prefixed) methods up front via ``get_public_method``;
+# we skip that check because our policy engine already decided whether
+# the call is permitted. ``_UNSAFE_ATTRIBUTES`` (Python introspection
+# slots like ``mro``, ``f_code``) are not handled here because the
+# policy classifies them as ``execute`` and any allow rule covering
+# them would have to be authored deliberately by an admin — that
+# alarm-level friction is the intended guardrail.
+
+
+def _dispatch(model, method_name: str, args: list, kwargs: dict):
+    """Invoke ``method_name`` on ``model`` with execute_kw-style args."""
+    cls = type(model)
+    method = getattr(cls, method_name, None)
+    if not callable(method):
+        raise ValidationError(
+            f"Model {model._name!r} has no callable method {method_name!r}"
+        )
+
+    args = list(args)
+    if getattr(method, "_api_model", False):
+        recs = model
+    else:
+        if not args:
+            raise ValidationError(
+                f"Record method {method_name!r} requires a list of ids as the first positional arg"
+            )
+        ids = args[0]
+        args = args[1:]
+        if isinstance(ids, int):
+            ids = [ids]
+        if not isinstance(ids, (list, tuple)):
+            raise ValidationError(
+                f"First positional arg for record method {method_name!r} must be a list of ids"
+            )
+        recs = model.browse(ids)
+
+    kwargs = dict(kwargs)
+    inner_context = kwargs.pop("context", None) or {}
+    if inner_context:
+        recs = recs.with_context(**inner_context)
+
+    result = method(recs, *args, **kwargs)
+
+    # Adapt result to a JSON-safe shape — match what odoo.service.model.call_kw does
+    # so Tuqui's CompanionTransport gets the same data shape as JsonRpcTransport.
+    if method_name == "create":
+        # @api.model_create_multi keeps original args (no ids pop); args[0] is the vals.
+        original_vals = args[0] if args else None
+        if isinstance(original_vals, Mapping):
+            result = result.id
+        else:
+            result = result.ids
+    elif isinstance(result, BaseModel):
+        result = result.ids
+
+    return result
+
+
+# ─── HTTP helpers ────────────────────────────────────────────────────
+
+
+def _serializer(obj):
+    """JSON fallback: recordsets → ids, then delegate to Odoo's date/lazy serializer."""
+    if isinstance(obj, BaseModel):
+        return obj.ids
+    return odoo_json_default(obj)
 
 
 def _json_response(body, status=200):
     return Response(
-        json.dumps(body, default=str),
+        json.dumps(body, default=_serializer),
         content_type="application/json",
         status=status,
     )
 
 
-def _ok(data, record_count=None):
-    body = {"ok": True, "data": data}
-    if record_count is not None:
-        body["record_count"] = record_count
-    return _json_response(body, status=200)
+def _ok(data):
+    return _json_response({"ok": True, "data": data}, status=200)
 
 
 def _error(code, message, status=400):
@@ -54,164 +214,85 @@ def _bearer_token():
 
 
 def _resolve_acting_user(env, login):
-    """Look up by ``res.users.login`` (NOT email — duplicates exist in some instances)."""
+    """Lookup by ``res.users.login`` (not email — emails duplicate in some instances)."""
     if not login:
         return env["res.users"]
     return env["res.users"].sudo().search([("login", "=", login), ("active", "=", True)], limit=1)
 
 
-def _log_access(env, operation, acting_user, model_name, record_count, success, error_code=None):
-    """Adapter that maps the v1 allowlist controller to the v2 log schema.
+def _result_count(result) -> int:
+    """Best-effort row count for the audit log. Zero when the result isn't sized."""
+    if isinstance(result, (list, tuple, dict)):
+        return len(result)
+    return 0
 
-    The gateway refactor in a follow-up commit will split policy_allowed/
-    policy_denied_reason from success/error_code properly. For now,
-    operation_not_allowed (policy-like) collapses into error_code so
-    behavior is preserved without touching test expectations.
-    """
+
+def _log(
+    env,
+    *,
+    method,
+    model_name,
+    operation_type,
+    acting_user,
+    policy_allowed,
+    policy_denied_reason,
+    success,
+    error_code,
+    duration_ms,
+    result_count,
+):
+    """Best-effort audit log write. Never fails the calling RPC."""
     try:
         env["tuqui.access.log"].sudo().log(
-            method=operation,
+            method=method,
             model_name=model_name,
+            operation_type=operation_type,
             acting_user_id=acting_user.id if acting_user else None,
+            policy_allowed=policy_allowed,
+            policy_denied_reason=policy_denied_reason,
             success=success,
             error_code=error_code,
-            result_count=record_count,
+            duration_ms=duration_ms,
+            result_count=result_count,
         )
     except Exception:  # noqa: BLE001
-        # Logging is best-effort — never fail an RPC call because we couldn't log it.
         _LOG.exception("tuqui.access.log: failed to record access")
 
 
-def _require_model(env, model_name):
-    """Return the recordset for ``model_name`` or raise ValidationError."""
-    if not model_name or not isinstance(model_name, str):
-        raise ValidationError("Param 'model' is required")
-    if model_name not in env:
-        raise ValidationError(f"Unknown model: {model_name!r}")
-    return env[model_name]
-
-
-# ---------- Per-operation dispatch ----------
-#
-# Each handler receives (env_user, params) where env_user is request.env modified
-# with `with_user(acting_user)` so the call respects the acting user's groups.
-# Handlers return (data, record_count). Exceptions propagate to the wrapper.
-
-
-def _op_search_read(env_user, params):
-    model_name = params.get("model")
-    model = _require_model(env_user, model_name)
-    domain = params.get("domain") or []
-    fields = params.get("fields") or []
-    limit = params.get("limit")
-    offset = params.get("offset") or 0
-    order = params.get("order")
-    rows = model.search_read(domain, fields, offset=offset, limit=limit, order=order)
-    return rows, len(rows)
-
-
-def _op_read(env_user, params):
-    model = _require_model(env_user, params.get("model"))
-    ids = params.get("ids") or []
-    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
-        raise ValidationError("Param 'ids' must be a list of integers")
-    fields = params.get("fields") or None
-    rows = model.browse(ids).read(fields) if fields else model.browse(ids).read()
-    return rows, len(rows)
-
-
-def _op_fields_get(env_user, params):
-    model = _require_model(env_user, params.get("model"))
-    allfields = params.get("allfields") or None
-    attributes = params.get("attributes") or None
-    data = model.fields_get(allfields=allfields, attributes=attributes)
-    return data, len(data)
-
-
-def _op_name_search(env_user, params):
-    model = _require_model(env_user, params.get("model"))
-    name = params.get("name") or ""
-    # Accept legacy 'args' alias for the search domain (Odoo 18 → 19 renamed
-    # the parameter to 'domain'). Tuqui clients may send either.
-    domain = params.get("domain")
-    if domain is None:
-        domain = params.get("args")
-    operator = params.get("operator") or "ilike"
-    limit = params.get("limit") or 100
-    rows = model.name_search(name=name, domain=domain, operator=operator, limit=limit)
-    # name_search returns list of (id, display_name) tuples → JSON serialises tuples as lists.
-    return rows, len(rows)
-
-
-def _op_read_group(env_user, params):
-    model = _require_model(env_user, params.get("model"))
-    domain = params.get("domain") or []
-    fields = params.get("fields") or []
-    groupby = params.get("groupby") or []
-    offset = params.get("offset") or 0
-    limit = params.get("limit")
-    orderby = params.get("orderby") or False
-    lazy = params.get("lazy")
-    if lazy is None:
-        lazy = True
-    rows = model.read_group(
-        domain=domain,
-        fields=fields,
-        groupby=groupby,
-        offset=offset,
-        limit=limit,
-        orderby=orderby,
-        lazy=lazy,
-    )
-    return rows, len(rows)
-
-
-def _op_name_get(env_user, params):
-    """Compatibility shim: ``name_get`` was removed in Odoo 17+ in favour of ``display_name``.
-
-    We replicate the legacy return shape (``[[id, display_name], ...]``) so
-    Tuqui clients that still call it keep working until they migrate.
-    """
-    model = _require_model(env_user, params.get("model"))
-    ids = params.get("ids") or []
-    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
-        raise ValidationError("Param 'ids' must be a list of integers")
-    records = model.browse(ids)
-    rows = [[rec.id, rec.display_name] for rec in records]
-    return rows, len(rows)
-
-
-def _op_model_list(env_user, _params):
-    """List models the acting user has read access to (via ``ir.model.access``).
-
-    Returns ``[{model, name, transient}, ...]``. Uses the public
-    ``_get_allowed_models('read')`` API so we don't reach into ACL internals.
-    """
-    allowed = env_user["ir.model.access"]._get_allowed_models("read")
-    if not allowed:
-        return [], 0
-    ir_model = env_user["ir.model"].sudo().search([("model", "in", list(allowed))])
-    rows = [
-        {"model": rec.model, "name": rec.name, "transient": rec.transient}
-        for rec in ir_model
-    ]
-    rows.sort(key=lambda r: r["model"])
-    return rows, len(rows)
-
-
-_DISPATCH = {
-    "search_read": _op_search_read,
-    "read": _op_read,
-    "fields_get": _op_fields_get,
-    "name_search": _op_name_search,
-    "read_group": _op_read_group,
-    "name_get": _op_name_get,
-    "model_list": _op_model_list,
-}
+# Policy-deny reasons that should surface as HTTP 403. Anything else
+# from the gate (currently nothing) would surface as 400.
+_POLICY_DENY_403 = frozenset(
+    {"method_blocked", "private_method_blocked", "deny_rule_matched", "no_allow_rule"}
+)
 
 
 class TuquiRpc(http.Controller):
-    """Generic RPC bridge: read-style operations against the Odoo ORM."""
+    """Generic ``execute_kw``-style gateway, behind OAuth + policy engine.
+
+    Body shape::
+
+        {
+            "model":   "res.partner",
+            "method":  "search_read",
+            "args":    [[]],
+            "kwargs":  {"fields": ["name"], "limit": 5},
+            "context": {"lang": "es_AR"}
+        }
+
+    There is no hardcoded allowlist of operations — that lives in the
+    ``tuqui.rpc.policy`` engine and the optional ``tuqui.rpc.rule`` table,
+    so adding new capabilities to Tuqui doesn't require shipping a new
+    module version to clients. Defense in depth, in order:
+
+    1. OAuth ``client_credentials`` bearer (verified upstream).
+    2. ``X-Tuqui-Acting-User`` → ``res.users.login`` lookup, then every
+       ORM call runs through ``with_user(acting_user)`` so Odoo's ACL is
+       the per-call privilege check.
+    3. Absolute blocks on ``sudo`` / ``with_*`` / ``flush*`` /
+       ``invalidate*`` — escape hatches that bypass ACL.
+    4. Policy engine: ``default`` mode blocks private (``_``-prefixed)
+       methods; ``advanced`` consults the rules table.
+    """
 
     @http.route(
         "/tuqui/rpc",
@@ -223,59 +304,176 @@ class TuquiRpc(http.Controller):
     )
     def rpc(self, **_kwargs):
         env = request.env
+
+        # ─── Auth ──────────────────────────────────────────────────────────
         token = _bearer_token()
         if not token:
             return _error("unauthorized", "Missing bearer token", status=401)
-        payload = verify_access_token(env, token)
-        if not payload:
+        if not verify_access_token(env, token):
             return _error("unauthorized", "Invalid or expired token", status=401)
 
+        # ─── Body ──────────────────────────────────────────────────────────
         try:
             body = json.loads(request.httprequest.get_data(as_text=True) or "{}")
         except json.JSONDecodeError:
             return _error("bad_request", "Body must be valid JSON", status=400)
 
-        operation = body.get("operation")
-        params = body.get("params") or {}
-        if not operation or not isinstance(operation, str):
-            return _error("bad_request", "Missing 'operation'", status=400)
-        if operation not in _ALLOWED_OPERATIONS:
-            _log_access(env, operation, None, params.get("model"), 0, False, "operation_not_allowed")
-            return _error("operation_not_allowed", f"Operation '{operation}' is not exposed", status=403)
+        model_name = body.get("model")
+        method = body.get("method")
+        args = body.get("args") or []
+        kwargs = body.get("kwargs") or {}
+        context = body.get("context") or {}
 
+        if not isinstance(model_name, str) or not model_name:
+            return _error("bad_request", "Param 'model' is required", status=400)
+        if not isinstance(method, str) or not method:
+            return _error("bad_request", "Param 'method' is required", status=400)
+        if not isinstance(args, list):
+            return _error("bad_request", "Param 'args' must be a list", status=400)
+        if not isinstance(kwargs, dict):
+            return _error("bad_request", "Param 'kwargs' must be an object", status=400)
+        if not isinstance(context, dict):
+            return _error("bad_request", "Param 'context' must be an object", status=400)
+
+        # Outer context comes from the top-level field; any nested context
+        # in kwargs is merged below with outer winning.
+        operation_type = _classify(method)
+
+        # ─── Acting user ───────────────────────────────────────────────────
         acting_login = request.httprequest.headers.get("X-Tuqui-Acting-User") or ""
         acting_user = _resolve_acting_user(env, acting_login)
         if not acting_user:
-            _log_access(env, operation, None, params.get("model"), 0, False, "unknown_acting_user")
+            _log(
+                env,
+                method=method,
+                model_name=model_name,
+                operation_type=operation_type,
+                acting_user=None,
+                policy_allowed=False,
+                policy_denied_reason=None,
+                success=False,
+                error_code="unknown_acting_user",
+                duration_ms=0,
+                result_count=0,
+            )
             return _error(
                 "unknown_acting_user",
                 f"Unknown acting_user login: {acting_login!r}",
                 status=400,
             )
 
-        handler = _DISPATCH.get(operation)
-        if handler is None:
-            # Defensive — _ALLOWED_OPERATIONS and _DISPATCH must stay in sync.
-            _log_access(env, operation, acting_user, params.get("model"), 0, False, "not_implemented")
-            return _error("not_implemented", f"Operation '{operation}' has no handler", status=501)
+        # ─── Policy gate ───────────────────────────────────────────────────
+        policy = env["tuqui.rpc.policy"]._get_singleton()
+        allowed, denied_reason = _evaluate_policy(env, policy, model_name, method, operation_type)
+        if not allowed:
+            _log(
+                env,
+                method=method,
+                model_name=model_name,
+                operation_type=operation_type,
+                acting_user=acting_user,
+                policy_allowed=False,
+                policy_denied_reason=denied_reason,
+                success=False,
+                error_code=None,
+                duration_ms=0,
+                result_count=0,
+            )
+            status = 403 if denied_reason in _POLICY_DENY_403 else 400
+            return _error(denied_reason, f"Call blocked by policy: {denied_reason}", status=status)
 
-        env_user = env(user=acting_user.id)
-        model_name = params.get("model")
+        # ─── Dispatch ──────────────────────────────────────────────────────
+        if model_name not in env:
+            _log(
+                env,
+                method=method,
+                model_name=model_name,
+                operation_type=operation_type,
+                acting_user=acting_user,
+                policy_allowed=True,
+                policy_denied_reason=None,
+                success=False,
+                error_code="validation_error",
+                duration_ms=0,
+                result_count=0,
+            )
+            return _error("validation_error", f"Unknown model: {model_name!r}", status=400)
+
+        recordset = env[model_name].with_user(acting_user)
+        if context:
+            recordset = recordset.with_context(**context)
+
+        started = time.monotonic()
         try:
-            data, record_count = handler(env_user, params)
+            result = _dispatch(recordset, method, args, kwargs)
         except AccessError as exc:
-            _log_access(env, operation, acting_user, model_name, 0, False, "access_denied")
+            duration_ms = int((time.monotonic() - started) * 1000)
+            _log(
+                env,
+                method=method,
+                model_name=model_name,
+                operation_type=operation_type,
+                acting_user=acting_user,
+                policy_allowed=True,
+                policy_denied_reason=None,
+                success=False,
+                error_code="access_denied",
+                duration_ms=duration_ms,
+                result_count=0,
+            )
             return _error("access_denied", str(exc), status=403)
         except (ValidationError, UserError) as exc:
-            _log_access(env, operation, acting_user, model_name, 0, False, "validation_error")
+            duration_ms = int((time.monotonic() - started) * 1000)
+            _log(
+                env,
+                method=method,
+                model_name=model_name,
+                operation_type=operation_type,
+                acting_user=acting_user,
+                policy_allowed=True,
+                policy_denied_reason=None,
+                success=False,
+                error_code="validation_error",
+                duration_ms=duration_ms,
+                result_count=0,
+            )
             return _error("validation_error", str(exc), status=400)
         except Exception:  # noqa: BLE001
-            # Log the full traceback server-side; never leak exception
-            # details (str/repr/traceback) to the client — they may carry
-            # SQL fragments, internal paths, or user data.
-            _LOG.exception("tuqui.rpc: unhandled error in operation %s", operation)
-            _log_access(env, operation, acting_user, model_name, 0, False, "internal_error")
+            # Server-side: full traceback. Client-side: generic copy.
+            # Never leak SQL, paths, repr(exc), or anything from the
+            # underlying call into the response body.
+            _LOG.exception(
+                "tuqui.rpc: unhandled error in %s.%s", model_name, method
+            )
+            duration_ms = int((time.monotonic() - started) * 1000)
+            _log(
+                env,
+                method=method,
+                model_name=model_name,
+                operation_type=operation_type,
+                acting_user=acting_user,
+                policy_allowed=True,
+                policy_denied_reason=None,
+                success=False,
+                error_code="internal_error",
+                duration_ms=duration_ms,
+                result_count=0,
+            )
             return _error("internal_error", "An internal error occurred.", status=500)
 
-        _log_access(env, operation, acting_user, model_name, record_count, True)
-        return _ok(data, record_count=record_count)
+        duration_ms = int((time.monotonic() - started) * 1000)
+        result_count = _result_count(result)
+        _log(
+            env,
+            method=method,
+            model_name=model_name,
+            operation_type=operation_type,
+            acting_user=acting_user,
+            policy_allowed=True,
+            policy_denied_reason=None,
+            success=True,
+            error_code=None,
+            duration_ms=duration_ms,
+            result_count=result_count,
+        )
+        return _ok(result)

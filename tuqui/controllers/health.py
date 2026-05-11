@@ -4,19 +4,18 @@ from odoo import http, release
 from odoo.http import Response
 
 
-_PROTOCOL_VERSION = "1.0"
+_PROTOCOL_VERSION = "2.0"
 
 # Capabilities advertised by this module to a Tuqui backend during handshake.
-# Read-style operations only; new capabilities (rag_search, etc.) are added
-# through dedicated semantic endpoints, not by widening the generic RPC.
+# The 2.0 surface is a single generic execute_kw gateway behind a local
+# policy engine — new capabilities are added on the Tuqui side by calling
+# new ORM methods, without shipping a new module version.
 _CAPABILITIES = [
-    "rpc.search_read",
-    "rpc.read_group",
-    "rpc.name_search",
-    "rpc.fields_get",
-    "rpc.model_list",
-    "rpc.read",
-    "rpc.name_get",
+    "rpc.execute_kw",
+    "policy.default",
+    "policy.advanced",
+    "policy.private_exact_allow",
+    "access_log",
 ]
 
 

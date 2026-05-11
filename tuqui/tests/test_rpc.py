@@ -1,13 +1,18 @@
 import json
 import secrets
+import unittest
 
 from odoo.tests import HttpCase, tagged
 
 
+@unittest.skip(
+    "Sprint 1.5 verified the 7-op allowlist body shape ({operation, params}). "
+    "The 1.6a gateway uses {model, method, args, kwargs, context} — these "
+    "tests will be replaced wholesale in the next commit on this branch."
+)
 @tagged("post_install", "-at_install", "tuqui")
 class TestTuquiRpc(HttpCase):
-    """End-to-end coverage of /tuqui/rpc — one test per allowed operation
-    plus the perimeter (auth, allowlist, acting_user, error mapping)."""
+    """Legacy 1.5 perimeter tests, kept skipped until commit 5 replaces them."""
 
     @classmethod
     def setUpClass(cls):
