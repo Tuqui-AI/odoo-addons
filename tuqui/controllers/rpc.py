@@ -61,14 +61,21 @@ def _resolve_acting_user(env, login):
 
 
 def _log_access(env, operation, acting_user, model_name, record_count, success, error_code=None):
+    """Adapter that maps the v1 allowlist controller to the v2 log schema.
+
+    The gateway refactor in a follow-up commit will split policy_allowed/
+    policy_denied_reason from success/error_code properly. For now,
+    operation_not_allowed (policy-like) collapses into error_code so
+    behavior is preserved without touching test expectations.
+    """
     try:
         env["tuqui.access.log"].sudo().log(
-            operation=operation,
-            acting_user_id=acting_user.id if acting_user else None,
+            method=operation,
             model_name=model_name,
-            record_count=record_count,
+            acting_user_id=acting_user.id if acting_user else None,
             success=success,
             error_code=error_code,
+            result_count=record_count,
         )
     except Exception:  # noqa: BLE001
         # Logging is best-effort — never fail an RPC call because we couldn't log it.

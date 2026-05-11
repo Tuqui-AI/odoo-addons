@@ -6,13 +6,17 @@
         <field name="model">tuqui.access.log</field>
         <field name="arch" type="xml">
             <list string="Tuqui Access Log" create="false" delete="false" edit="false">
-                <field name="timestamp"/>
+                <field name="create_date" string="Timestamp"/>
                 <field name="acting_user_id"/>
-                <field name="operation"/>
                 <field name="model_name"/>
-                <field name="record_count"/>
+                <field name="method"/>
+                <field name="operation_type"/>
+                <field name="policy_allowed"/>
+                <field name="policy_denied_reason"/>
                 <field name="success"/>
                 <field name="error_code"/>
+                <field name="duration_ms"/>
+                <field name="result_count"/>
             </list>
         </field>
     </record>
@@ -22,12 +26,17 @@
         <field name="model">tuqui.access.log</field>
         <field name="arch" type="xml">
             <search>
-                <field name="operation"/>
+                <field name="method"/>
                 <field name="model_name"/>
                 <field name="acting_user_id"/>
-                <filter name="failed" string="Failed" domain="[('success', '=', False)]"/>
-                <filter name="group_operation" string="Operation" context="{'group_by': 'operation'}"/>
+                <filter name="policy_denied" string="Denied by policy"
+                        domain="[('policy_allowed', '=', False)]"/>
+                <filter name="runtime_failed" string="Runtime failed"
+                        domain="[('policy_allowed', '=', True), ('success', '=', False)]"/>
+                <separator/>
+                <filter name="group_method" string="Method" context="{'group_by': 'method'}"/>
                 <filter name="group_model" string="Model" context="{'group_by': 'model_name'}"/>
+                <filter name="group_op_type" string="Operation type" context="{'group_by': 'operation_type'}"/>
                 <filter name="group_user" string="Acting user" context="{'group_by': 'acting_user_id'}"/>
             </search>
         </field>
