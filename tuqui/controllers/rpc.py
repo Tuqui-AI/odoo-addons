@@ -29,6 +29,13 @@ _ABSOLUTE_METHOD_PREFIXES = ("flush", "invalidate")
 def _is_absolutely_blocked(method: str) -> bool:
     if method in _ABSOLUTE_METHOD_BLOCKS:
         return True
+    # Dunders (``__class__``, ``__getattribute__``, ``__reduce__``, …) are
+    # Python introspection slots, not business methods. No RPC has a
+    # legitimate use for them, and a careless advanced-mode allow rule
+    # like ``model_pattern='*' / method_pattern='__*__'`` would silently
+    # widen attack surface. Hard-block at the gate.
+    if method.startswith("__") and method.endswith("__"):
+        return True
     return method.startswith(_ABSOLUTE_METHOD_PREFIXES)
 
 
@@ -220,10 +227,26 @@ def _resolve_acting_user(env, login):
     return env["res.users"].sudo().search([("login", "=", login), ("active", "=", True)], limit=1)
 
 
-def _result_count(result) -> int:
-    """Best-effort row count for the audit log. Zero when the result isn't sized."""
+def _result_count(result, method: str) -> int:
+    """Best-effort "records affected" count for the audit log.
+
+    Sized results (lists, tuples, dicts, recordsets) → ``len()``. Scalar
+    int results (``create`` returning a single id, ``copy``) → ``1`` so
+    the audit shows a meaningful count instead of zero. ``search_count``
+    is special-cased: the int it returns IS the count, so we surface it
+    directly. ``None``/``False`` (typical for action methods that don't
+    return data) → ``0``.
+    """
+    if result is None or result is False:
+        return 0
+    if isinstance(result, BaseModel):
+        return len(result)
     if isinstance(result, (list, tuple, dict)):
         return len(result)
+    if isinstance(result, int):
+        if method == "search_count":
+            return result
+        return 1
     return 0
 
 
@@ -335,8 +358,10 @@ class TuquiRpc(http.Controller):
         if not isinstance(context, dict):
             return _error("bad_request", "Param 'context' must be an object", status=400)
 
-        # Outer context comes from the top-level field; any nested context
-        # in kwargs is merged below with outer winning.
+        # The outer ``context`` field is applied first via with_context()
+        # on the recordset, then ``_dispatch`` pops any context inside
+        # kwargs and layers it on top — inner wins on key conflicts,
+        # matching Odoo's own call_kw semantics.
         operation_type = _classify(method)
 
         # ─── Acting user ───────────────────────────────────────────────────
@@ -462,7 +487,7 @@ class TuquiRpc(http.Controller):
             return _error("internal_error", "An internal error occurred.", status=500)
 
         duration_ms = int((time.monotonic() - started) * 1000)
-        result_count = _result_count(result)
+        result_count = _result_count(result, method)
         _log(
             env,
             method=method,

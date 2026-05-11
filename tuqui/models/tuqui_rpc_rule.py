@@ -70,6 +70,11 @@ class TuquiRpcRule(models.Model):
     )
     note = fields.Text(help="Optional — explain *why* this rule exists. Useful for auditors.")
 
+    _rule_unique = models.Constraint(
+        "unique(effect, model_pattern, method_pattern, operation_type)",
+        "A rule with this (effect, model_pattern, method_pattern, operation_type) combination already exists.",
+    )
+
     @api.constrains("effect", "operation_type", "model_pattern", "method_pattern")
     def _check_private_allow_is_exact(self):
         """Allow rules for private methods must use exact patterns."""
