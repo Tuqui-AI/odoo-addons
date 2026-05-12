@@ -84,10 +84,28 @@ class TuquiOAuthClient(models.Model):
     # ---------- Actions ----------
 
     def action_rotate_secret(self):
-        """Generate a new secret. Returns the plaintext value once via context.
+        """Rotate the secret and surface the plaintext via a sticky notification."""
+        self.ensure_one()
+        plain_secret = self._rotate_secret_silent()
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "type": "warning",
+                "title": _("Tuqui secret rotated"),
+                "message": _("New client_secret (shown once): %s\n\nUpdate Tuqui with this value.") % plain_secret,
+                "sticky": True,
+            },
+        }
 
-        UI consumes the value via wizard / sticky notification; backend should
-        ensure it isn't logged.
+    def _rotate_secret_silent(self) -> str:
+        """Generate a new ``client_secret`` and return the plaintext.
+
+        Used by activation flows that hand the secret to another system
+        (the Tuqui frontend via the nonce exchange) rather than showing
+        it to a human. The plaintext is returned exactly once — the
+        caller is responsible for routing it without logging or persisting
+        beyond the activation handshake.
         """
         self.ensure_one()
         plain_secret = secrets.token_urlsafe(48)
@@ -98,15 +116,20 @@ class TuquiOAuthClient(models.Model):
                 "client_secret_salt": salt,
             }
         )
+        return plain_secret
+
+    def action_start_activation(self):
+        """Return an ``act_url`` action that opens ``/tuqui/activation/start``.
+
+        The route mints a fresh nonce + secret and redirects the browser
+        on to the Tuqui frontend with the nonce in the query string. UI
+        glue only — the work happens server-side at the route.
+        """
+        self.ensure_one()
         return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "type": "warning",
-                "title": _("Tuqui secret rotated"),
-                "message": _("New client_secret (shown once): %s\n\nUpdate Tuqui with this value.") % plain_secret,
-                "sticky": True,
-            },
+            "type": "ir.actions.act_url",
+            "url": "/tuqui/activation/start",
+            "target": "self",
         }
 
     def action_disconnect(self):
