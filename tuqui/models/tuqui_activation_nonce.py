@@ -63,6 +63,15 @@ class TuquiActivationNonce(models.Model):
         ),
     )
     client_id = fields.Char(required=True, readonly=True)
+    acting_user_login = fields.Char(
+        readonly=True,
+        help=(
+            "Odoo ``res.users.login`` of the admin who triggered the activation. "
+            "Tuqui will use this value in the ``X-Tuqui-Acting-User`` header for "
+            "every RPC call once activation completes. Captured at /start because "
+            "the request context isn't available at /exchange time."
+        ),
+    )
 
     _nonce_unique = models.Constraint(
         "unique(nonce)",
@@ -70,12 +79,21 @@ class TuquiActivationNonce(models.Model):
     )
 
     @api.model
-    def _issue(self, *, client_id, client_secret_plaintext, ttl_minutes=_NONCE_TTL_MINUTES):
+    def _issue(
+        self,
+        *,
+        client_id,
+        client_secret_plaintext,
+        acting_user_login=None,
+        ttl_minutes=_NONCE_TTL_MINUTES,
+    ):
         """Mint a fresh nonce row and return the unguessable token.
 
         The plaintext secret is intentionally stored here (and only here)
         so the exchange endpoint can hand it back to the Tuqui frontend
         on first redemption — never written to logs, never re-issued.
+        ``acting_user_login`` is captured at issuance because at
+        exchange time the request has no authenticated user.
         """
         nonce = secrets.token_urlsafe(48)
         expires_at = fields.Datetime.add(fields.Datetime.now(), minutes=ttl_minutes)
@@ -85,6 +103,7 @@ class TuquiActivationNonce(models.Model):
                 "expires_at": expires_at,
                 "client_id": client_id,
                 "client_secret_plaintext": client_secret_plaintext,
+                "acting_user_login": acting_user_login or False,
             }
         )
         return nonce, expires_at

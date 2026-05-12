@@ -1,11 +1,14 @@
 """Activation trigger — mints a nonce + redirects to the Tuqui frontend."""
 
+import json
 import logging
 import urllib.parse
 
-from odoo import _, http
+from odoo import _, fields, http
 from odoo.exceptions import AccessError, UserError
 from odoo.http import Response, request
+
+from .health import _PROTOCOL_VERSION, _module_version
 
 
 _LOG = logging.getLogger(__name__)
@@ -75,6 +78,7 @@ class TuquiActivation(http.Controller):
         nonce, _expires_at = env["tuqui.activation.nonce"].sudo()._issue(
             client_id=oauth_client.client_id,
             client_secret_plaintext=plain_secret,
+            acting_user_login=env.user.login,
         )
 
         frontend_url = (
@@ -97,3 +101,98 @@ class TuquiActivation(http.Controller):
             companion_url,
         )
         return Response("", status=302, headers={"Location": redirect_to})
+
+    @http.route(
+        "/tuqui/activation/exchange",
+        type="http",
+        auth="none",
+        methods=["POST"],
+        csrf=False,
+        readonly=False,
+    )
+    def exchange(self, **_kwargs):
+        """Redeem a single-use nonce for the activation credentials.
+
+        Auth is the nonce itself — single-use, 5-minute TTL, sent only
+        via the redirect from /start to the Tuqui frontend (HTTPS to a
+        trusted origin). The exchange marks the row consumed in the same
+        UPDATE that nullifies the plaintext secret, so a leaked nonce
+        post-consumption can't replay.
+
+        On success the OAuth client transitions ``pending → active`` —
+        Tuqui having received the credentials is the moment activation
+        is "real" from this module's perspective. If Tuqui's downstream
+        wiring fails, the admin sees ``state=active`` but no traffic
+        in ``last_seen_at`` and can disconnect to retry.
+
+        Response shape::
+
+            {
+                "client_id":          "...",
+                "client_secret":      "...",
+                "companion_url":      "https://erp.example.com",
+                "acting_user_login":  "admin",
+                "module_version":     "19.0.0.3.0",
+                "protocol_version":   "2.0"
+            }
+        """
+        env = request.env
+
+        try:
+            body = json.loads(request.httprequest.get_data(as_text=True) or "{}")
+        except json.JSONDecodeError:
+            return _json_error("bad_request", "Body must be valid JSON", status=400)
+
+        nonce = (body.get("nonce") or "").strip()
+        if not nonce:
+            return _json_error("bad_request", "Missing 'nonce'", status=400)
+
+        row = env["tuqui.activation.nonce"].sudo().search([("nonce", "=", nonce)], limit=1)
+        if not row:
+            return _json_error("not_found", "Unknown activation nonce", status=404)
+
+        if row.consumed_at:
+            return _json_error("gone", "Activation nonce already consumed", status=410)
+
+        if row.expires_at and row.expires_at < fields.Datetime.now():
+            return _json_error("gone", "Activation nonce has expired", status=410)
+
+        # Snapshot the fields we need to return before _consume nulls
+        # the plaintext.
+        client_id = row.client_id
+        client_secret = row.client_secret_plaintext
+        acting_user_login = row.acting_user_login
+
+        row._consume()
+
+        # Transition the OAuth client to active — Tuqui has the creds.
+        oauth_client = env["tuqui.oauth.client"].sudo()._get_singleton()
+        if oauth_client and oauth_client.state == "pending":
+            oauth_client.mark_active()
+
+        companion_url = request.httprequest.host_url.rstrip("/")
+        payload = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "companion_url": companion_url,
+            "acting_user_login": acting_user_login,
+            "module_version": _module_version(env),
+            "protocol_version": _PROTOCOL_VERSION,
+        }
+        _LOG.info(
+            "tuqui.activation.exchange: nonce redeemed, client_id=%s",
+            client_id,
+        )
+        return Response(
+            json.dumps(payload),
+            content_type="application/json",
+            status=200,
+        )
+
+
+def _json_error(code: str, message: str, *, status: int) -> Response:
+    return Response(
+        json.dumps({"error": {"code": code, "message": message}}),
+        content_type="application/json",
+        status=status,
+    )
