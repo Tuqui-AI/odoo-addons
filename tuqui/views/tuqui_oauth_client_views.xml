@@ -7,14 +7,18 @@
         <field name="arch" type="xml">
             <form string="Tuqui Connection" create="false" delete="false">
                 <header>
+                    <button name="action_start_activation" type="object"
+                            string="Activate Tuqui"
+                            class="oe_highlight"
+                            invisible="state != 'pending'"/>
                     <button name="action_rotate_secret" type="object"
                             string="Rotate secret"
-                            class="oe_highlight"
+                            invisible="state == 'pending'"
                             confirm="Rotating the secret will invalidate Tuqui's current session. You will need to paste the new secret into Tuqui. Continue?"/>
                     <button name="action_disconnect" type="object"
                             string="Disconnect"
                             confirm="Disconnect this Odoo from Tuqui? Tuqui will lose access until you re-activate."
-                            invisible="state == 'disconnected'"/>
+                            invisible="state != 'active'"/>
                     <field name="state" widget="statusbar" statusbar_visible="pending,active,disconnected"/>
                 </header>
                 <sheet>

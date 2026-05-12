@@ -6,4 +6,15 @@
         <field name="value">10000</field>
     </record>
 
+    <!--
+        Tuqui frontend activation URL. The /tuqui/activation/start route
+        redirects the admin's browser here, appending ?nonce=... &
+        companion_url=... in the query string. Override for dev (e.g.
+        http://localhost:5173/activate) or staging environments.
+    -->
+    <record id="param_activation_frontend_url" model="ir.config_parameter">
+        <field name="key">tuqui.activation.frontend_url</field>
+        <field name="value">https://tuqui.com/activate</field>
+    </record>
+
 </odoo>
