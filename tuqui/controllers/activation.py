@@ -10,7 +10,6 @@ from odoo.http import Response, request
 
 from .health import _PROTOCOL_VERSION, _module_version
 
-
 _LOG = logging.getLogger(__name__)
 
 
@@ -61,39 +60,35 @@ class TuquiActivation(http.Controller):
 
         oauth_client = env["tuqui.oauth.client"].sudo()._get_singleton()
         if oauth_client and oauth_client.state != "pending":
-            raise UserError(
-                _("Tuqui is already activated. Disconnect first to re-activate.")
-            )
+            raise UserError(_("Tuqui is already activated. Disconnect first to re-activate."))
 
         # Lazy-create the singleton on first activation; otherwise rotate the
         # secret so the plaintext we hand to Tuqui isn't whatever leftover
         # value a previous abandoned attempt left behind.
         if not oauth_client:
-            oauth_client, plain_secret = (
-                env["tuqui.oauth.client"].sudo()._get_or_create_singleton()
-            )
+            oauth_client, plain_secret = env["tuqui.oauth.client"].sudo()._get_or_create_singleton()
         else:
             plain_secret = oauth_client._rotate_secret_silent()
 
-        nonce, _expires_at = env["tuqui.activation.nonce"].sudo()._issue(
-            client_id=oauth_client.client_id,
-            client_secret_plaintext=plain_secret,
-            acting_user_login=env.user.login,
+        nonce, _expires_at = (
+            env["tuqui.activation.nonce"]
+            .sudo()
+            ._issue(
+                client_id=oauth_client.client_id,
+                client_secret_plaintext=plain_secret,
+                acting_user_login=env.user.login,
+            )
         )
 
-        frontend_url = (
-            env["ir.config_parameter"]
-            .sudo()
-            .get_param(_FRONTEND_URL_PARAM, _DEFAULT_FRONTEND_URL)
-        ).rstrip("/")
+        frontend_url = (env["ir.config_parameter"].sudo().get_param(_FRONTEND_URL_PARAM, _DEFAULT_FRONTEND_URL)).rstrip(
+            "/"
+        )
         companion_url = request.httprequest.host_url.rstrip("/")
 
         # The Tuqui frontend reads nonce + companion_url from the query
         # string and POSTs back to /tuqui/activation/exchange with the
         # nonce only — the rest is metadata for UX, not auth.
-        query = urllib.parse.urlencode(
-            {"nonce": nonce, "companion_url": companion_url}
-        )
+        query = urllib.parse.urlencode({"nonce": nonce, "companion_url": companion_url})
         redirect_to = f"{frontend_url}?{query}"
 
         _LOG.info(
