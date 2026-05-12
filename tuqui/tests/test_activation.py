@@ -11,10 +11,14 @@ class TestTuquiActivationNonceModel(TransactionCase):
     """Unit-level coverage of tuqui.activation.nonce primitives."""
 
     def test_issue_persists_plaintext_and_returns_nonce(self):
-        nonce, expires_at = self.env["tuqui.activation.nonce"].sudo()._issue(
-            client_id="test-client-id",
-            client_secret_plaintext="plain-secret",
-            acting_user_login="admin",
+        nonce, expires_at = (
+            self.env["tuqui.activation.nonce"]
+            .sudo()
+            ._issue(
+                client_id="test-client-id",
+                client_secret_plaintext="plain-secret",
+                acting_user_login="admin",
+            )
         )
         self.assertGreater(len(nonce), 40, "Nonce should be url-safe and unguessable")
         self.assertGreater(expires_at, fields.Datetime.now(), "expires_at must be in the future")
@@ -27,8 +31,10 @@ class TestTuquiActivationNonceModel(TransactionCase):
         self.assertFalse(row.consumed_at)
 
     def test_consume_nulls_plaintext_and_sets_timestamp(self):
-        nonce, _ = self.env["tuqui.activation.nonce"].sudo()._issue(
-            client_id="cid", client_secret_plaintext="secret", acting_user_login="admin"
+        nonce, _ = (
+            self.env["tuqui.activation.nonce"]
+            .sudo()
+            ._issue(client_id="cid", client_secret_plaintext="secret", acting_user_login="admin")
         )
         row = self.env["tuqui.activation.nonce"].sudo().search([("nonce", "=", nonce)], limit=1)
 
@@ -40,13 +46,13 @@ class TestTuquiActivationNonceModel(TransactionCase):
     def test_gc_old_nonces_drops_only_aged_rows(self):
         """The cron purges nonces whose expires_at is older than the retention window."""
         # Fresh nonce: should survive.
-        fresh_nonce, _ = self.env["tuqui.activation.nonce"].sudo()._issue(
-            client_id="fresh", client_secret_plaintext="fresh-secret"
+        fresh_nonce, _ = (
+            self.env["tuqui.activation.nonce"].sudo()._issue(client_id="fresh", client_secret_plaintext="fresh-secret")
         )
 
         # Aged nonce: backdated way past retention.
-        aged_nonce, _ = self.env["tuqui.activation.nonce"].sudo()._issue(
-            client_id="aged", client_secret_plaintext="aged-secret"
+        aged_nonce, _ = (
+            self.env["tuqui.activation.nonce"].sudo()._issue(client_id="aged", client_secret_plaintext="aged-secret")
         )
         aged_row = self.env["tuqui.activation.nonce"].sudo().search([("nonce", "=", aged_nonce)])
         aged_row.write({"expires_at": fields.Datetime.subtract(fields.Datetime.now(), days=30)})
@@ -86,10 +92,14 @@ class TestTuquiActivationExchange(HttpCase):
     def test_exchange_happy_path(self):
         """A valid, unconsumed, unexpired nonce returns all six credential fields."""
         client_id = self.env["tuqui.oauth.client"].sudo()._get_singleton().client_id
-        nonce, _ = self.env["tuqui.activation.nonce"].sudo()._issue(
-            client_id=client_id,
-            client_secret_plaintext="plain-secret-for-test",
-            acting_user_login="admin",
+        nonce, _ = (
+            self.env["tuqui.activation.nonce"]
+            .sudo()
+            ._issue(
+                client_id=client_id,
+                client_secret_plaintext="plain-secret-for-test",
+                acting_user_login="admin",
+            )
         )
         # HttpCase propagates writes to the HTTP-server view via the test
         # cursor's savepoint; no explicit commit is required (and would be
@@ -116,8 +126,10 @@ class TestTuquiActivationExchange(HttpCase):
 
     def test_exchange_rejects_replayed_nonce(self):
         client_id = self.env["tuqui.oauth.client"].sudo()._get_singleton().client_id
-        nonce, _ = self.env["tuqui.activation.nonce"].sudo()._issue(
-            client_id=client_id, client_secret_plaintext="replay-target"
+        nonce, _ = (
+            self.env["tuqui.activation.nonce"]
+            .sudo()
+            ._issue(client_id=client_id, client_secret_plaintext="replay-target")
         )
 
         self._post_exchange({"nonce": nonce}, expect_status=200)
@@ -127,8 +139,8 @@ class TestTuquiActivationExchange(HttpCase):
 
     def test_exchange_rejects_expired_nonce(self):
         client_id = self.env["tuqui.oauth.client"].sudo()._get_singleton().client_id
-        nonce, _ = self.env["tuqui.activation.nonce"].sudo()._issue(
-            client_id=client_id, client_secret_plaintext="will-expire"
+        nonce, _ = (
+            self.env["tuqui.activation.nonce"].sudo()._issue(client_id=client_id, client_secret_plaintext="will-expire")
         )
         row = self.env["tuqui.activation.nonce"].sudo().search([("nonce", "=", nonce)])
         row.write({"expires_at": fields.Datetime.subtract(fields.Datetime.now(), minutes=1)})

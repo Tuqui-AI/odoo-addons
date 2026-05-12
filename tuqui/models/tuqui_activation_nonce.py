@@ -3,7 +3,6 @@ import secrets
 from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 
-
 # How long a nonce stays redeemable once issued. Tight on purpose —
 # activation is a synchronous flow; if the admin doesn't complete it in
 # five minutes, they restart from the button.
