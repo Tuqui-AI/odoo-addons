@@ -1,3 +1,5 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_tuqui_oauth_client_admin,tuqui.oauth.client.admin,model_tuqui_oauth_client,base.group_system,1,1,1,1
 access_tuqui_access_log_admin,tuqui.access.log.admin,model_tuqui_access_log,base.group_system,1,1,1,1
+access_tuqui_rpc_policy_admin,tuqui.rpc.policy.admin,model_tuqui_rpc_policy,base.group_system,1,1,1,1
+access_tuqui_rpc_rule_admin,tuqui.rpc.rule.admin,model_tuqui_rpc_rule,base.group_system,1,1,1,1
