@@ -3,6 +3,7 @@ import secrets
 
 from odoo.exceptions import ValidationError
 from odoo.tests import HttpCase, TransactionCase, tagged
+from odoo.tools import mute_logger
 
 # ─── Helpers shared by the HTTP suite ────────────────────────────────
 
@@ -315,8 +316,15 @@ class TestTuquiRpcGateway(HttpCase):
         )
         self.assertEqual(resp.json()["error"]["code"], "access_denied")
 
+    @mute_logger("odoo.addons.tuqui.controllers.rpc")
     def test_internal_error_does_not_leak_details(self):
-        """A 500 must surface a generic message — no SQL, no ValueError repr."""
+        """A 500 must surface a generic message — no SQL, no ValueError repr.
+
+        The controller is expected to call ``_LOG.exception(...)`` server-side
+        before returning the generic response; muting the logger here keeps
+        runbot's red-on-any-ERROR signal honest (this isn't a real failure,
+        it's the test verifying the failure path).
+        """
         # Grouping by a non-stored field raises ValueError inside the ORM.
         resp = self._rpc(
             "res.partner",
@@ -456,7 +464,15 @@ class TestTuquiRpcRuleConstraints(TransactionCase):
         )
         self.assertTrue(rec.id)
 
+    @mute_logger("odoo.sql_db")
     def test_unique_constraint_blocks_duplicate(self):
+        """The unique SQL constraint must block a duplicate rule.
+
+        Postgres logs the ``duplicate key value violates unique constraint``
+        error at ERROR level via ``odoo.sql_db`` when we deliberately
+        trigger it — silence that channel during the test so runbot
+        doesn't paint the whole build red on this expected event.
+        """
         self.env["tuqui.rpc.rule"].sudo().create(
             {
                 "name": "first",
