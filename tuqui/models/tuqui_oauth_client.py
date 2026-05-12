@@ -6,7 +6,6 @@ import uuid
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
-
 _STATE_SELECTION = [
     ("pending", "Pending activation"),
     ("active", "Active"),
@@ -73,7 +72,7 @@ class TuquiOAuthClient(models.Model):
 
     @staticmethod
     def _hash_secret(plain, salt):
-        return hashlib.sha256(f"{salt}::{plain}".encode("utf-8")).hexdigest()
+        return hashlib.sha256(f"{salt}::{plain}".encode()).hexdigest()
 
     def verify_secret(self, plain):
         self.ensure_one()
@@ -105,10 +104,7 @@ class TuquiOAuthClient(models.Model):
             "params": {
                 "type": "warning",
                 "title": _("Tuqui secret rotated"),
-                "message": _(
-                    "New client_secret (shown once): %s\n\nUpdate Tuqui with this value."
-                )
-                % plain_secret,
+                "message": _("New client_secret (shown once): %s\n\nUpdate Tuqui with this value.") % plain_secret,
                 "sticky": True,
             },
         }

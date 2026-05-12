@@ -12,7 +12,6 @@ from odoo.tools.json import json_default as odoo_json_default
 
 from .oauth import verify_access_token
 
-
 _LOG = logging.getLogger(__name__)
 
 
@@ -46,9 +45,7 @@ def _is_absolutely_blocked(method: str) -> bool:
 # actions land in `execute` and only get bouncing by explicit rules.
 
 _WRITE_METHODS = frozenset({"create", "write", "unlink", "copy", "name_create"})
-_READ_METHODS = frozenset(
-    {"name_search", "name_get", "fields_get", "default_get", "models_list", "model_list"}
-)
+_READ_METHODS = frozenset({"name_search", "name_get", "fields_get", "default_get", "models_list", "model_list"})
 _READ_PREFIXES = ("search", "read")
 
 
@@ -75,9 +72,7 @@ def _rule_matches(rule, model: str, method: str, op_type: str) -> bool:
     """
     if rule.operation_type != "any" and rule.operation_type != op_type:
         return False
-    return fnmatch.fnmatchcase(model, rule.model_pattern) and fnmatch.fnmatchcase(
-        method, rule.method_pattern
-    )
+    return fnmatch.fnmatchcase(model, rule.model_pattern) and fnmatch.fnmatchcase(method, rule.method_pattern)
 
 
 # ─── Policy gate ─────────────────────────────────────────────────────
@@ -143,26 +138,20 @@ def _dispatch(model, method_name: str, args: list, kwargs: dict):
     cls = type(model)
     method = getattr(cls, method_name, None)
     if not callable(method):
-        raise ValidationError(
-            f"Model {model._name!r} has no callable method {method_name!r}"
-        )
+        raise ValidationError(f"Model {model._name!r} has no callable method {method_name!r}")
 
     args = list(args)
     if getattr(method, "_api_model", False):
         recs = model
     else:
         if not args:
-            raise ValidationError(
-                f"Record method {method_name!r} requires a list of ids as the first positional arg"
-            )
+            raise ValidationError(f"Record method {method_name!r} requires a list of ids as the first positional arg")
         ids = args[0]
         args = args[1:]
         if isinstance(ids, int):
             ids = [ids]
         if not isinstance(ids, (list, tuple)):
-            raise ValidationError(
-                f"First positional arg for record method {method_name!r} must be a list of ids"
-            )
+            raise ValidationError(f"First positional arg for record method {method_name!r} must be a list of ids")
         recs = model.browse(ids)
 
     kwargs = dict(kwargs)
@@ -284,9 +273,7 @@ def _log(
 
 # Policy-deny reasons that should surface as HTTP 403. Anything else
 # from the gate (currently nothing) would surface as 400.
-_POLICY_DENY_403 = frozenset(
-    {"method_blocked", "private_method_blocked", "deny_rule_matched", "no_allow_rule"}
-)
+_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "deny_rule_matched", "no_allow_rule"})
 
 
 class TuquiRpc(http.Controller):
@@ -467,9 +454,7 @@ class TuquiRpc(http.Controller):
             # Server-side: full traceback. Client-side: generic copy.
             # Never leak SQL, paths, repr(exc), or anything from the
             # underlying call into the response body.
-            _LOG.exception(
-                "tuqui.rpc: unhandled error in %s.%s", model_name, method
-            )
+            _LOG.exception("tuqui.rpc: unhandled error in %s.%s", model_name, method)
             duration_ms = int((time.monotonic() - started) * 1000)
             _log(
                 env,

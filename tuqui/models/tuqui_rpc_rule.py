@@ -1,7 +1,6 @@
 from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 
-
 # Characters that fnmatch treats as wildcards. A pattern is "exact" when
 # it contains none of them. We reject all four — sticking to '*' and '?'
 # only would leak '[abc]' as a back door.
@@ -82,17 +81,11 @@ class TuquiRpcRule(models.Model):
             if rec.effect == "allow" and rec.operation_type == "private_execute":
                 if not _is_exact_pattern(rec.model_pattern):
                     raise ValidationError(
-                        _(
-                            "Allow rules for private_execute require an exact "
-                            "model_pattern (no wildcards). Got: %s"
-                        )
+                        _("Allow rules for private_execute require an exact " "model_pattern (no wildcards). Got: %s")
                         % rec.model_pattern
                     )
                 if not _is_exact_pattern(rec.method_pattern):
                     raise ValidationError(
-                        _(
-                            "Allow rules for private_execute require an exact "
-                            "method_pattern (no wildcards). Got: %s"
-                        )
+                        _("Allow rules for private_execute require an exact " "method_pattern (no wildcards). Got: %s")
                         % rec.method_pattern
                     )

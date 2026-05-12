@@ -9,7 +9,6 @@ import time
 from odoo import http
 from odoo.http import Response, request
 
-
 _LOG = logging.getLogger(__name__)
 
 _ACCESS_TOKEN_TTL_SECONDS = 3600  # 1 hour
@@ -60,9 +59,7 @@ def verify_access_token(env, token):
     except (ValueError, AttributeError):
         return None
     signing_input = f"{head_b64}.{payload_b64}".encode("ascii")
-    expected_sig = hmac.new(
-        _get_or_create_signing_key(env), signing_input, hashlib.sha256
-    ).digest()
+    expected_sig = hmac.new(_get_or_create_signing_key(env), signing_input, hashlib.sha256).digest()
     try:
         provided_sig = _b64url_decode(sig_b64)
     except Exception:

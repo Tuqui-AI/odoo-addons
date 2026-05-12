@@ -1,6 +1,5 @@
 from odoo import api, fields, models
 
-
 _DEFAULT_MAX_ROWS = 10000
 
 # Sentinel for the (rare) case where the controller hits an error path
@@ -130,11 +129,7 @@ class TuquiAccessLog(models.Model):
 
     @api.model
     def _max_rows(self):
-        raw = (
-            self.env["ir.config_parameter"]
-            .sudo()
-            .get_param("tuqui.access_log.max_rows", _DEFAULT_MAX_ROWS)
-        )
+        raw = self.env["ir.config_parameter"].sudo().get_param("tuqui.access_log.max_rows", _DEFAULT_MAX_ROWS)
         try:
             return max(int(raw), 100)
         except (TypeError, ValueError):

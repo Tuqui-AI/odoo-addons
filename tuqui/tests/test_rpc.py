@@ -4,7 +4,6 @@ import secrets
 from odoo.exceptions import ValidationError
 from odoo.tests import HttpCase, TransactionCase, tagged
 
-
 # ─── Helpers shared by the HTTP suite ────────────────────────────────
 
 
@@ -122,18 +121,16 @@ class TestTuquiRpcGateway(HttpCase):
 
     def _latest_log(self, **filters):
         domain = [(k, "=", v) for k, v in filters.items()]
-        return (
-            self.env["tuqui.access.log"]
-            .sudo()
-            .search(domain, order="id desc", limit=1)
-        )
+        return self.env["tuqui.access.log"].sudo().search(domain, order="id desc", limit=1)
 
     # ─── Default mode classification ─────────────────────────────────
 
     def test_default_mode_routes_read_write_execute(self):
         """Default mode: reads/writes/executes pass to the ORM (subject to ACL)."""
         # read
-        resp = self._rpc("res.partner", "search_read", args=[[]], kwargs={"fields": ["name"], "limit": 2}, expect_status=200)
+        resp = self._rpc(
+            "res.partner", "search_read", args=[[]], kwargs={"fields": ["name"], "limit": 2}, expect_status=200
+        )
         self.assertTrue(resp.json()["ok"])
 
         # write — admin has create rights on res.partner
@@ -153,7 +150,8 @@ class TestTuquiRpcGateway(HttpCase):
         for method in ("sudo", "with_user", "with_env", "with_company"):
             resp = self._rpc("res.partner", method, args=[], expect_status=403)
             self.assertEqual(
-                resp.json()["error"]["code"], "method_blocked",
+                resp.json()["error"]["code"],
+                "method_blocked",
                 f"{method} should be hardblocked",
             )
         for method in ("flush_recordset", "invalidate_cache", "flush_all", "invalidate_model"):
@@ -162,7 +160,8 @@ class TestTuquiRpcGateway(HttpCase):
         for method in ("__class__", "__getattribute__", "__reduce__"):
             resp = self._rpc("res.partner", method, args=[], expect_status=403)
             self.assertEqual(
-                resp.json()["error"]["code"], "method_blocked",
+                resp.json()["error"]["code"],
+                "method_blocked",
                 f"dunder {method} should be hardblocked",
             )
 
@@ -177,17 +176,25 @@ class TestTuquiRpcGateway(HttpCase):
     def test_advanced_mode_deny_wins(self):
         self.policy.write({"policy_mode": "advanced"})
         # Allow rule that would match
-        self.env["tuqui.rpc.rule"].sudo().create({
-            "name": "allow read", "effect": "allow",
-            "model_pattern": "res.partner", "method_pattern": "search_read",
-            "operation_type": "read",
-        })
+        self.env["tuqui.rpc.rule"].sudo().create(
+            {
+                "name": "allow read",
+                "effect": "allow",
+                "model_pattern": "res.partner",
+                "method_pattern": "search_read",
+                "operation_type": "read",
+            }
+        )
         # And a deny rule that also matches — deny should win.
-        self.env["tuqui.rpc.rule"].sudo().create({
-            "name": "deny everything on res.partner", "effect": "deny",
-            "model_pattern": "res.partner", "method_pattern": "*",
-            "operation_type": "any",
-        })
+        self.env["tuqui.rpc.rule"].sudo().create(
+            {
+                "name": "deny everything on res.partner",
+                "effect": "deny",
+                "model_pattern": "res.partner",
+                "method_pattern": "*",
+                "operation_type": "any",
+            }
+        )
         resp = self._rpc("res.partner", "search_read", args=[[]], kwargs={"limit": 1}, expect_status=403)
         self.assertEqual(resp.json()["error"]["code"], "deny_rule_matched")
 
@@ -195,11 +202,15 @@ class TestTuquiRpcGateway(HttpCase):
         """Both the toggle AND an exact allow rule are required for private."""
         self.policy.write({"policy_mode": "advanced"})
         # Toggle off: blocked even with an exact rule, before reaching rule eval.
-        self.env["tuqui.rpc.rule"].sudo().create({
-            "name": "allow specific private", "effect": "allow",
-            "model_pattern": "res.partner", "method_pattern": "_compute_display_name",
-            "operation_type": "private_execute",
-        })
+        self.env["tuqui.rpc.rule"].sudo().create(
+            {
+                "name": "allow specific private",
+                "effect": "allow",
+                "model_pattern": "res.partner",
+                "method_pattern": "_compute_display_name",
+                "operation_type": "private_execute",
+            }
+        )
         resp = self._rpc("res.partner", "_compute_display_name", args=[[1]], expect_status=403)
         self.assertEqual(resp.json()["error"]["code"], "private_method_blocked")
 
@@ -210,11 +221,15 @@ class TestTuquiRpcGateway(HttpCase):
         self.assertEqual(resp.json()["error"]["code"], "no_allow_rule")
 
         # Toggle on AND exact rule → succeeds.
-        self.env["tuqui.rpc.rule"].sudo().create({
-            "name": "allow specific private 2", "effect": "allow",
-            "model_pattern": "res.partner", "method_pattern": "_compute_display_name",
-            "operation_type": "private_execute",
-        })
+        self.env["tuqui.rpc.rule"].sudo().create(
+            {
+                "name": "allow specific private 2",
+                "effect": "allow",
+                "model_pattern": "res.partner",
+                "method_pattern": "_compute_display_name",
+                "operation_type": "private_execute",
+            }
+        )
         resp = self._rpc("res.partner", "_compute_display_name", args=[[1]], expect_status=200)
         self.assertTrue(resp.json()["ok"])
 
@@ -271,9 +286,12 @@ class TestTuquiRpcGateway(HttpCase):
         resp = self._rpc(model="res.partner", expect_status=400)
         self.assertEqual(resp.json()["error"]["code"], "bad_request")
         # args not list
-        resp = self._rpc(model="res.partner", method="search_read",
-                         body_override={"model": "res.partner", "method": "search_read", "args": "not-a-list"},
-                         expect_status=400)
+        resp = self._rpc(
+            model="res.partner",
+            method="search_read",
+            body_override={"model": "res.partner", "method": "search_read", "args": "not-a-list"},
+            expect_status=400,
+        )
         self.assertEqual(resp.json()["error"]["code"], "bad_request")
         # Unknown model
         resp = self._rpc("does.not.exist", "search_read", args=[[]], expect_status=400)
@@ -288,8 +306,10 @@ class TestTuquiRpcGateway(HttpCase):
     def test_access_error_maps_to_403(self):
         """Basic user without system rights can't read ir.config_parameter — AccessError → 403."""
         resp = self._rpc(
-            "ir.config_parameter", "search_read",
-            args=[[]], kwargs={"fields": ["key"]},
+            "ir.config_parameter",
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["key"]},
             acting_user=self.basic_user.login,
             expect_status=403,
         )
@@ -299,7 +319,8 @@ class TestTuquiRpcGateway(HttpCase):
         """A 500 must surface a generic message — no SQL, no ValueError repr."""
         # Grouping by a non-stored field raises ValueError inside the ORM.
         resp = self._rpc(
-            "res.partner", "read_group",
+            "res.partner",
+            "read_group",
             args=[[], [], ["company_type"]],  # non-stored selection
             expect_status=500,
         )
@@ -331,8 +352,10 @@ class TestTuquiRpcGateway(HttpCase):
 
     def test_access_log_records_runtime_error(self):
         self._rpc(
-            "ir.config_parameter", "search_read",
-            args=[[]], kwargs={"fields": ["key"]},
+            "ir.config_parameter",
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["key"]},
             acting_user=self.basic_user.login,
             expect_status=403,
         )
@@ -365,60 +388,94 @@ class TestTuquiRpcRuleConstraints(TransactionCase):
 
     def test_allow_private_rejects_wildcard_in_model_pattern(self):
         with self.assertRaises(ValidationError):
-            self.env["tuqui.rpc.rule"].sudo().create({
-                "name": "bad", "effect": "allow",
-                "model_pattern": "ai.*",  # wildcard
-                "method_pattern": "_run_transcription",
-                "operation_type": "private_execute",
-            })
+            self.env["tuqui.rpc.rule"].sudo().create(
+                {
+                    "name": "bad",
+                    "effect": "allow",
+                    "model_pattern": "ai.*",  # wildcard
+                    "method_pattern": "_run_transcription",
+                    "operation_type": "private_execute",
+                }
+            )
 
     def test_allow_private_rejects_wildcard_in_method_pattern(self):
         with self.assertRaises(ValidationError):
-            self.env["tuqui.rpc.rule"].sudo().create({
-                "name": "bad", "effect": "allow",
-                "model_pattern": "ai.video",
-                "method_pattern": "_run_*",  # wildcard
-                "operation_type": "private_execute",
-            })
+            self.env["tuqui.rpc.rule"].sudo().create(
+                {
+                    "name": "bad",
+                    "effect": "allow",
+                    "model_pattern": "ai.video",
+                    "method_pattern": "_run_*",  # wildcard
+                    "operation_type": "private_execute",
+                }
+            )
 
     def test_allow_private_rejects_character_class(self):
         """[abc] is a glob too — must not slip past the exact check."""
         with self.assertRaises(ValidationError):
-            self.env["tuqui.rpc.rule"].sudo().create({
-                "name": "bad", "effect": "allow",
-                "model_pattern": "ai.video",
-                "method_pattern": "_run_[abc]",
-                "operation_type": "private_execute",
-            })
+            self.env["tuqui.rpc.rule"].sudo().create(
+                {
+                    "name": "bad",
+                    "effect": "allow",
+                    "model_pattern": "ai.video",
+                    "method_pattern": "_run_[abc]",
+                    "operation_type": "private_execute",
+                }
+            )
 
     def test_allow_private_accepts_exact_patterns(self):
-        rec = self.env["tuqui.rpc.rule"].sudo().create({
-            "name": "ok", "effect": "allow",
-            "model_pattern": "ai.video",
-            "method_pattern": "_run_transcription",
-            "operation_type": "private_execute",
-        })
+        rec = (
+            self.env["tuqui.rpc.rule"]
+            .sudo()
+            .create(
+                {
+                    "name": "ok",
+                    "effect": "allow",
+                    "model_pattern": "ai.video",
+                    "method_pattern": "_run_transcription",
+                    "operation_type": "private_execute",
+                }
+            )
+        )
         self.assertTrue(rec.id)
 
     def test_deny_with_wildcard_on_private_accepted(self):
         """Wildcards in deny rules are fine — the constraint only fires on allow."""
-        rec = self.env["tuqui.rpc.rule"].sudo().create({
-            "name": "deny all private", "effect": "deny",
-            "model_pattern": "*", "method_pattern": "*",
-            "operation_type": "private_execute",
-        })
+        rec = (
+            self.env["tuqui.rpc.rule"]
+            .sudo()
+            .create(
+                {
+                    "name": "deny all private",
+                    "effect": "deny",
+                    "model_pattern": "*",
+                    "method_pattern": "*",
+                    "operation_type": "private_execute",
+                }
+            )
+        )
         self.assertTrue(rec.id)
 
     def test_unique_constraint_blocks_duplicate(self):
-        self.env["tuqui.rpc.rule"].sudo().create({
-            "name": "first", "effect": "deny",
-            "model_pattern": "*", "method_pattern": "*", "operation_type": "write",
-        })
+        self.env["tuqui.rpc.rule"].sudo().create(
+            {
+                "name": "first",
+                "effect": "deny",
+                "model_pattern": "*",
+                "method_pattern": "*",
+                "operation_type": "write",
+            }
+        )
         with self.assertRaises(Exception):  # IntegrityError, surfaced via Odoo wrapper
-            self.env["tuqui.rpc.rule"].sudo().create({
-                "name": "duplicate", "effect": "deny",
-                "model_pattern": "*", "method_pattern": "*", "operation_type": "write",
-            })
+            self.env["tuqui.rpc.rule"].sudo().create(
+                {
+                    "name": "duplicate",
+                    "effect": "deny",
+                    "model_pattern": "*",
+                    "method_pattern": "*",
+                    "operation_type": "write",
+                }
+            )
             self.env.cr.flush()
 
 

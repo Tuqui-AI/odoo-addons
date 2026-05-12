@@ -3,7 +3,6 @@ import json
 from odoo import http, release
 from odoo.http import Response
 
-
 _PROTOCOL_VERSION = "2.0"
 
 # Capabilities advertised by this module to a Tuqui backend during handshake.

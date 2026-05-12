@@ -1,7 +1,6 @@
 from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 
-
 # Default deny rules created by the "Solo lectura" preset. Keep the
 # tuples in (effect, model_pattern, method_pattern, operation_type)
 # order so the idempotency check below stays trivial.
