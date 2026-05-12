@@ -3,3 +3,4 @@ access_tuqui_oauth_client_admin,tuqui.oauth.client.admin,model_tuqui_oauth_clien
 access_tuqui_access_log_admin,tuqui.access.log.admin,model_tuqui_access_log,base.group_system,1,1,1,1
 access_tuqui_rpc_policy_admin,tuqui.rpc.policy.admin,model_tuqui_rpc_policy,base.group_system,1,1,1,1
 access_tuqui_rpc_rule_admin,tuqui.rpc.rule.admin,model_tuqui_rpc_rule,base.group_system,1,1,1,1
+access_tuqui_activation_nonce_admin,tuqui.activation.nonce.admin,model_tuqui_activation_nonce,base.group_system,1,1,1,1

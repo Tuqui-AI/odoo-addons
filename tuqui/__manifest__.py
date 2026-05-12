@@ -1,6 +1,6 @@
 {
     "name": "Tuqui",
-    "version": "19.0.0.2.0",
+    "version": "19.0.0.3.0",
     "category": "Productivity",
     "summary": "Connect this Odoo to Tuqui in one click.",
     "author": "Tuqui-AI",
@@ -13,6 +13,7 @@
     "data": [
         "security/ir.model.access.csv",
         "data/ir_config_parameter_data.xml",
+        "data/cron_activation_cleanup.xml",
         "views/tuqui_oauth_client_views.xml",
         "views/tuqui_access_log_views.xml",
         "views/tuqui_rpc_rule_views.xml",
