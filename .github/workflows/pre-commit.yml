@@ -13,6 +13,9 @@ on:
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
     steps:
       -
         name: Checkout
