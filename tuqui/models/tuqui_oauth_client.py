@@ -1,7 +1,9 @@
 import hashlib
 import hmac
 import secrets
+import urllib.parse
 import uuid
+from datetime import timedelta
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
@@ -36,6 +38,11 @@ class TuquiOAuthClient(models.Model):
         string="Tuqui Workspace ID",
         readonly=True,
         help="Identifier returned by Tuqui after the first successful handshake.",
+    )
+    access_count_7d = fields.Integer(
+        string="Accesses (last 7 days)",
+        compute="_compute_access_count_7d",
+        help="Total RPC calls logged in tuqui.access.log during the last 7 days.",
     )
 
     _client_id_unique = models.Constraint(
@@ -136,6 +143,27 @@ class TuquiOAuthClient(models.Model):
         self.ensure_one()
         self.write({"state": "disconnected"})
 
+    def action_open_tuqui(self):
+        """Open the connected Tuqui workspace in a new tab.
+
+        Links straight to ``<tuqui_url>/w/<workspace_id_external>`` when
+        the handshake has reported back a workspace identifier. Falls
+        back to the bare ``tuqui_url`` (typically https://tuqui.com)
+        otherwise — useful even pre-activation so the admin can see
+        the destination before clicking Activate.
+        """
+        self.ensure_one()
+        base = (self.tuqui_url or "https://tuqui.com").rstrip("/")
+        if self.workspace_id_external:
+            url = "{}/w/{}".format(base, urllib.parse.quote(self.workspace_id_external, safe=""))
+        else:
+            url = base
+        return {
+            "type": "ir.actions.act_url",
+            "url": url,
+            "target": "new",
+        }
+
     def mark_active(self, workspace_id_external=None):
         self.ensure_one()
         vals = {"state": "active", "activated_at": fields.Datetime.now()}
@@ -146,6 +174,14 @@ class TuquiOAuthClient(models.Model):
     def touch_last_seen(self):
         self.ensure_one()
         self.write({"last_seen_at": fields.Datetime.now()})
+
+    # ---------- Compute ----------
+
+    def _compute_access_count_7d(self):
+        AccessLog = self.env["tuqui.access.log"].sudo()
+        since = fields.Datetime.now() - timedelta(days=7)
+        for rec in self:
+            rec.access_count_7d = AccessLog.search_count([("create_date", ">=", since)])
 
     # ---------- Guard ----------
 

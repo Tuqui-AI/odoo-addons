@@ -19,15 +19,26 @@
                             string="Disconnect"
                             confirm="Disconnect this Odoo from Tuqui? Tuqui will lose access until you re-activate."
                             invisible="state != 'active'"/>
+                    <button name="action_open_tuqui" type="object"
+                            string="Go to Tuqui"
+                            class="oe_highlight"
+                            invisible="state != 'active'"/>
                     <field name="state" widget="statusbar" statusbar_visible="pending,active,disconnected"/>
                 </header>
                 <sheet>
                     <group>
-                        <field name="client_id" readonly="1"/>
-                        <field name="tuqui_url"/>
-                        <field name="workspace_id_external" readonly="1"/>
-                        <field name="activated_at" readonly="1"/>
-                        <field name="last_seen_at" readonly="1"/>
+                        <group string="Connection">
+                            <field name="client_id" readonly="1"/>
+                            <field name="tuqui_url"/>
+                            <field name="workspace_id_external" readonly="1"
+                                   invisible="not workspace_id_external"/>
+                        </group>
+                        <group string="Activity">
+                            <field name="activated_at" readonly="1"/>
+                            <field name="last_seen_at" readonly="1"/>
+                            <field name="access_count_7d" readonly="1"
+                                   invisible="state != 'active'"/>
+                        </group>
                     </group>
                 </sheet>
             </form>
