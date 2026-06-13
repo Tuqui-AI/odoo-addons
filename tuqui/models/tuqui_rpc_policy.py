@@ -102,22 +102,6 @@ class TuquiRpcPolicy(models.Model):
             },
         }
 
-    def action_open_form(self):
-        """Server-action target for the Tuqui > Security menu.
-
-        Auto-creates the singleton on first access so the menu never
-        opens an empty form on a fresh install.
-        """
-        rec = self.sudo()._get_singleton()
-        return {
-            "type": "ir.actions.act_window",
-            "name": _("Tuqui Security"),
-            "res_model": self._name,
-            "view_mode": "form",
-            "res_id": rec.id,
-            "target": "current",
-        }
-
     @api.constrains("policy_mode", "allow_private_methods")
     def _check_allow_private_only_in_advanced(self):
         """``allow_private_methods`` has no meaning in default mode — keep them in sync.

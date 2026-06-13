@@ -30,7 +30,6 @@ class TuquiOAuthClient(models.Model):
     client_id = fields.Char(required=True, readonly=True, copy=False, index=True)
     client_secret_hash = fields.Char(required=True, readonly=True, copy=False)
     client_secret_salt = fields.Char(required=True, readonly=True, copy=False)
-    tuqui_url = fields.Char(string="Tuqui URL", default="https://tuqui.com")
     state = fields.Selection(_STATE_SELECTION, default="pending", required=True, readonly=True)
     activated_at = fields.Datetime(readonly=True)
     last_seen_at = fields.Datetime(readonly=True)
@@ -143,17 +142,28 @@ class TuquiOAuthClient(models.Model):
         self.ensure_one()
         self.write({"state": "disconnected"})
 
+    @api.model
+    def _get_tuqui_base_url(self):
+        """Tuqui base URL — hardcoded for clients, overridable for dev.
+
+        Not a user-facing setting: clients never point the module at a
+        different Tuqui. The ``tuqui.base_url`` ir.config_parameter exists
+        only so dev environments can target a local/staging instance,
+        same pattern as ``tuqui.activation.frontend_url``.
+        """
+        param = self.env["ir.config_parameter"].sudo().get_param("tuqui.base_url", "https://tuqui.com")
+        return (param or "https://tuqui.com").rstrip("/")
+
     def action_open_tuqui(self):
         """Open the connected Tuqui workspace in a new tab.
 
-        Links straight to ``<tuqui_url>/w/<workspace_id_external>`` when
+        Links straight to ``<base_url>/w/<workspace_id_external>`` when
         the handshake has reported back a workspace identifier. Falls
-        back to the bare ``tuqui_url`` (typically https://tuqui.com)
-        otherwise — useful even pre-activation so the admin can see
-        the destination before clicking Activate.
+        back to the bare base URL otherwise — useful even pre-activation
+        so the admin can see the destination before clicking Activate.
         """
         self.ensure_one()
-        base = (self.tuqui_url or "https://tuqui.com").rstrip("/")
+        base = self._get_tuqui_base_url()
         if self.workspace_id_external:
             url = "{}/w/{}".format(base, urllib.parse.quote(self.workspace_id_external, safe=""))
         else:
