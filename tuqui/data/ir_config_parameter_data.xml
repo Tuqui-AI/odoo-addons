@@ -17,4 +17,14 @@
         <field name="value">https://tuqui.com/activate</field>
     </record>
 
+    <!--
+        Tuqui base URL, used to build the "Go to Tuqui" workspace link.
+        Not user-facing — clients never point the module elsewhere.
+        Override for dev (e.g. http://localhost:5173) or staging.
+    -->
+    <record id="param_base_url" model="ir.config_parameter">
+        <field name="key">tuqui.base_url</field>
+        <field name="value">https://tuqui.com</field>
+    </record>
+
 </odoo>

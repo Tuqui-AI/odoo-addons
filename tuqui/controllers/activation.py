@@ -87,8 +87,13 @@ class TuquiActivation(http.Controller):
 
         # The Tuqui frontend reads nonce + companion_url from the query
         # string and POSTs back to /tuqui/activation/exchange with the
-        # nonce only — the rest is metadata for UX, not auth.
-        query = urllib.parse.urlencode({"nonce": nonce, "companion_url": companion_url})
+        # nonce only — the rest is metadata for UX, not auth. instance_name
+        # carries the company name so Tuqui can pre-fill a new workspace.
+        params = {"nonce": nonce, "companion_url": companion_url}
+        instance_name = env.company.name
+        if instance_name:
+            params["instance_name"] = instance_name
+        query = urllib.parse.urlencode(params)
         redirect_to = f"{frontend_url}?{query}"
 
         _LOG.info(
