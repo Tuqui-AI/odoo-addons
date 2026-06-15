@@ -7,24 +7,12 @@
     </record>
 
     <!--
-        Tuqui frontend activation URL. The /tuqui/activation/start route
-        redirects the admin's browser here, appending ?nonce=... &
-        companion_url=... in the query string. Override for dev (e.g.
-        http://localhost:5173/activate) or staging environments.
+        No seed record for the Tuqui base URL: the production default lives
+        hardcoded in tuqui.oauth.client._TUQUI_BASE_URL and is read via
+        get_param(key, DEFAULT), so the param only needs to exist when a
+        dev/staging environment overrides it (e.g. set tuqui.base_url to
+        http://localhost:5173). The activation redirect URL is derived from
+        it (<base_url>/activate) — one source of truth, not two params.
     -->
-    <record id="param_activation_frontend_url" model="ir.config_parameter">
-        <field name="key">tuqui.activation.frontend_url</field>
-        <field name="value">https://tuqui.com/activate</field>
-    </record>
-
-    <!--
-        Tuqui base URL, used to build the "Go to Tuqui" workspace link.
-        Not user-facing — clients never point the module elsewhere.
-        Override for dev (e.g. http://localhost:5173) or staging.
-    -->
-    <record id="param_base_url" model="ir.config_parameter">
-        <field name="key">tuqui.base_url</field>
-        <field name="value">https://tuqui.com</field>
-    </record>
 
 </odoo>

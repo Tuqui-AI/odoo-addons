@@ -1,8 +1,8 @@
 """Tests for the Tuqui block in General Settings.
 
 The settings transient is the only admin surface of the module (no
-menus): it has to reflect the connection state, round-trip the security
-policy to the tuqui.rpc.policy singleton, and proxy the lifecycle
+menus): it has to reflect the connection state, round-trip the read-only
+flag to the tuqui.oauth.client singleton, and proxy the lifecycle
 actions correctly.
 """
 
@@ -16,7 +16,6 @@ class TestTuquiResConfigSettings(TransactionCase):
         super().setUpClass()
         cls.Settings = cls.env["res.config.settings"]
         cls.OAuth = cls.env["tuqui.oauth.client"].sudo()
-        cls.Policy = cls.env["tuqui.rpc.policy"]
 
     def _settings(self):
         return self.Settings.create({})
@@ -34,33 +33,34 @@ class TestTuquiResConfigSettings(TransactionCase):
         settings = self._settings()
         self.assertEqual(settings.tuqui_state, "active")
 
-    def test_policy_mode_roundtrip(self):
-        policy = self.Policy._get_singleton()
-        self.assertEqual(policy.policy_mode, "default")
+    def test_read_only_roundtrip(self):
+        client = self.OAuth._get_or_create_singleton()[0]
+        self.assertFalse(client.read_only)
 
         settings = self._settings()
-        settings.tuqui_policy_mode = "advanced"
-        settings.tuqui_allow_private_methods = True
+        settings.tuqui_read_only = True
         settings.set_values()
+        self.assertTrue(client.read_only)
 
-        self.assertEqual(policy.policy_mode, "advanced")
-        self.assertTrue(policy.allow_private_methods)
-
-        # And back — the constraint clears allow_private outside advanced,
-        # so set_values must write both fields in one call.
+        # And back off.
         settings = self._settings()
-        settings.tuqui_policy_mode = "default"
-        settings.tuqui_allow_private_methods = False
+        settings.tuqui_read_only = False
         settings.set_values()
-        self.assertEqual(policy.policy_mode, "default")
-        self.assertFalse(policy.allow_private_methods)
+        self.assertFalse(client.read_only)
 
-    def test_get_values_reads_policy_singleton(self):
-        policy = self.Policy._get_singleton()
-        policy.write({"policy_mode": "advanced", "allow_private_methods": True})
+    def test_get_values_reads_read_only_from_singleton(self):
+        client = self.OAuth._get_or_create_singleton()[0]
+        client.write({"read_only": True})
         values = self.Settings.get_values()
-        self.assertEqual(values["tuqui_policy_mode"], "advanced")
-        self.assertTrue(values["tuqui_allow_private_methods"])
+        self.assertTrue(values["tuqui_read_only"])
+
+    def test_set_values_without_singleton_is_noop(self):
+        """Toggling read-only before activation has nothing to write to."""
+        self.OAuth.search([]).unlink()
+        settings = self._settings()
+        settings.tuqui_read_only = True
+        settings.set_values()  # must not raise / must not create a client
+        self.assertFalse(self.OAuth.search([]))
 
     def test_activate_action_targets_start_route(self):
         settings = self._settings()
@@ -69,10 +69,8 @@ class TestTuquiResConfigSettings(TransactionCase):
         self.assertEqual(action["url"], "/tuqui/activation/start")
         self.assertEqual(action["target"], "new")
 
-    def test_open_rules_and_access_log_actions_resolve(self):
+    def test_open_access_log_action_resolves(self):
         settings = self._settings()
-        rules_action = settings.action_tuqui_open_rules()
-        self.assertEqual(rules_action["res_model"], "tuqui.rpc.rule")
         log_action = settings.action_tuqui_open_access_log()
         self.assertEqual(log_action["res_model"], "tuqui.access.log")
 

@@ -1,8 +1,7 @@
 import json
 import secrets
 
-from odoo.exceptions import ValidationError
-from odoo.tests import HttpCase, TransactionCase, tagged
+from odoo.tests import HttpCase, tagged
 from odoo.tools import mute_logger
 
 # ─── Helpers shared by the HTTP suite ────────────────────────────────
@@ -50,15 +49,10 @@ class TestTuquiRpcGateway(HttpCase):
 
     def setUp(self):
         super().setUp()
-        # Reset policy + rules to a known baseline. Order matters because
-        # of the @api.constrains: clear allow_private before switching mode.
-        self.env["tuqui.rpc.rule"].sudo().search([]).unlink()
-        policy = self.env["tuqui.rpc.policy"]._get_singleton()
-        if policy.allow_private_methods:
-            policy.write({"allow_private_methods": False})
-        if policy.policy_mode != "default":
-            policy.write({"policy_mode": "default"})
-        self.policy = policy
+        # Reset the connection to a known baseline: read-only off.
+        self.client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        if self.client.read_only:
+            self.client.write({"read_only": False})
 
     # ─── HTTP helpers ────────────────────────────────────────────────
 
@@ -166,95 +160,31 @@ class TestTuquiRpcGateway(HttpCase):
                 f"dunder {method} should be hardblocked",
             )
 
-    # ─── Advanced mode rules ─────────────────────────────────────────
+    # ─── Read-only mode ──────────────────────────────────────────────
 
-    def test_advanced_mode_allow_by_default_for_non_private(self):
-        """No rules → reads/writes/executes pass (advanced doesn't tighten non-private)."""
-        self.policy.write({"policy_mode": "advanced"})
+    def test_read_only_mode_blocks_writes_and_executes_but_allows_reads(self):
+        """read_only=True: create/execute are refused; search_read still passes."""
+        self.client.write({"read_only": True})
+
+        # write blocked
+        resp = self._rpc("res.partner", "create", args=[{"name": "blocked"}], expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
+
+        # execute (arbitrary business method) blocked
+        resp = self._rpc("res.partner", "action_archive", args=[[1]], expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
+
+        # read still works
         resp = self._rpc("res.partner", "search_read", args=[[]], kwargs={"limit": 1}, expect_status=200)
         self.assertTrue(resp.json()["ok"])
 
-    def test_advanced_mode_deny_wins(self):
-        self.policy.write({"policy_mode": "advanced"})
-        # Allow rule that would match
-        self.env["tuqui.rpc.rule"].sudo().create(
-            {
-                "name": "allow read",
-                "effect": "allow",
-                "model_pattern": "res.partner",
-                "method_pattern": "search_read",
-                "operation_type": "read",
-            }
-        )
-        # And a deny rule that also matches — deny should win.
-        self.env["tuqui.rpc.rule"].sudo().create(
-            {
-                "name": "deny everything on res.partner",
-                "effect": "deny",
-                "model_pattern": "res.partner",
-                "method_pattern": "*",
-                "operation_type": "any",
-            }
-        )
-        resp = self._rpc("res.partner", "search_read", args=[[]], kwargs={"limit": 1}, expect_status=403)
-        self.assertEqual(resp.json()["error"]["code"], "deny_rule_matched")
-
-    def test_advanced_mode_private_requires_allow_private_and_exact_rule(self):
-        """Both the toggle AND an exact allow rule are required for private."""
-        self.policy.write({"policy_mode": "advanced"})
-        # Toggle off: blocked even with an exact rule, before reaching rule eval.
-        self.env["tuqui.rpc.rule"].sudo().create(
-            {
-                "name": "allow specific private",
-                "effect": "allow",
-                "model_pattern": "res.partner",
-                "method_pattern": "_compute_display_name",
-                "operation_type": "private_execute",
-            }
-        )
+    def test_read_only_mode_still_hard_blocks_private_and_escape_hatches(self):
+        """The unconditional blocks take precedence over the read_only reason."""
+        self.client.write({"read_only": True})
         resp = self._rpc("res.partner", "_compute_display_name", args=[[1]], expect_status=403)
         self.assertEqual(resp.json()["error"]["code"], "private_method_blocked")
-
-        # Toggle on but no rule → still blocked (no_allow_rule).
-        self.env["tuqui.rpc.rule"].sudo().search([]).unlink()
-        self.policy.write({"allow_private_methods": True})
-        resp = self._rpc("res.partner", "_compute_display_name", args=[[1]], expect_status=403)
-        self.assertEqual(resp.json()["error"]["code"], "no_allow_rule")
-
-        # Toggle on AND exact rule → succeeds.
-        self.env["tuqui.rpc.rule"].sudo().create(
-            {
-                "name": "allow specific private 2",
-                "effect": "allow",
-                "model_pattern": "res.partner",
-                "method_pattern": "_compute_display_name",
-                "operation_type": "private_execute",
-            }
-        )
-        resp = self._rpc("res.partner", "_compute_display_name", args=[[1]], expect_status=200)
-        self.assertTrue(resp.json()["ok"])
-
-    # ─── Preset ──────────────────────────────────────────────────────
-
-    def test_preset_creates_three_deny_rules_idempotent(self):
-        self.policy.write({"policy_mode": "advanced"})
-        self.policy.action_apply_read_only_preset()
-        rules = self.env["tuqui.rpc.rule"].sudo().search([])
-        self.assertEqual(len(rules), 3)
-        op_types = {r.operation_type for r in rules}
-        self.assertEqual(op_types, {"write", "execute", "private_execute"})
-        self.assertTrue(all(r.effect == "deny" for r in rules))
-
-        # Idempotent: second apply doesn't add duplicates.
-        self.policy.action_apply_read_only_preset()
-        self.assertEqual(self.env["tuqui.rpc.rule"].sudo().search_count([]), 3)
-
-        # After preset, write/execute/private are blocked but reads work.
-        resp = self._rpc("res.partner", "create", args=[{"name": "blocked"}], expect_status=403)
-        self.assertEqual(resp.json()["error"]["code"], "deny_rule_matched")
-
-        resp = self._rpc("res.partner", "search_read", args=[[]], kwargs={"limit": 1}, expect_status=200)
-        self.assertTrue(resp.json()["ok"])
+        resp = self._rpc("res.partner", "sudo", args=[], expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "method_blocked")
 
     # ─── Perimeter ───────────────────────────────────────────────────
 
@@ -388,127 +318,3 @@ class TestTuquiRpcGateway(HttpCase):
         count = resp.json()["data"]
         log = self._latest_log(method="search_count")
         self.assertEqual(log.result_count, count)
-
-
-@tagged("post_install", "-at_install", "tuqui")
-class TestTuquiRpcRuleConstraints(TransactionCase):
-    """Python-level coverage of the policy rule model — no HTTP needed."""
-
-    def test_allow_private_rejects_wildcard_in_model_pattern(self):
-        with self.assertRaises(ValidationError):
-            self.env["tuqui.rpc.rule"].sudo().create(
-                {
-                    "name": "bad",
-                    "effect": "allow",
-                    "model_pattern": "ai.*",  # wildcard
-                    "method_pattern": "_run_transcription",
-                    "operation_type": "private_execute",
-                }
-            )
-
-    def test_allow_private_rejects_wildcard_in_method_pattern(self):
-        with self.assertRaises(ValidationError):
-            self.env["tuqui.rpc.rule"].sudo().create(
-                {
-                    "name": "bad",
-                    "effect": "allow",
-                    "model_pattern": "ai.video",
-                    "method_pattern": "_run_*",  # wildcard
-                    "operation_type": "private_execute",
-                }
-            )
-
-    def test_allow_private_rejects_character_class(self):
-        """[abc] is a glob too — must not slip past the exact check."""
-        with self.assertRaises(ValidationError):
-            self.env["tuqui.rpc.rule"].sudo().create(
-                {
-                    "name": "bad",
-                    "effect": "allow",
-                    "model_pattern": "ai.video",
-                    "method_pattern": "_run_[abc]",
-                    "operation_type": "private_execute",
-                }
-            )
-
-    def test_allow_private_accepts_exact_patterns(self):
-        rec = (
-            self.env["tuqui.rpc.rule"]
-            .sudo()
-            .create(
-                {
-                    "name": "ok",
-                    "effect": "allow",
-                    "model_pattern": "ai.video",
-                    "method_pattern": "_run_transcription",
-                    "operation_type": "private_execute",
-                }
-            )
-        )
-        self.assertTrue(rec.id)
-
-    def test_deny_with_wildcard_on_private_accepted(self):
-        """Wildcards in deny rules are fine — the constraint only fires on allow."""
-        rec = (
-            self.env["tuqui.rpc.rule"]
-            .sudo()
-            .create(
-                {
-                    "name": "deny all private",
-                    "effect": "deny",
-                    "model_pattern": "*",
-                    "method_pattern": "*",
-                    "operation_type": "private_execute",
-                }
-            )
-        )
-        self.assertTrue(rec.id)
-
-    @mute_logger("odoo.sql_db")
-    def test_unique_constraint_blocks_duplicate(self):
-        """The unique SQL constraint must block a duplicate rule.
-
-        Postgres logs the ``duplicate key value violates unique constraint``
-        error at ERROR level via ``odoo.sql_db`` when we deliberately
-        trigger it — silence that channel during the test so runbot
-        doesn't paint the whole build red on this expected event.
-        """
-        self.env["tuqui.rpc.rule"].sudo().create(
-            {
-                "name": "first",
-                "effect": "deny",
-                "model_pattern": "*",
-                "method_pattern": "*",
-                "operation_type": "write",
-            }
-        )
-        with self.assertRaises(Exception):  # IntegrityError, surfaced via Odoo wrapper
-            self.env["tuqui.rpc.rule"].sudo().create(
-                {
-                    "name": "duplicate",
-                    "effect": "deny",
-                    "model_pattern": "*",
-                    "method_pattern": "*",
-                    "operation_type": "write",
-                }
-            )
-            self.env.cr.flush()
-
-
-@tagged("post_install", "-at_install", "tuqui")
-class TestTuquiRpcPolicyConstraints(TransactionCase):
-    """Policy-level constraints not covered by the HTTP suite."""
-
-    def test_allow_private_only_in_advanced(self):
-        """Default mode + allow_private_methods=True is a contradictory state."""
-        policy = self.env["tuqui.rpc.policy"]._get_singleton()
-        # Set up: advanced + flag on.
-        policy.write({"policy_mode": "advanced"})
-        policy.write({"allow_private_methods": True})
-        # Now try to flip back without disabling the flag — constraint fires.
-        with self.assertRaises(ValidationError):
-            policy.write({"policy_mode": "default"})
-        # The standard flow (disable flag, then switch mode) succeeds.
-        policy.write({"allow_private_methods": False})
-        policy.write({"policy_mode": "default"})
-        self.assertEqual(policy.policy_mode, "default")

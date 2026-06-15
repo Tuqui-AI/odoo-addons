@@ -49,23 +49,16 @@
                         </div>
                     </div>
 
-                    <!-- Security policy -->
-                    <div class="mt16">
-                        <span class="o_form_label fw-bold d-block mb-1">Security policy</span>
-                        <field name="tuqui_policy_mode" widget="radio" options="{'horizontal': true}"/>
-                        <div invisible="tuqui_policy_mode != 'advanced'" class="mt-2 ps-2 border-start">
-                            <div>
-                                <field name="tuqui_allow_private_methods" class="oe_inline"/>
-                                <label for="tuqui_allow_private_methods" class="ms-1"/>
-                            </div>
-                            <div class="d-flex flex-wrap gap-3 mt-2">
-                                <button name="action_tuqui_open_rules" type="object"
-                                        string="Configure rules" icon="fa-sliders"
-                                        class="btn-link p-0"/>
-                                <button name="action_tuqui_apply_read_only_preset" type="object"
-                                        string="Apply read-only preset" class="btn-link p-0"
-                                        confirm="This adds three deny rules to block writes, executes and private methods. Existing custom rules are preserved. Continue?"/>
-                            </div>
+                    <!-- Security: optional read-only lock (only meaningful once connected) -->
+                    <div invisible="tuqui_state != 'active'" class="mt16">
+                        <span class="o_form_label fw-bold d-block mb-1">Security</span>
+                        <div class="d-flex align-items-center">
+                            <field name="tuqui_read_only" widget="boolean_toggle" class="oe_inline"/>
+                            <label for="tuqui_read_only" string="Read-only mode" class="ms-2 mb-0"/>
+                        </div>
+                        <div class="text-muted small mt-1">
+                            When on, Tuqui can read but never create, update, delete or run methods.
+                            Reads still follow each user's own Odoo permissions.
                         </div>
                     </div>
                 </setting>

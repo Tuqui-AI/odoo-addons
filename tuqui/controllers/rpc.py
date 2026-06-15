@@ -1,4 +1,3 @@
-import fnmatch
 import json
 import logging
 import time
@@ -30,9 +29,7 @@ def _is_absolutely_blocked(method: str) -> bool:
         return True
     # Dunders (``__class__``, ``__getattribute__``, ``__reduce__``, …) are
     # Python introspection slots, not business methods. No RPC has a
-    # legitimate use for them, and a careless advanced-mode allow rule
-    # like ``model_pattern='*' / method_pattern='__*__'`` would silently
-    # widen attack surface. Hard-block at the gate.
+    # legitimate use for them, so they are hard-blocked at the gate.
     if method.startswith("__") and method.endswith("__"):
         return True
     return method.startswith(_ABSOLUTE_METHOD_PREFIXES)
@@ -59,64 +56,28 @@ def _classify(method: str) -> str:
     return "execute"
 
 
-# ─── Rule matching ───────────────────────────────────────────────────
-
-
-def _rule_matches(rule, model: str, method: str, op_type: str) -> bool:
-    """A rule matches when its op_type filter passes and both globs match.
-
-    ``operation_type == 'any'`` is the catch-all bucket. Case-sensitive
-    matching is intentional — model names are lowercase by convention
-    and a stray uppercase character should not silently change a
-    rule's reach.
-    """
-    if rule.operation_type != "any" and rule.operation_type != op_type:
-        return False
-    return fnmatch.fnmatchcase(model, rule.model_pattern) and fnmatch.fnmatchcase(method, rule.method_pattern)
-
-
 # ─── Policy gate ─────────────────────────────────────────────────────
 
 
-def _evaluate_policy(env, policy, model: str, method: str, op_type: str):
+def _evaluate_policy(read_only: bool, method: str, op_type: str):
     """Return ``(allowed, denied_reason)``.
 
-    ``allowed=True`` means the call may proceed to the ORM. ``denied_reason``
-    is set only when ``allowed=False``; otherwise it is ``None``.
+    ``allowed=True`` means the call may proceed to the ORM (where the acting
+    user's own Odoo ACL is the real per-call check). ``denied_reason`` is set
+    only when ``allowed=False``. Three gates, in order:
+
+    1. Absolute blocks — ``sudo`` / ``with_*`` / ``flush*`` / ``invalidate*``
+       and dunders bypass or sidestep the ACL; blocked unconditionally.
+    2. Private (``_``-prefixed) methods — internal ORM surface, never exposed.
+    3. Read-only mode — when the connection is flagged read-only, anything
+       that can mutate (``write`` / ``execute``) is refused; reads pass.
     """
-    # 1. Hard blocks first — apply in both default and advanced modes.
     if _is_absolutely_blocked(method):
         return False, "method_blocked"
-
-    # 2. Default mode: privados bloqueados, todo lo demás pasa al ACL de Odoo.
-    if policy.policy_mode == "default":
-        if op_type == "private_execute":
-            return False, "private_method_blocked"
-        return True, None
-
-    # 3. Advanced mode — rules table is consulted.
-    if op_type == "private_execute" and not policy.allow_private_methods:
+    if op_type == "private_execute":
         return False, "private_method_blocked"
-
-    rules = env["tuqui.rpc.rule"].sudo().search([("active", "=", True)])
-    # Single pass; deny wins, allow remembered.
-    matched_deny = False
-    matched_allow = False
-    for rule in rules:
-        if not _rule_matches(rule, model, method, op_type):
-            continue
-        if rule.effect == "deny":
-            matched_deny = True
-            break
-        matched_allow = True
-
-    if matched_deny:
-        return False, "deny_rule_matched"
-
-    # For private_execute the allow MUST be explicit (no allow-by-default).
-    if op_type == "private_execute" and not matched_allow:
-        return False, "no_allow_rule"
-
+    if read_only and op_type in ("write", "execute"):
+        return False, "read_only_mode"
     return True, None
 
 
@@ -273,7 +234,7 @@ def _log(
 
 # Policy-deny reasons that should surface as HTTP 403. Anything else
 # from the gate (currently nothing) would surface as 400.
-_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "deny_rule_matched", "no_allow_rule"})
+_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "read_only_mode"})
 
 
 class TuquiRpc(http.Controller):
@@ -289,10 +250,10 @@ class TuquiRpc(http.Controller):
             "context": {"lang": "es_AR"}
         }
 
-    There is no hardcoded allowlist of operations — that lives in the
-    ``tuqui.rpc.policy`` engine and the optional ``tuqui.rpc.rule`` table,
-    so adding new capabilities to Tuqui doesn't require shipping a new
-    module version to clients. Defense in depth, in order:
+    There is no hardcoded allowlist of operations — Odoo's own ACL (via the
+    acting user) is the authorization model, so adding new capabilities to
+    Tuqui doesn't require shipping a new module version to clients. Defense
+    in depth, in order:
 
     1. OAuth ``client_credentials`` bearer (verified upstream).
     2. ``X-Tuqui-Acting-User`` → ``res.users.login`` lookup, then every
@@ -300,8 +261,9 @@ class TuquiRpc(http.Controller):
        the per-call privilege check.
     3. Absolute blocks on ``sudo`` / ``with_*`` / ``flush*`` /
        ``invalidate*`` — escape hatches that bypass ACL.
-    4. Policy engine: ``default`` mode blocks private (``_``-prefixed)
-       methods; ``advanced`` consults the rules table.
+    4. Private (``_``-prefixed) methods are always refused; an optional
+       per-connection ``read_only`` flag additionally refuses writes and
+       method execution.
     """
 
     @http.route(
@@ -375,8 +337,9 @@ class TuquiRpc(http.Controller):
             )
 
         # ─── Policy gate ───────────────────────────────────────────────────
-        policy = env["tuqui.rpc.policy"]._get_singleton()
-        allowed, denied_reason = _evaluate_policy(env, policy, model_name, method, operation_type)
+        client = env["tuqui.oauth.client"].sudo()._get_singleton()
+        read_only = bool(client.read_only) if client else False
+        allowed, denied_reason = _evaluate_policy(read_only, method, operation_type)
         if not allowed:
             _log(
                 env,

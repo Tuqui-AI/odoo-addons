@@ -34,23 +34,13 @@ class ResConfigSettings(models.TransientModel):
         compute="_compute_tuqui_status",
         string="Tuqui Activity Summary",
     )
-    tuqui_policy_mode = fields.Selection(
-        [("default", "Default"), ("advanced", "Advanced")],
-        string="Tuqui Security Policy",
-        default="default",
+    tuqui_read_only = fields.Boolean(
+        string="Tuqui Read-only Mode",
         help=(
-            "Default: private (_-prefixed) methods always blocked, plus "
-            "hardcoded absolute blocks (sudo, with_*, flush*, invalidate*, "
-            "dunders); everything else goes through the acting user's own "
-            "Odoo access rights. Advanced: an allow/deny rules table is "
-            "consulted on every call — deny wins."
-        ),
-    )
-    tuqui_allow_private_methods = fields.Boolean(
-        string="Allow Private Methods",
-        help=(
-            "Advanced mode only. When enabled, a private method can be "
-            "called IF an exact (no wildcards) allow rule matches it."
+            "When enabled, Tuqui can read but never create, update, delete "
+            "or run methods on this database. Reads still follow each user's "
+            "own Odoo permissions. Private methods and ORM escape hatches are "
+            "always blocked regardless of this flag."
         ),
     )
 
@@ -70,27 +60,18 @@ class ResConfigSettings(models.TransientModel):
     @api.model
     def get_values(self):
         res = super().get_values()
-        policy = self.env["tuqui.rpc.policy"]._get_singleton()
-        res.update(
-            tuqui_policy_mode=policy.policy_mode,
-            tuqui_allow_private_methods=policy.allow_private_methods,
-        )
+        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        res.update(tuqui_read_only=bool(client.read_only) if client else False)
         return res
 
     def set_values(self):
         super().set_values()
-        policy = self.env["tuqui.rpc.policy"]._get_singleton()
-        # The flag only exists in advanced mode; force it off otherwise so
-        # switching back to default never trips the policy's constraint on
-        # a value the UI was hiding.
-        allow_private = self.tuqui_policy_mode == "advanced" and self.tuqui_allow_private_methods
-        vals = {}
-        if policy.policy_mode != self.tuqui_policy_mode:
-            vals["policy_mode"] = self.tuqui_policy_mode
-        if policy.allow_private_methods != allow_private:
-            vals["allow_private_methods"] = allow_private
-        if vals:
-            policy.write(vals)
+        # read_only lives on the OAuth singleton, which only exists once the
+        # database is activated — there's nothing to gate before then, so a
+        # missing singleton just means the toggle has no effect yet.
+        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        if client and client.read_only != self.tuqui_read_only:
+            client.write({"read_only": self.tuqui_read_only})
 
     # ---------- Actions (thin proxies to the singletons) ----------
 
@@ -120,12 +101,6 @@ class ResConfigSettings(models.TransientModel):
         client.action_disconnect()
         # Reload so the block re-renders in its disconnected shape.
         return {"type": "ir.actions.client", "tag": "reload"}
-
-    def action_tuqui_apply_read_only_preset(self):
-        return self.env["tuqui.rpc.policy"]._get_singleton().action_apply_read_only_preset()
-
-    def action_tuqui_open_rules(self):
-        return self.env["ir.actions.act_window"]._for_xml_id("tuqui.action_tuqui_rpc_rule")
 
     def action_tuqui_open_access_log(self):
         return self.env["ir.actions.act_window"]._for_xml_id("tuqui.action_tuqui_access_log")
