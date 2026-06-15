@@ -188,10 +188,12 @@ class TuquiOAuthClient(models.Model):
     # ---------- Compute ----------
 
     def _compute_access_count_7d(self):
-        AccessLog = self.env["tuqui.access.log"].sudo()
+        # The domain doesn't depend on the record, so count once and fan out
+        # (same shape as res_config_settings._compute_tuqui_status).
         since = fields.Datetime.now() - timedelta(days=7)
+        count = self.env["tuqui.access.log"].sudo().search_count([("create_date", ">=", since)])
         for rec in self:
-            rec.access_count_7d = AccessLog.search_count([("create_date", ">=", since)])
+            rec.access_count_7d = count
 
     # ---------- Guard ----------
 

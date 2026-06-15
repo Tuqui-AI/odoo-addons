@@ -1,12 +1,9 @@
 from odoo import _, api, fields, models
 
-# Mirror of tuqui.oauth.client._STATE_SELECTION — settings shows the
-# connection state read-only; transitions happen through the actions below.
-_STATE_SELECTION = [
-    ("pending", "Pending activation"),
-    ("active", "Active"),
-    ("disconnected", "Disconnected"),
-]
+# Settings shows the connection state read-only; transitions happen through the
+# actions below. Reuse the canonical selection from the client model so the two
+# never drift when a state is added.
+from .tuqui_oauth_client import _STATE_SELECTION
 
 
 class ResConfigSettings(models.TransientModel):
