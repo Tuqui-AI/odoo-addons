@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<templates xml:space="preserve">
+    <t t-name="tuqui_assistant.Panel">
+        <div t-if="state.panelOpen" class="o-tuqui-panel d-flex flex-column">
+            <div class="o-tuqui-panel-header d-flex align-items-center justify-content-between p-2">
+                <span class="fw-bold"><i class="fa fa-comments-o me-1"/> Tuqui</span>
+                <button class="btn btn-sm btn-link text-reset" t-on-click="close" title="Cerrar">
+                    <i class="fa fa-times"/>
+                </button>
+            </div>
+            <div class="o-tuqui-panel-body flex-grow-1 p-2 overflow-auto">
+                <t t-if="state.context">
+                    <div class="text-muted small mb-2">
+                        Contexto: <b t-esc="state.context.model"/> #<t t-esc="state.context.resId"/>
+                        <div t-if="state.context.displayName" t-esc="state.context.displayName"/>
+                    </div>
+                </t>
+                <t t-else="">
+                    <div class="text-muted small mb-2">Abrí un formulario para dar contexto.</div>
+                </t>
+
+                <label class="form-label small mb-1">Propuesta de cambios (JSON)</label>
+                <textarea
+                    class="form-control font-monospace small"
+                    rows="5"
+                    t-model="ui.rawChanges"
+                    placeholder='{"priority": "1"}'/>
+                <button class="btn btn-primary btn-sm mt-2 w-100" t-on-click="onApply">
+                    Proponer cambios al formulario
+                </button>
+                <div class="text-muted small mt-2">
+                    Se aplica en memoria: el formulario queda con cambios sin guardar.
+                    Revisá y usá Guardar o Descartar de Odoo.
+                </div>
+            </div>
+        </div>
+    </t>
+</templates>

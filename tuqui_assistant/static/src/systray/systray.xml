@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<templates xml:space="preserve">
+    <t t-name="tuqui_assistant.Systray">
+        <div class="o-tuqui-systray">
+            <button class="btn btn-link o-tuqui-systray-btn" t-on-click="onClick" title="Tuqui">
+                <i class="fa fa-fw fa-comments-o" role="img" aria-label="Tuqui"/>
+            </button>
+        </div>
+    </t>
+</templates>
