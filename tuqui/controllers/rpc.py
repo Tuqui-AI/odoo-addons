@@ -170,11 +170,33 @@ def _bearer_token():
     return auth[7:].strip()
 
 
-def _resolve_acting_user(env, login):
-    """Lookup by ``res.users.login`` (not email — emails duplicate in some instances)."""
-    if not login:
-        return env["res.users"]
-    return env["res.users"].sudo().search([("login", "=", login), ("active", "=", True)], limit=1)
+def _resolve_acting_user(env, *, uid="", login=""):
+    """Resolve the Odoo user every ORM call will impersonate.
+
+    Tuqui sends one of two headers:
+
+    - ``X-Tuqui-Acting-Uid`` — the stable per-member Odoo user id. Sent for
+      a workspace member's own calls so companion behaves like the native
+      per-user JSON-RPC path (each call runs under that member's ACL).
+    - ``X-Tuqui-Acting-User`` — a ``res.users.login``. Used for the
+      connection's acting user (the admin captured at activation) on
+      workspace-level operations that have no per-member identity.
+
+    The uid wins when present; we never silently fall back to the connection
+    login if a provided uid doesn't resolve (that would re-introduce the
+    privilege the per-user model removes). Lookup by login (not email —
+    emails duplicate in some instances).
+    """
+    Users = env["res.users"].sudo()
+    if uid:
+        try:
+            uid_int = int(uid)
+        except ValueError:
+            return env["res.users"]
+        return Users.search([("id", "=", uid_int), ("active", "=", True)], limit=1)
+    if login:
+        return Users.search([("login", "=", login), ("active", "=", True)], limit=1)
+    return env["res.users"]
 
 
 def _result_count(result, method: str) -> int:
@@ -256,9 +278,11 @@ class TuquiRpc(http.Controller):
     in depth, in order:
 
     1. OAuth ``client_credentials`` bearer (verified upstream).
-    2. ``X-Tuqui-Acting-User`` → ``res.users.login`` lookup, then every
-       ORM call runs through ``with_user(acting_user)`` so Odoo's ACL is
-       the per-call privilege check.
+    2. Acting user → ``X-Tuqui-Acting-Uid`` (per-member Odoo user id, the
+       common case) or ``X-Tuqui-Acting-User`` (a ``res.users.login``, for
+       the connection's acting user on workspace-level ops). Every ORM call
+       then runs through ``with_user(acting_user)`` so Odoo's ACL is the
+       per-call privilege check — identical to the native per-user path.
     3. Absolute blocks on ``sudo`` / ``with_*`` / ``flush*`` /
        ``invalidate*`` — escape hatches that bypass ACL.
     4. Private (``_``-prefixed) methods are always refused; an optional
@@ -314,8 +338,9 @@ class TuquiRpc(http.Controller):
         operation_type = _classify(method)
 
         # ─── Acting user ───────────────────────────────────────────────────
+        acting_uid = request.httprequest.headers.get("X-Tuqui-Acting-Uid") or ""
         acting_login = request.httprequest.headers.get("X-Tuqui-Acting-User") or ""
-        acting_user = _resolve_acting_user(env, acting_login)
+        acting_user = _resolve_acting_user(env, uid=acting_uid, login=acting_login)
         if not acting_user:
             _log(
                 env,
@@ -330,9 +355,10 @@ class TuquiRpc(http.Controller):
                 duration_ms=0,
                 result_count=0,
             )
+            identifier = f"uid={acting_uid!r}" if acting_uid else f"login={acting_login!r}"
             return _error(
                 "unknown_acting_user",
-                f"Unknown acting_user login: {acting_login!r}",
+                f"Unknown acting user ({identifier})",
                 status=400,
             )
 

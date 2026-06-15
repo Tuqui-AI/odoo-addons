@@ -80,6 +80,7 @@ class TestTuquiRpcGateway(HttpCase):
         kwargs=None,
         context=None,
         acting_user="admin",
+        acting_uid=None,
         token=None,
         body_override=None,
         expect_status=None,
@@ -87,7 +88,9 @@ class TestTuquiRpcGateway(HttpCase):
         """Invoke ``/tuqui/rpc`` and return the response.
 
         Pass ``body_override`` to send a malformed body for perimeter tests;
-        otherwise the body is built from the named params.
+        otherwise the body is built from the named params. Pass ``acting_uid``
+        to impersonate by Odoo user id (``X-Tuqui-Acting-Uid``) instead of by
+        login — the per-member path.
         """
         token = token or self._get_token()
         if body_override is not None:
@@ -100,15 +103,19 @@ class TestTuquiRpcGateway(HttpCase):
                 body["kwargs"] = kwargs
             if context is not None:
                 body["context"] = context
+        headers = {
+            **self._db_headers(),
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        if acting_uid is not None:
+            headers["X-Tuqui-Acting-Uid"] = str(acting_uid)
+        else:
+            headers["X-Tuqui-Acting-User"] = acting_user
         resp = self.url_open(
             "/tuqui/rpc",
             data=json.dumps(body),
-            headers={
-                **self._db_headers(),
-                "Authorization": f"Bearer {token}",
-                "X-Tuqui-Acting-User": acting_user,
-                "Content-Type": "application/json",
-            },
+            headers=headers,
         )
         if expect_status is not None:
             self.assertEqual(resp.status_code, expect_status, resp.text)
@@ -231,6 +238,31 @@ class TestTuquiRpcGateway(HttpCase):
     def test_unknown_acting_user(self):
         resp = self._rpc("res.partner", "search_read", args=[[]], acting_user="ghost", expect_status=400)
         self.assertEqual(resp.json()["error"]["code"], "unknown_acting_user")
+
+    def test_unknown_acting_uid(self):
+        resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid=99999999, expect_status=400)
+        self.assertEqual(resp.json()["error"]["code"], "unknown_acting_user")
+
+    # ─── Per-member impersonation by uid ─────────────────────────────
+
+    def test_acting_uid_impersonates_that_user(self):
+        """X-Tuqui-Acting-Uid runs the call under that user's own ACL.
+
+        The basic user can't read ir.config_parameter → AccessError → 403,
+        proving the call ran as the uid we sent and not as admin.
+        """
+        resp = self._rpc(
+            "ir.config_parameter",
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["key"]},
+            acting_uid=self.basic_user.id,
+            expect_status=403,
+        )
+        self.assertEqual(resp.json()["error"]["code"], "access_denied")
+        # And the audit log attributes the call to that user, not admin.
+        log = self._latest_log(method="search_read", model_name="ir.config_parameter")
+        self.assertEqual(log.acting_user_id.id, self.basic_user.id)
 
     # ─── Error mapping ───────────────────────────────────────────────
 
