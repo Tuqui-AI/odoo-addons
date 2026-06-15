@@ -13,14 +13,6 @@ from .health import _PROTOCOL_VERSION, _module_version
 _LOG = logging.getLogger(__name__)
 
 
-# Default landing URL when no admin override is set via
-# ir.config_parameter ``tuqui.activation.frontend_url``. Dev environments
-# typically point this at a local Vite/Next server (e.g.
-# http://localhost:5173/activate).
-_DEFAULT_FRONTEND_URL = "https://tuqui.com/activate"
-_FRONTEND_URL_PARAM = "tuqui.activation.frontend_url"
-
-
 class TuquiActivation(http.Controller):
     """Server-side trigger for the 2-leg activation handshake.
 
@@ -80,9 +72,7 @@ class TuquiActivation(http.Controller):
             )
         )
 
-        frontend_url = (env["ir.config_parameter"].sudo().get_param(_FRONTEND_URL_PARAM, _DEFAULT_FRONTEND_URL)).rstrip(
-            "/"
-        )
+        frontend_url = env["tuqui.oauth.client"].sudo()._get_activation_frontend_url().rstrip("/")
         companion_url = request.httprequest.host_url.rstrip("/")
 
         # The Tuqui frontend reads nonce + companion_url from the query

@@ -14,6 +14,12 @@ _STATE_SELECTION = [
     ("disconnected", "Disconnected"),
 ]
 
+# Production Tuqui base URL. Hardcoded — clients never point the module at a
+# different Tuqui. The ``tuqui.base_url`` ir.config_parameter overrides it only
+# for dev/staging (e.g. http://localhost:5173); no seed record is shipped, so
+# get_param falls back to this constant in production.
+_TUQUI_BASE_URL = "https://tuqui.com"
+
 
 class TuquiOAuthClient(models.Model):
     """Singleton-style OAuth 2.0 client credentials store for Tuqui.
@@ -42,6 +48,16 @@ class TuquiOAuthClient(models.Model):
         string="Accesses (last 7 days)",
         compute="_compute_access_count_7d",
         help="Total RPC calls logged in tuqui.access.log during the last 7 days.",
+    )
+    read_only = fields.Boolean(
+        default=False,
+        help=(
+            "When enabled, /tuqui/rpc refuses every mutating call (create, "
+            "write, unlink, copy and arbitrary method execution); only reads "
+            "pass. Reads still run with the acting user's own Odoo permissions. "
+            "The hardcoded escape-hatch and private-method blocks apply "
+            "regardless of this flag."
+        ),
     )
 
     _client_id_unique = models.Constraint(
@@ -146,13 +162,21 @@ class TuquiOAuthClient(models.Model):
     def _get_tuqui_base_url(self):
         """Tuqui base URL — hardcoded for clients, overridable for dev.
 
-        Not a user-facing setting: clients never point the module at a
-        different Tuqui. The ``tuqui.base_url`` ir.config_parameter exists
-        only so dev environments can target a local/staging instance,
-        same pattern as ``tuqui.activation.frontend_url``.
+        Single source of truth for both the "Go to Tuqui" link and the
+        activation redirect target (``<base_url>/activate``). Reads the
+        ``tuqui.base_url`` ir.config_parameter when set (dev/staging) and
+        otherwise falls back to the hardcoded production constant.
         """
-        param = self.env["ir.config_parameter"].sudo().get_param("tuqui.base_url", "https://tuqui.com")
-        return (param or "https://tuqui.com").rstrip("/")
+        param = self.env["ir.config_parameter"].sudo().get_param("tuqui.base_url", _TUQUI_BASE_URL)
+        return (param or _TUQUI_BASE_URL).rstrip("/")
+
+    @api.model
+    def _get_activation_frontend_url(self):
+        """Where ``/tuqui/activation/start`` redirects the admin's browser.
+
+        Derived from the base URL — one config, not two.
+        """
+        return f"{self._get_tuqui_base_url()}/activate"
 
     def action_open_tuqui(self):
         """Open the connected Tuqui workspace in a new tab.
