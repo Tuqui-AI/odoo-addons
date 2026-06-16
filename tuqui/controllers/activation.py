@@ -51,7 +51,10 @@ class TuquiActivation(http.Controller):
             raise AccessError(_("Only Odoo administrators can activate Tuqui."))
 
         oauth_client = env["tuqui.oauth.client"].sudo()._get_singleton()
-        if oauth_client and oauth_client.state != "pending":
+        # Re-activation is allowed from both 'pending' (never activated) and
+        # 'disconnected' (admin or Tuqui tore the link down). Only a live
+        # 'active' connection must be explicitly disconnected first.
+        if oauth_client and oauth_client.state == "active":
             raise UserError(_("Tuqui is already activated. Disconnect first to re-activate."))
 
         # Lazy-create the singleton on first activation; otherwise rotate the
@@ -155,9 +158,12 @@ class TuquiActivation(http.Controller):
 
         row._consume()
 
-        # Transition the OAuth client to active — Tuqui has the creds.
+        # Tuqui now holds valid creds → the connection is active, whatever the
+        # prior state. Re-activation after a disconnect reaches here with
+        # state='disconnected'; guarding on 'pending' would leave Odoo wrongly
+        # showing "not connected" while Tuqui works fine. mark_active is idempotent.
         oauth_client = env["tuqui.oauth.client"].sudo()._get_singleton()
-        if oauth_client and oauth_client.state == "pending":
+        if oauth_client:
             oauth_client.mark_active()
 
         companion_url = request.httprequest.host_url.rstrip("/")

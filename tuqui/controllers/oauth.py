@@ -149,4 +149,10 @@ class TuquiOAuth(http.Controller):
         # Rotate signing key → invalidate every token issued so far.
         new_key = _b64url(secrets.token_bytes(32))
         env["ir.config_parameter"].sudo().set_param(_SIGNING_KEY_PARAM, new_key)
+        # Mark the OAuth client as disconnected so Odoo Settings reflects the
+        # state change. Called by Tuqui when the user disconnects from the Tuqui
+        # side; mirrors what the manual "Disconnect" button does in Settings.
+        singleton = env["tuqui.oauth.client"].sudo()._get_singleton()
+        if singleton:
+            singleton.action_disconnect()
         return _json_response({"ok": True})

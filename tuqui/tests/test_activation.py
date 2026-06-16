@@ -165,3 +165,53 @@ class TestTuquiActivationExchange(HttpCase):
         )
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()["error"]["code"], "bad_request")
+
+    def test_reactivation_cycle(self):
+        """Full lifecycle: activate → disconnect → re-activate.
+
+        Re-activation reaches /exchange with state='disconnected'. The client
+        must flip back to 'active' — a transition guarded on 'pending' would
+        leave Odoo wrongly showing "not connected" while Tuqui works. Regression
+        guard for the from-state-coupled transitions in start()/exchange().
+        """
+        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        client_id = client.client_id
+
+        def _activate(secret):
+            nonce, _ = (
+                self.env["tuqui.activation.nonce"]
+                .sudo()
+                ._issue(client_id=client_id, client_secret_plaintext=secret, acting_user_login="admin")
+            )
+            self._post_exchange({"nonce": nonce}, expect_status=200)
+            client.invalidate_recordset()
+
+        # 1. First activation: pending → active.
+        _activate("secret-1")
+        self.assertEqual(client.state, "active")
+
+        # 2. Disconnect (manual button / Tuqui-side revoke both land here).
+        client.action_disconnect()
+        client.invalidate_recordset()
+        self.assertEqual(client.state, "disconnected")
+
+        # 3. Re-activation: disconnected → active (the bug this guards against).
+        _activate("secret-2")
+        self.assertEqual(client.state, "active", "exchange must re-activate from 'disconnected', not only 'pending'")
+
+    def test_start_rejects_only_active(self):
+        """/start is allowed from 'pending' and 'disconnected'; only a live
+        'active' connection is rejected. Authenticated admin GET → 302 redirect
+        to the Tuqui frontend when allowed; non-redirect when blocked."""
+        self.authenticate("admin", "admin")
+        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+
+        # disconnected → re-activation allowed (redirects to frontend).
+        client.write({"state": "disconnected"})
+        resp = self.url_open("/tuqui/activation/start", allow_redirects=False, headers=self._db_headers())
+        self.assertEqual(resp.status_code, 302, "re-activation from 'disconnected' must be allowed")
+
+        # active → blocked (must disconnect first); no redirect.
+        client.write({"state": "active"})
+        resp = self.url_open("/tuqui/activation/start", allow_redirects=False, headers=self._db_headers())
+        self.assertNotEqual(resp.status_code, 302, "an 'active' link must not re-activate")
