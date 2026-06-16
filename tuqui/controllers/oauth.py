@@ -34,6 +34,18 @@ def _get_or_create_signing_key(env):
     return _b64url_decode(key_b64)
 
 
+def rotate_signing_key(env):
+    """Rotate the HMAC signing key, invalidating every outstanding access token.
+
+    Shared by the two ways a connection is torn down: ``/tuqui/oauth/revoke``
+    (Tuqui-initiated) and ``tuqui.oauth.client.action_disconnect`` (the Odoo
+    "Disconnect" button). Verification re-derives the key per call, so dropping
+    in a fresh one makes every previously issued bearer fail signature checks.
+    """
+    new_key = _b64url(secrets.token_bytes(32))
+    env["ir.config_parameter"].sudo().set_param(_SIGNING_KEY_PARAM, new_key)
+
+
 def _issue_access_token(env, client_id):
     """Compact JWT-like token: header.payload.signature (HS256, base64url)."""
     now = int(time.time())
@@ -116,6 +128,15 @@ class TuquiOAuth(http.Controller):
         if not client or client.client_id != client_id or not client.verify_secret(client_secret):
             _LOG.info("Tuqui OAuth: invalid credentials for client_id=%s", client_id)
             return _oauth_error("invalid_client", status=401)
+        # A disconnected connection must not mint new tokens — otherwise the
+        # "Disconnect" button is cosmetic (Tuqui just re-fetches a fresh token
+        # on its next 401 and carries on). We refuse only ``disconnected``, not
+        # ``!= active``: ``pending`` is a live, pre-activation state in the
+        # direct-paste flow (the module only flips to ``active`` via the redirect
+        # /exchange), and refusing it would break first activation.
+        if client.state == "disconnected":
+            _LOG.info("Tuqui OAuth: token refused, client disconnected (client_id=%s)", client_id)
+            return _oauth_error("invalid_client", status=401, description="client_disconnected")
         access_token = _issue_access_token(env, client_id)
         client.touch_last_seen()
         return _json_response(
@@ -146,13 +167,9 @@ class TuquiOAuth(http.Controller):
         client = env["tuqui.oauth.client"].sudo()._get_singleton()
         if not client or client.client_id != client_id or not client.verify_secret(client_secret):
             return _oauth_error("invalid_client", status=401)
-        # Rotate signing key → invalidate every token issued so far.
-        new_key = _b64url(secrets.token_bytes(32))
-        env["ir.config_parameter"].sudo().set_param(_SIGNING_KEY_PARAM, new_key)
-        # Mark the OAuth client as disconnected so Odoo Settings reflects the
-        # state change. Called by Tuqui when the user disconnects from the Tuqui
-        # side; mirrors what the manual "Disconnect" button does in Settings.
-        singleton = env["tuqui.oauth.client"].sudo()._get_singleton()
-        if singleton:
-            singleton.action_disconnect()
+        # action_disconnect rotates the signing key (invalidating every
+        # outstanding token) and flips state to 'disconnected' — exactly what
+        # the manual "Disconnect" button does, so both teardown paths are
+        # identical. Called by Tuqui when the user disconnects from its side.
+        client.action_disconnect()
         return _json_response({"ok": True})

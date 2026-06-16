@@ -155,7 +155,22 @@ class TuquiOAuthClient(models.Model):
         }
 
     def action_disconnect(self):
+        """Tear down the connection: rotate the signing key, then flip state.
+
+        Rotating the key invalidates every outstanding access token, and while
+        ``state == 'disconnected'`` ``/tuqui/oauth/token`` refuses to mint new
+        ones (see ``controllers/oauth.py``). Without the rotation the disconnect
+        would be cosmetic — Tuqui would keep calling until its cached token
+        expired and then quietly re-authenticate. Re-activation (the redirect
+        /exchange) flips state back to 'active'; a new key is minted lazily.
+        """
         self.ensure_one()
+        # Local import: the rotation primitive lives with the token-signing code
+        # in the controller; importing at module load would couple model and
+        # controller import order for no benefit.
+        from ..controllers.oauth import rotate_signing_key
+
+        rotate_signing_key(self.env)
         self.write({"state": "disconnected"})
 
     @api.model
