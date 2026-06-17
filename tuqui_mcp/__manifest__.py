@@ -1,5 +1,5 @@
 {
-    "name": "Tuqui — Odoo MCP",
+    "name": "Tuqui - Odoo MCP",
     "version": "19.0.1.0.0",
     "category": "Productivity",
     "summary": "Connect your Odoo to Claude, ChatGPT and any AI assistant via Odoo MCP.",
