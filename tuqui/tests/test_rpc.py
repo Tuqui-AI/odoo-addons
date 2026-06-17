@@ -360,7 +360,7 @@ class TestTuquiRpcGateway(HttpCase):
         """
         from unittest.mock import patch
 
-        from odoo.addons.tuqui.controllers import oauth as oauth_mod
+        from ..controllers import oauth as oauth_mod
 
         backdated = int(time.time()) - oauth_mod._ACCESS_TOKEN_TTL_SECONDS - 3600
         with patch.object(oauth_mod.time, "time", return_value=backdated):
