@@ -288,10 +288,18 @@ class TestTuquiRpcGateway(HttpCase):
         it's the test verifying the failure path).
         """
         # Grouping by a non-stored field raises ValueError inside the ORM.
+        # We use ``formatted_read_group`` (the Odoo 19 replacement) rather than
+        # the deprecated ``read_group``: the latter emits a DeprecationWarning
+        # through the ``py.warnings`` logger, which ``@mute_logger`` above does
+        # not silence (it targets the controller logger), dirtying the runbot
+        # log. ``_read_group`` is not an option here — its ``_`` prefix makes
+        # the gateway refuse it as a private method (403), so it never reaches
+        # the ORM error path this test exercises. Args: (domain, groupby,
+        # aggregates) — same signature the CompanionTransport sends.
         resp = self._rpc(
             "res.partner",
-            "read_group",
-            args=[[], [], ["company_type"]],  # non-stored selection
+            "formatted_read_group",
+            args=[[], ["company_type"], []],  # group by non-stored selection
             expect_status=500,
         )
         body = resp.json()
