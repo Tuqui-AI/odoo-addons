@@ -4,6 +4,7 @@ import json
 
 from odoo import fields
 from odoo.tests import HttpCase, TransactionCase, tagged
+from odoo.tools import mute_logger
 
 
 @tagged("post_install", "-at_install", "tuqui")
@@ -199,6 +200,9 @@ class TestTuquiActivationExchange(HttpCase):
         _activate("secret-2")
         self.assertEqual(client.state, "active", "exchange must re-activate from 'disconnected', not only 'pending'")
 
+    # The 'active' branch raises UserError, which the http framework logs at
+    # WARNING (odoo.http) — expected here, muted so it doesn't redden runbot.
+    @mute_logger("odoo.http")
     def test_start_rejects_only_active(self):
         """/start is allowed from 'pending' and 'disconnected'; only a live
         'active' connection is rejected. Authenticated admin GET → 302 redirect
