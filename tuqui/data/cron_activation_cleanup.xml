@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+    <!--
+        Daily housekeeping job for tuqui.activation.nonce rows past their
+        retention window. Not a security control — the plaintext secret is
+        already NULL'd on consume / wiped by TTL — this just bounds the
+        table size so it doesn't grow unbounded with stale nonces.
+    -->
+    <record id="ir_cron_tuqui_activation_nonce_gc" model="ir.cron">
+        <field name="name">Tuqui: garbage-collect old activation nonces</field>
+        <field name="model_id" ref="model_tuqui_activation_nonce"/>
+        <field name="state">code</field>
+        <field name="code">model._gc_old_nonces()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active">True</field>
+    </record>
+
+</odoo>
