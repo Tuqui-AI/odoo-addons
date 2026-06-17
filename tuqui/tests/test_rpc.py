@@ -170,7 +170,10 @@ class TestTuquiRpcGateway(HttpCase):
     # ─── Read-only mode ──────────────────────────────────────────────
 
     def test_read_only_mode_blocks_writes_and_executes_but_allows_reads(self):
-        """read_only=True: create/execute are refused; search_read still passes."""
+        """read_only=True: create/execute are refused; reads still pass —
+        including ``formatted_read_group``, which doesn't match the search/read
+        prefix and would be misclassified as ``execute`` without the explicit
+        entry in ``_READ_METHODS``."""
         self.client.write({"read_only": True})
 
         # write blocked
@@ -181,8 +184,17 @@ class TestTuquiRpcGateway(HttpCase):
         resp = self._rpc("res.partner", "action_archive", args=[[1]], expect_status=403)
         self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
 
-        # read still works
+        # plain read works
         resp = self._rpc("res.partner", "search_read", args=[[]], kwargs={"limit": 1}, expect_status=200)
+        self.assertTrue(resp.json()["ok"])
+
+        # grouped read works too — formatted_read_group is a read, not an execute
+        resp = self._rpc(
+            "res.partner",
+            "formatted_read_group",
+            args=[[], ["is_company"], ["__count"]],
+            expect_status=200,
+        )
         self.assertTrue(resp.json()["ok"])
 
     def test_read_only_mode_still_hard_blocks_private_and_escape_hatches(self):
