@@ -76,16 +76,19 @@ class ResConfigSettings(models.TransientModel):
     # ---------- Actions (thin proxies to the singletons) ----------
 
     def action_tuqui_activate(self):
-        """Open the activation route in a new tab — it mints the nonce +
-        secret and redirects on to the Tuqui frontend. Works from both
-        'pending' and 'disconnected' (the route itself rejects 'active').
+        """Navigate to the activation route in the same tab — it mints the
+        nonce + secret, captures the Settings page URL from the Referer
+        header, and redirects on to the Tuqui frontend with a return_url so
+        the browser lands back here once the handshake completes. Works from
+        both 'pending' and 'disconnected' (the route itself rejects 'active').
 
-        New tab so the admin keeps the Odoo settings open behind the
-        activation flow instead of navigating away from the database."""
+        Same tab so Tuqui can redirect the admin back to this exact Settings
+        page after activation and the connected state is visible without a
+        manual reload."""
         return {
             "type": "ir.actions.act_url",
             "url": "/tuqui/activation/start",
-            "target": "new",
+            "target": "self",
         }
 
     def action_tuqui_open_workspace(self):

@@ -78,6 +78,14 @@ class TestTuquiActivationExchange(HttpCase):
         cls.env["tuqui.oauth.client"].sudo()._get_or_create_singleton()
         cls.env["tuqui.oauth.client"].sudo()._get_singleton().write({"state": "pending"})
 
+    def setUp(self):
+        super().setUp()
+        # Each test starts from a clean singleton — HttpCase rolls back only at
+        # class teardown, so writes would otherwise leak between tests.
+        self.env["tuqui.oauth.client"].sudo()._get_singleton().write(
+            {"state": "pending", "workspace_id_external": False}
+        )
+
     def _db_headers(self):
         return {"X-Odoo-Database": self.env.cr.dbname}
 
@@ -124,6 +132,54 @@ class TestTuquiActivationExchange(HttpCase):
         self.assertFalse(row.client_secret_plaintext)
         oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         oauth_client.invalidate_recordset()
+        self.assertEqual(oauth_client.state, "active")
+
+    def test_exchange_with_workspace_slug_stores_it(self):
+        """When Tuqui sends workspace_slug the field is persisted and
+        action_open_tuqui builds a direct /w/<slug> deep-link."""
+        client_id = self.env["tuqui.oauth.client"].sudo()._get_singleton().client_id
+        nonce, _ = (
+            self.env["tuqui.activation.nonce"]
+            .sudo()
+            ._issue(
+                client_id=client_id,
+                client_secret_plaintext="plain-secret-slug-test",
+                acting_user_login="admin",
+            )
+        )
+
+        self._post_exchange({"nonce": nonce, "workspace_slug": "my-workspace"}, expect_status=200)
+
+        oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        oauth_client.invalidate_recordset()
+        self.assertEqual(oauth_client.workspace_id_external, "my-workspace")
+        self.assertEqual(oauth_client.state, "active")
+
+        # action_open_tuqui must build <base>/w/my-workspace, not the bare base.
+        action = oauth_client.action_open_tuqui()
+        self.assertEqual(action["type"], "ir.actions.act_url")
+        self.assertIn("/w/my-workspace", action["url"])
+
+    def test_exchange_without_workspace_slug_leaves_field_empty(self):
+        """An exchange body that omits workspace_slug (backward-compat: older
+        Tuqui) must not crash and must leave workspace_id_external unset."""
+        client_id = self.env["tuqui.oauth.client"].sudo()._get_singleton().client_id
+        nonce, _ = (
+            self.env["tuqui.activation.nonce"]
+            .sudo()
+            ._issue(
+                client_id=client_id,
+                client_secret_plaintext="plain-secret-no-slug",
+                acting_user_login="admin",
+            )
+        )
+
+        resp = self._post_exchange({"nonce": nonce}, expect_status=200)
+        self.assertEqual(resp.status_code, 200, resp.text)
+
+        oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        oauth_client.invalidate_recordset()
+        self.assertFalse(oauth_client.workspace_id_external)
         self.assertEqual(oauth_client.state, "active")
 
     def test_exchange_rejects_replayed_nonce(self):
@@ -261,4 +317,42 @@ class TestTuquiActivationExchange(HttpCase):
             hash_after_first,
             hash_after_second,
             "the client_secret must not rotate while a valid nonce is outstanding",
+        )
+
+    def test_start_roundtrips_same_origin_referer_as_return_url(self):
+        """/start captures the Settings page URL from the Referer header and
+        forwards it to Tuqui as return_url so the admin lands back on Settings
+        after activation — but only when the Referer shares this Odoo's
+        (companion_url) origin. A cross-origin Referer is dropped so it can't be
+        abused as an open redirect."""
+        self.authenticate("admin", "admin")
+        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        client.write({"state": "pending"})
+
+        def _start(referer=None):
+            headers = self._db_headers()
+            if referer is not None:
+                headers = {**headers, "Referer": referer}
+            resp = self.url_open("/tuqui/activation/start", allow_redirects=False, headers=headers)
+            self.assertEqual(resp.status_code, 302, resp.text)
+            query = urllib.parse.urlparse(resp.headers["Location"]).query
+            return urllib.parse.parse_qs(query)
+
+        # Baseline call tells us this Odoo's own origin (host_url).
+        own = urllib.parse.urlparse(_start()["companion_url"][0])
+        own_origin = f"{own.scheme}://{own.netloc}"
+
+        # Same-origin Referer → forwarded verbatim as return_url.
+        settings_url = f"{own_origin}/odoo/settings"
+        self.assertEqual(
+            _start(settings_url).get("return_url", [None])[0],
+            settings_url,
+            "a same-origin Referer must be forwarded as return_url",
+        )
+
+        # Cross-origin Referer → dropped (open-redirect guard).
+        self.assertNotIn(
+            "return_url",
+            _start("https://evil.example.com/phish"),
+            "a cross-origin Referer must never become return_url",
         )
