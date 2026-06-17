@@ -42,7 +42,21 @@ def _is_absolutely_blocked(method: str) -> bool:
 # actions land in `execute` and only get bouncing by explicit rules.
 
 _WRITE_METHODS = frozenset({"create", "write", "unlink", "copy", "name_create"})
-_READ_METHODS = frozenset({"name_search", "name_get", "fields_get", "default_get", "models_list", "model_list"})
+# Reads that don't begin with the search/read prefix must be listed explicitly.
+# ``formatted_read_group`` is the Odoo 19 grouped read (what CompanionTransport
+# sends for ``odoo_read_group``); without it here it falls through to ``execute``
+# and gets wrongly refused on a read_only connection.
+_READ_METHODS = frozenset(
+    {
+        "name_search",
+        "name_get",
+        "fields_get",
+        "default_get",
+        "models_list",
+        "model_list",
+        "formatted_read_group",
+    }
+)
 _READ_PREFIXES = ("search", "read")
 
 
