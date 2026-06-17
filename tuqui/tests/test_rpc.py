@@ -1,6 +1,7 @@
 import json
 import secrets
 
+from odoo.addons.tuqui.controllers.rpc import _classify
 from odoo.tests import HttpCase, tagged
 from odoo.tools import mute_logger
 
@@ -204,6 +205,19 @@ class TestTuquiRpcGateway(HttpCase):
         self.assertEqual(resp.json()["error"]["code"], "private_method_blocked")
         resp = self._rpc("res.partner", "sudo", args=[], expect_status=403)
         self.assertEqual(resp.json()["error"]["code"], "method_blocked")
+
+    def test_classify_covers_companion_transport_surface(self):
+        """Contract guard: every typed method CompanionTransport posts to
+        /tuqui/rpc must classify as intended. Mirror of
+        tuqui_core/integrations/odoo/transports/companion.py — when its method
+        surface changes, update this list and _READ_METHODS/_WRITE_METHODS
+        together. A read that slips to 'execute' is refused on read_only."""
+        reads = ("search_read", "read", "read_group", "formatted_read_group", "search_count", "fields_get")
+        writes = ("create", "write", "unlink", "copy")
+        for method in reads:
+            self.assertEqual(_classify(method), "read", f"{method} must classify as a read")
+        for method in writes:
+            self.assertEqual(_classify(method), "write", f"{method} must classify as a write")
 
     # ─── Perimeter ───────────────────────────────────────────────────
 
