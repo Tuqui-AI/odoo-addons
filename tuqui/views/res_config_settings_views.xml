@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="res_config_settings_view_form" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.tuqui</field>
+        <field name="model">res.config.settings</field>
+        <field name="priority" eval="70"/>
+        <field name="inherit_id" ref="base_setup.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//block[@name='integration']" position="inside">
+                <setting id="tuqui" string="Tuqui"
+                         documentation="https://tuqui.com"
+                         help="Connect this database to Tuqui, the AI assistant for Odoo. One-click activation; every call Tuqui makes runs with the acting user's own permissions and is recorded in the access log.">
+                    <field name="tuqui_state" invisible="1"/>
+
+                    <!-- Not connected: a single call to action -->
+                    <div invisible="tuqui_state == 'active'">
+                        <button name="action_tuqui_activate" type="object"
+                                string="Activate Tuqui" class="btn-primary"/>
+                    </div>
+
+                    <!-- Connected: status + links + lifecycle actions -->
+                    <div invisible="tuqui_state != 'active'">
+                        <field name="tuqui_access_count_7d" invisible="1"/>
+                        <div class="d-flex align-items-center flex-wrap gap-2">
+                            <span class="badge text-bg-success">Connected</span>
+                            <span class="text-muted">·</span>
+                            <span class="text-muted">Last activity:</span>
+                            <field name="tuqui_last_seen_at" readonly="1" class="oe_inline"/>
+                        </div>
+                        <div class="text-muted small mt-1">
+                            <field name="tuqui_access_summary" readonly="1" class="oe_inline"/>
+                        </div>
+                        <div class="d-flex flex-wrap gap-3 mt-2">
+                            <button name="action_tuqui_open_workspace" type="object"
+                                    string="Go to Tuqui" icon="fa-external-link"
+                                    class="btn-link p-0"/>
+                            <button name="action_tuqui_open_access_log" type="object"
+                                    string="View access log" icon="fa-list-ul"
+                                    class="btn-link p-0"/>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 mt-3">
+                            <button name="action_tuqui_rotate_secret" type="object"
+                                    string="Rotate secret" class="btn-secondary btn-sm"
+                                    confirm="Rotating the secret will invalidate Tuqui's current session. You will need to paste the new secret into Tuqui. Continue?"/>
+                            <button name="action_tuqui_disconnect" type="object"
+                                    string="Disconnect" class="btn-link btn-sm text-danger"
+                                    confirm="Disconnect this Odoo from Tuqui? Tuqui will lose access until you re-activate."/>
+                        </div>
+                    </div>
+
+                    <!-- Security: optional read-only lock (only meaningful once connected) -->
+                    <div invisible="tuqui_state != 'active'" class="mt16">
+                        <span class="o_form_label fw-bold d-block mb-1">Security</span>
+                        <div class="d-flex align-items-center">
+                            <field name="tuqui_read_only" widget="boolean_toggle" class="oe_inline"/>
+                            <label for="tuqui_read_only" string="Read-only mode" class="ms-2 mb-0"/>
+                        </div>
+                        <div class="text-muted small mt-1">
+                            When on, Tuqui can read but never create, update, delete or run methods.
+                            Reads still follow each user's own Odoo permissions.
+                        </div>
+                    </div>
+                </setting>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+    <record id="param_access_log_max_rows" model="ir.config_parameter">
+        <field name="key">tuqui.access_log.max_rows</field>
+        <field name="value">10000</field>
+    </record>
+
+    <!--
+        No seed record for the Tuqui base URL: the production default lives
+        hardcoded in tuqui.oauth.client._TUQUI_BASE_URL and is read via
+        get_param(key, DEFAULT), so the param only needs to exist when a
+        dev/staging environment overrides it (e.g. set tuqui.base_url to
+        http://localhost:5173). The activation redirect URL is derived from
+        it (<base_url>/activate) — one source of truth, not two params.
+    -->
+
+</odoo>

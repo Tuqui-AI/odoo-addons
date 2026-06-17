@@ -1,0 +1,64 @@
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <h2 class="oe_slogan">Tuqui — Companion module for Odoo</h2>
+        <h3 class="oe_slogan">Connect your Odoo to Tuqui in one click.</h3>
+    </div>
+</section>
+
+<section class="oe_container oe_dark">
+    <div class="oe_row oe_spaced">
+        <h2 class="oe_slogan">OAuth 2.0 client credentials</h2>
+        <div class="oe_span6">
+            <p class="oe_mt32">
+                Replaces per-user API keys with a single workspace-level
+                <code>client_id</code> / <code>client_secret</code> pair that can be
+                rotated or revoked at any time. After installation, an admin
+                (<code>base.group_system</code>) can activate Tuqui from the
+                <strong>Tuqui</strong> menu and the workspace becomes reachable from
+                claude.ai, ChatGPT, or any MCP-compatible client.
+            </p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <h2 class="oe_slogan">Generic RPC gateway with local policy engine</h2>
+        <div class="oe_span12">
+            <p>
+                A single <code>/tuqui/rpc</code> endpoint exposes Odoo's ORM via
+                <code>execute_kw</code>-style calls. Permission is decided by a local
+                policy engine, never by a hardcoded allowlist — so new Tuqui
+                capabilities don't require shipping a new module version to clients.
+            </p>
+            <ul>
+                <li><strong>Default mode</strong>: hardcoded behaviour, no rules
+                    consulted. Private methods always blocked; absolute blocks
+                    (<code>sudo</code>, <code>with_user</code>/<code>env</code>/<code>company</code>,
+                    <code>flush*</code>/<code>invalidate*</code>, Python dunders) apply
+                    universally. Reads/writes/executes go through the acting user's
+                    Odoo ACL.</li>
+                <li><strong>Advanced mode</strong>: allow / deny rules with
+                    <code>fnmatch</code> globs. Deny wins. For private methods, an
+                    exact allow rule is required (wildcards rejected at save).</li>
+                <li><strong>Read-only preset</strong>: one-click button that adds the
+                    deny rules needed to lock the connection down to reads only.</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container oe_dark">
+    <div class="oe_row oe_spaced">
+        <h2 class="oe_slogan">Access log</h2>
+        <div class="oe_span12">
+            <p>
+                Every call is recorded in <code>tuqui.access.log</code> with separate
+                policy and runtime axes — making audit queries unambiguous about
+                whether a call was blocked by policy, denied by Odoo's ACL, or failed
+                at runtime. Capped by row count so the table stays bounded without
+                coupling to a time-based retention.
+            </p>
+        </div>
+    </div>
+</section>
