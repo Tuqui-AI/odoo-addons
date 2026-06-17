@@ -3,7 +3,7 @@ import logging
 import time
 from collections.abc import Mapping
 
-from odoo import http
+from odoo import SUPERUSER_ID, http
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.http import Response, request
 from odoo.models import BaseModel
@@ -82,23 +82,34 @@ def _classify(method: str) -> str:
 # ─── Policy gate ─────────────────────────────────────────────────────
 
 
-def _evaluate_policy(read_only: bool, method: str, op_type: str):
+def _evaluate_policy(read_only: bool, method: str, op_type: str, *, is_connection: bool):
     """Return ``(allowed, denied_reason)``.
 
     ``allowed=True`` means the call may proceed to the ORM (where the acting
-    user's own Odoo ACL is the real per-call check). ``denied_reason`` is set
-    only when ``allowed=False``. Three gates, in order:
+    user's own Odoo ACL is the real per-call check on the member path).
+    ``denied_reason`` is set only when ``allowed=False``. Gates, in order:
 
     1. Absolute blocks — ``sudo`` / ``with_*`` / ``flush*`` / ``invalidate*``
        and dunders bypass or sidestep the ACL; blocked unconditionally.
     2. Private (``_``-prefixed) methods — internal ORM surface, never exposed.
-    3. Read-only mode — when the connection is flagged read-only, anything
-       that can mutate (``write`` / ``execute``) is refused; reads pass.
+    3. Connection path (``is_connection=True``): runs as SUPERUSER with no
+       record rules, so it is locked to reads UNCONDITIONALLY — anything that
+       can mutate is refused with ``connection_read_only`` regardless of the
+       ``read_only`` flag. Keeps the blast radius of a stolen token to
+       read-only even on workspace-level/system traffic.
+    4. Member path: when the connection is flagged ``read_only``, anything that
+       can mutate (``write`` / ``execute``) is refused; reads pass.
     """
     if _is_absolutely_blocked(method):
         return False, "method_blocked"
     if op_type == "private_execute":
         return False, "private_method_blocked"
+    if is_connection:
+        # Only read-classified ops may run as superuser. Anything else
+        # (write / execute) is refused here — sudo must never mutate.
+        if op_type != "read":
+            return False, "connection_read_only"
+        return True, None
     if read_only and op_type in ("write", "execute"):
         return False, "read_only_mode"
     return True, None
@@ -193,33 +204,38 @@ def _bearer_token():
     return auth[7:].strip()
 
 
-def _resolve_acting_user(env, *, uid="", login=""):
-    """Resolve the Odoo user every ORM call will impersonate.
+def _resolve_acting_member(env, uid):
+    """Resolve + vet the workspace member a member-path ORM call impersonates.
 
-    Tuqui sends one of two headers:
+    The only acting header is ``X-Tuqui-Acting-Uid`` — the stable per-member
+    Odoo user id. The call runs under that member's own ACL via
+    ``with_user(member)`` so companion behaves like the native per-user
+    JSON-RPC path.
 
-    - ``X-Tuqui-Acting-Uid`` — the stable per-member Odoo user id. Sent for
-      a workspace member's own calls so companion behaves like the native
-      per-user JSON-RPC path (each call runs under that member's ACL).
-    - ``X-Tuqui-Acting-User`` — a ``res.users.login``. Used for the
-      connection's acting user (the admin captured at activation) on
-      workspace-level operations that have no per-member identity.
+    Returns ``(member, denied_reason)``:
 
-    The uid wins when present; we never silently fall back to the connection
-    login if a provided uid doesn't resolve (that would re-introduce the
-    privilege the per-user model removes). Lookup by login (not email —
-    emails duplicate in some instances).
+    - ``(<active internal user>, None)`` when the uid vets clean.
+    - ``(env['res.users'], 'forbidden_acting_user')`` when the uid is the
+      superuser, a share (portal/public) user, or doesn't resolve to an
+      active user. We never widen privilege: an unparseable/unknown uid is a
+      refusal, not a silent fallback to the connection identity.
     """
-    Users = env["res.users"].sudo()
-    if uid:
-        try:
-            uid_int = int(uid)
-        except ValueError:
-            return env["res.users"]
-        return Users.search([("id", "=", uid_int), ("active", "=", True)], limit=1)
-    if login:
-        return Users.search([("login", "=", login), ("active", "=", True)], limit=1)
-    return env["res.users"]
+    empty = env["res.users"]
+    try:
+        uid_int = int(uid)
+    except (TypeError, ValueError):
+        return empty, "forbidden_acting_user"
+    # SUPERUSER_ID would bypass every record rule — never impersonable.
+    if uid_int == SUPERUSER_ID:
+        return empty, "forbidden_acting_user"
+    member = env["res.users"].sudo().search([("id", "=", uid_int), ("active", "=", True)], limit=1)
+    if not member:
+        return empty, "forbidden_acting_user"
+    # share == True is a portal/public user — not an internal member; refuse
+    # so the per-member path only ever runs as a real workspace member.
+    if member.share:
+        return empty, "forbidden_acting_user"
+    return member, None
 
 
 def _result_count(result, method: str) -> int:
@@ -279,7 +295,7 @@ def _log(
 
 # Policy-deny reasons that should surface as HTTP 403. Anything else
 # from the gate (currently nothing) would surface as 400.
-_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "read_only_mode"})
+_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "read_only_mode", "connection_read_only"})
 
 
 class TuquiRpc(http.Controller):
@@ -297,20 +313,29 @@ class TuquiRpc(http.Controller):
 
     There is no hardcoded allowlist of operations — Odoo's own ACL (via the
     acting user) is the authorization model, so adding new capabilities to
-    Tuqui doesn't require shipping a new module version to clients. Defense
-    in depth, in order:
+    Tuqui doesn't require shipping a new module version to clients. Two
+    request paths, picked by the presence of ``X-Tuqui-Acting-Uid``:
+
+    * MEMBER PATH — request carries ``X-Tuqui-Acting-Uid`` (a workspace
+      member's res.users id). The call runs through ``with_user(member)`` so
+      Odoo's ACL is the per-call privilege check — identical to the native
+      per-user path. The uid is vetted first: superuser, share/portal users
+      and unknown/inactive ids are refused (``forbidden_acting_user``).
+      Writes here stay governed by the connection's ``read_only`` flag.
+
+    * CONNECTION PATH — request has NO acting uid (workspace-level / system
+      traffic). The call runs as SUPERUSER (``sudo()``). Because sudo bypasses
+      record rules, this path is locked to reads UNCONDITIONALLY: any write /
+      execute / private / blocked op is refused (``connection_read_only``),
+      independent of the ``read_only`` flag. A stolen token can therefore only
+      ever read on this path.
+
+    Defense in depth, applied to both paths:
 
     1. OAuth ``client_credentials`` bearer (verified upstream).
-    2. Acting user → ``X-Tuqui-Acting-Uid`` (per-member Odoo user id, the
-       common case) or ``X-Tuqui-Acting-User`` (a ``res.users.login``, for
-       the connection's acting user on workspace-level ops). Every ORM call
-       then runs through ``with_user(acting_user)`` so Odoo's ACL is the
-       per-call privilege check — identical to the native per-user path.
-    3. Absolute blocks on ``sudo`` / ``with_*`` / ``flush*`` /
-       ``invalidate*`` — escape hatches that bypass ACL.
-    4. Private (``_``-prefixed) methods are always refused; an optional
-       per-connection ``read_only`` flag additionally refuses writes and
-       method execution.
+    2. Absolute blocks on ``sudo`` / ``with_*`` / ``flush*`` /
+       ``invalidate*`` and dunders — escape hatches that bypass ACL.
+    3. Private (``_``-prefixed) methods are always refused.
     """
 
     @http.route(
@@ -361,34 +386,39 @@ class TuquiRpc(http.Controller):
         operation_type = _classify(method)
 
         # ─── Acting user ───────────────────────────────────────────────────
+        # Presence of the acting-uid header picks the path:
+        #   * MEMBER PATH (uid present) → resolve + vet the member, run with_user.
+        #   * CONNECTION PATH (no uid)  → run as superuser, locked to reads.
         acting_uid = request.httprequest.headers.get("X-Tuqui-Acting-Uid") or ""
-        acting_login = request.httprequest.headers.get("X-Tuqui-Acting-User") or ""
-        acting_user = _resolve_acting_user(env, uid=acting_uid, login=acting_login)
-        if not acting_user:
-            _log(
-                env,
-                method=method,
-                model_name=model_name,
-                operation_type=operation_type,
-                acting_user=None,
-                policy_allowed=False,
-                policy_denied_reason=None,
-                success=False,
-                error_code="unknown_acting_user",
-                duration_ms=0,
-                result_count=0,
-            )
-            identifier = f"uid={acting_uid!r}" if acting_uid else f"login={acting_login!r}"
-            return _error(
-                "unknown_acting_user",
-                f"Unknown acting user ({identifier})",
-                status=400,
-            )
+        is_connection = not acting_uid
+        if is_connection:
+            acting_user = None
+        else:
+            acting_user, acting_denied = _resolve_acting_member(env, acting_uid)
+            if acting_denied:
+                _log(
+                    env,
+                    method=method,
+                    model_name=model_name,
+                    operation_type=operation_type,
+                    acting_user=None,
+                    policy_allowed=False,
+                    policy_denied_reason=acting_denied,
+                    success=False,
+                    error_code=None,
+                    duration_ms=0,
+                    result_count=0,
+                )
+                return _error(
+                    acting_denied,
+                    f"Acting user refused (uid={acting_uid!r})",
+                    status=403,
+                )
 
         # ─── Policy gate ───────────────────────────────────────────────────
         client = env["tuqui.oauth.client"].sudo()._get_singleton()
         read_only = bool(client.read_only) if client else False
-        allowed, denied_reason = _evaluate_policy(read_only, method, operation_type)
+        allowed, denied_reason = _evaluate_policy(read_only, method, operation_type, is_connection=is_connection)
         if not allowed:
             _log(
                 env,
@@ -423,7 +453,12 @@ class TuquiRpc(http.Controller):
             )
             return _error("validation_error", f"Unknown model: {model_name!r}", status=400)
 
-        recordset = env[model_name].with_user(acting_user)
+        # Member path runs under the member's ACL; connection path runs as
+        # SUPERUSER (already gated read-only above).
+        if is_connection:
+            recordset = env[model_name].sudo()
+        else:
+            recordset = env[model_name].with_user(acting_user)
         if context:
             recordset = recordset.with_context(**context)
 

@@ -35,18 +35,19 @@ class TestTuquiResConfigSettings(TransactionCase):
 
     def test_read_only_roundtrip(self):
         client = self.OAuth._get_or_create_singleton()[0]
-        self.assertFalse(client.read_only)
-
-        settings = self._settings()
-        settings.tuqui_read_only = True
-        settings.set_values()
+        # read_only now defaults ON; the round-trip toggles it off and back on.
         self.assertTrue(client.read_only)
 
-        # And back off.
         settings = self._settings()
         settings.tuqui_read_only = False
         settings.set_values()
         self.assertFalse(client.read_only)
+
+        # And back on.
+        settings = self._settings()
+        settings.tuqui_read_only = True
+        settings.set_values()
+        self.assertTrue(client.read_only)
 
     def test_get_values_reads_read_only_from_singleton(self):
         client = self.OAuth._get_or_create_singleton()[0]

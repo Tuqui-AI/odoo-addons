@@ -68,7 +68,11 @@ class TestTuquiDisconnect(HttpCase):
         return resp
 
     def _rpc_with_token(self, token):
-        """A minimal read through the gateway, authenticated by ``token``."""
+        """A minimal read through the gateway, authenticated by ``token``.
+
+        No acting-uid header → connection path (superuser, read-only); a plain
+        search_read is a read so it passes when the token is valid.
+        """
         return self.url_open(
             "/tuqui/rpc",
             data=json.dumps(
@@ -83,7 +87,6 @@ class TestTuquiDisconnect(HttpCase):
                 **self._db_headers(),
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                "X-Tuqui-Acting-User": "admin",
             },
         )
 

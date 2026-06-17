@@ -35,7 +35,11 @@ class TuquiAccessLog(models.Model):
         "res.users",
         ondelete="set null",
         index=True,
-        help="The Odoo user resolved from the X-Tuqui-Acting-User header.",
+        help=(
+            "The Odoo member resolved from the X-Tuqui-Acting-Uid header "
+            "(member path). Empty on the connection path, which runs as "
+            "superuser with no per-member identity."
+        ),
     )
     model_name = fields.Char(string="Model", index=True)
     method = fields.Char(required=True, index=True)
@@ -61,8 +65,8 @@ class TuquiAccessLog(models.Model):
     policy_denied_reason = fields.Char(
         help=(
             "Why the policy gate blocked the call. One of: method_blocked, "
-            "private_method_blocked, deny_rule_matched, no_allow_rule. "
-            "Empty when policy_allowed is True."
+            "private_method_blocked, read_only_mode, connection_read_only, "
+            "forbidden_acting_user. Empty when policy_allowed is True."
         ),
     )
 
@@ -75,7 +79,7 @@ class TuquiAccessLog(models.Model):
     error_code = fields.Char(
         help=(
             "Error classification when success is False. One of: "
-            "access_denied, validation_error, internal_error, timeout. "
+            "access_denied, validation_error, internal_error. "
             "Empty when success is True."
         ),
     )

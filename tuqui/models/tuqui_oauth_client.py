@@ -50,13 +50,15 @@ class TuquiOAuthClient(models.Model):
         help="Total RPC calls logged in tuqui.access.log during the last 7 days.",
     )
     read_only = fields.Boolean(
-        default=False,
+        default=True,
         help=(
-            "When enabled, /tuqui/rpc refuses every mutating call (create, "
-            "write, unlink, copy and arbitrary method execution); only reads "
-            "pass. Reads still run with the acting user's own Odoo permissions. "
-            "The hardcoded escape-hatch and private-method blocks apply "
-            "regardless of this flag."
+            "Default ON. When enabled, the per-member path of /tuqui/rpc "
+            "refuses every mutating call (create, write, unlink, copy and "
+            "arbitrary method execution); only reads pass. Reads still run "
+            "with the acting user's own Odoo permissions. NOTE: the connection "
+            "(workspace-level) path always runs as superuser and is ALWAYS "
+            "read-only regardless of this flag. The hardcoded escape-hatch and "
+            "private-method blocks apply regardless of this flag."
         ),
     )
 

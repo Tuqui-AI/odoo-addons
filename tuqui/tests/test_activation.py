@@ -1,6 +1,7 @@
 """Tests for the activation handoff: nonce model, /exchange endpoint, gc cron."""
 
 import json
+import urllib.parse
 
 from odoo import fields
 from odoo.tests import HttpCase, TransactionCase, tagged
@@ -219,3 +220,45 @@ class TestTuquiActivationExchange(HttpCase):
         client.write({"state": "active"})
         resp = self.url_open("/tuqui/activation/start", allow_redirects=False, headers=self._db_headers())
         self.assertNotEqual(resp.status_code, 302, "an 'active' link must not re-activate")
+
+    def test_start_sets_no_referrer_header(self):
+        """The 302 redirect must carry Referrer-Policy: no-referrer so the nonce
+        in the URL never leaks via the Referer header to the Tuqui frontend."""
+        self.authenticate("admin", "admin")
+        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        client.write({"state": "pending"})
+        resp = self.url_open("/tuqui/activation/start", allow_redirects=False, headers=self._db_headers())
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.headers.get("Referrer-Policy"), "no-referrer")
+
+    def test_start_reuses_unconsumed_nonce_without_rotating_secret(self):
+        """Two /start calls in a row must reuse the still-valid nonce and leave
+        the client_secret hash untouched — rotating on every click would break a
+        double-clicked or refreshed handshake mid-flight."""
+        self.authenticate("admin", "admin")
+        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        client.write({"state": "pending"})
+
+        def _start_nonce():
+            resp = self.url_open("/tuqui/activation/start", allow_redirects=False, headers=self._db_headers())
+            self.assertEqual(resp.status_code, 302, resp.text)
+            location = resp.headers["Location"]
+            query = urllib.parse.urlparse(location).query
+            return urllib.parse.parse_qs(query)["nonce"][0]
+
+        # First call mints a nonce and (since none existed) rotates the secret.
+        nonce_1 = _start_nonce()
+        client.invalidate_recordset()
+        hash_after_first = client.client_secret_hash
+
+        # Second call must REUSE the same nonce and NOT rotate the secret again.
+        nonce_2 = _start_nonce()
+        client.invalidate_recordset()
+        hash_after_second = client.client_secret_hash
+
+        self.assertEqual(nonce_1, nonce_2, "an unconsumed, unexpired nonce must be reused, not re-minted")
+        self.assertEqual(
+            hash_after_first,
+            hash_after_second,
+            "the client_secret must not rotate while a valid nonce is outstanding",
+        )
