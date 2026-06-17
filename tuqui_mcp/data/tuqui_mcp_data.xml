@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+    <record id="param_tuqui_website" model="ir.config_parameter">
+        <field name="key">tuqui.website</field>
+        <field name="value">https://tuqui.com</field>
+    </record>
+
+    <record id="param_tuqui_mcp_endpoint" model="ir.config_parameter">
+        <field name="key">tuqui.mcp_endpoint</field>
+        <field name="value">https://tuqui.com/mcp</field>
+    </record>
+
+</odoo>
