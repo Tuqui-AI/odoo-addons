@@ -68,7 +68,9 @@ class TestTuquiResConfigSettings(TransactionCase):
         action = settings.action_tuqui_activate()
         self.assertEqual(action["type"], "ir.actions.act_url")
         self.assertEqual(action["url"], "/tuqui/activation/start")
-        self.assertEqual(action["target"], "new")
+        # Same tab so the start route can capture the Settings Referer and
+        # Tuqui can redirect the admin back here after activation.
+        self.assertEqual(action["target"], "self")
 
     def test_open_access_log_action_resolves(self):
         settings = self._settings()

@@ -110,6 +110,25 @@ class TuquiActivation(http.Controller):
         instance_name = env.company.name
         if instance_name:
             params["instance_name"] = instance_name
+
+        # Capture the Settings page URL from the Referer header so Tuqui can
+        # redirect the admin back after a successful activation — the settings
+        # page then reloads and shows the connected state without a manual F5.
+        # We read the raw Referer before we overwrite Referrer-Policy on the
+        # outgoing 302, so this is the page the admin was on, not the /start URL.
+        # Graceful fallback: if Referer is absent or doesn't belong to this
+        # Odoo origin (e.g. triggered programmatically), we omit return_url
+        # and Tuqui falls back to its default in-app navigate — never breaks.
+        referrer = request.httprequest.referrer or ""
+        if referrer:
+            try:
+                ref = urllib.parse.urlparse(referrer)
+                own = urllib.parse.urlparse(companion_url)
+                if (ref.scheme, ref.netloc) == (own.scheme, own.netloc):
+                    params["return_url"] = referrer
+            except ValueError:
+                pass  # Malformed referrer — omit return_url silently
+
         query = urllib.parse.urlencode(params)
         redirect_to = f"{frontend_url}?{query}"
 
@@ -173,6 +192,12 @@ class TuquiActivation(http.Controller):
         if not nonce:
             return _json_error("bad_request", "Missing 'nonce'", status=400)
 
+        # workspace_slug is optional — older Tuqui versions that don't send it
+        # are tolerated; mark_active() falls back gracefully when it's absent.
+        workspace_slug = body.get("workspace_slug")
+        if not isinstance(workspace_slug, str) or not workspace_slug:
+            workspace_slug = None
+
         row = env["tuqui.activation.nonce"].sudo().search([("nonce", "=", nonce)], limit=1)
         if not row:
             return _json_error("not_found", "Unknown activation nonce", status=404)
@@ -197,7 +222,7 @@ class TuquiActivation(http.Controller):
         # showing "not connected" while Tuqui works fine. mark_active is idempotent.
         oauth_client = env["tuqui.oauth.client"].sudo()._get_singleton()
         if oauth_client:
-            oauth_client.mark_active()
+            oauth_client.mark_active(workspace_id_external=workspace_slug)
 
         companion_url = request.httprequest.host_url.rstrip("/")
         payload = {
