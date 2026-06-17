@@ -59,9 +59,11 @@ class TuquiActivation(http.Controller):
         if oauth_client and oauth_client.state == "active":
             raise UserError(_("Tuqui is already activated. Disconnect first to re-activate."))
 
-        # Lazy-create the singleton on first activation.
+        # Lazy-create the singleton on first activation; keep the freshly minted
+        # secret so we reuse it below instead of rotating it again right away.
+        created_secret = None
         if not oauth_client:
-            oauth_client, _plain_secret = env["tuqui.oauth.client"].sudo()._get_or_create_singleton()
+            oauth_client, created_secret = env["tuqui.oauth.client"].sudo()._get_or_create_singleton()
 
         # Idempotent /start: if a still-valid, unconsumed nonce already exists
         # for this client, reuse it (same nonce) instead of rotating the secret
@@ -83,10 +85,10 @@ class TuquiActivation(http.Controller):
         if existing:
             nonce = existing.nonce
         else:
-            # No reusable nonce: rotate the secret so the plaintext we hand to
-            # Tuqui isn't whatever leftover value a previous abandoned attempt
-            # left behind, then mint a fresh nonce holding it.
-            plain_secret = oauth_client._rotate_secret_silent()
+            # No reusable nonce. Reuse the secret from a just-created singleton;
+            # otherwise rotate so the plaintext we hand to Tuqui isn't a leftover
+            # from an abandoned attempt. Then mint a fresh nonce holding it.
+            plain_secret = created_secret or oauth_client._rotate_secret_silent()
             nonce, _expires_at = (
                 env["tuqui.activation.nonce"]
                 .sudo()

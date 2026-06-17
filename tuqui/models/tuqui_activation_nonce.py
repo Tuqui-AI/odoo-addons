@@ -127,7 +127,7 @@ class TuquiActivationNonce(models.Model):
         """Purge nonces past the retention window.
 
         Wired to a daily ``ir.cron``. Not a security control — security
-        is the NULL on consume + the 5-minute TTL. This is housekeeping
+        is the NULL on consume + the 2-minute TTL. This is housekeeping
         to keep the table bounded.
         """
         cutoff = fields.Datetime.subtract(fields.Datetime.now(), days=_GC_RETENTION_DAYS)
