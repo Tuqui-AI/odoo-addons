@@ -1,5 +1,6 @@
 import json
 import secrets
+import time
 
 from odoo.addons.tuqui.controllers.rpc import _classify
 from odoo.tests import HttpCase, tagged
@@ -38,6 +39,7 @@ class TestTuquiRpcGateway(HttpCase):
     def setUpClass(cls):
         super().setUpClass()
         cls.client_id, cls.client_secret = _rotate_oauth_secret(cls.env)
+        cls.admin_uid = cls.env.ref("base.user_admin").id
         cls.basic_user = cls.env["res.users"].create(
             {
                 "name": "Tuqui Basic Test",
@@ -45,12 +47,21 @@ class TestTuquiRpcGateway(HttpCase):
                 "group_ids": [(6, 0, [cls.env.ref("base.group_user").id])],
             }
         )
+        # A share (portal) user — the per-member path must refuse impersonating it.
+        cls.portal_user = cls.env["res.users"].create(
+            {
+                "name": "Tuqui Portal Test",
+                "login": "tuqui_portal_test",
+                "group_ids": [(6, 0, [cls.env.ref("base.group_portal").id])],
+            }
+        )
 
     # ─── Test bookkeeping ────────────────────────────────────────────
 
     def setUp(self):
         super().setUp()
-        # Reset the connection to a known baseline: read-only off.
+        # Reset the connection to a known baseline: read-only off (the flag now
+        # defaults ON, so the member-path write tests must clear it explicitly).
         self.client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         if self.client.read_only:
             self.client.write({"read_only": False})
@@ -80,18 +91,26 @@ class TestTuquiRpcGateway(HttpCase):
         args=None,
         kwargs=None,
         context=None,
-        acting_user="admin",
-        acting_uid=None,
+        acting_uid="__admin__",
+        connection=False,
         token=None,
         body_override=None,
         expect_status=None,
     ):
         """Invoke ``/tuqui/rpc`` and return the response.
 
+        Two paths, matching the protocol:
+
+        * MEMBER PATH (default) — sends ``X-Tuqui-Acting-Uid``. ``acting_uid``
+          defaults to the admin user's id so the privileged read/write tests
+          behave like before the per-member rework. Pass an explicit id to
+          impersonate another member.
+        * CONNECTION PATH — pass ``connection=True`` to omit the acting header
+          entirely; the gateway then runs the call as superuser, locked to
+          reads.
+
         Pass ``body_override`` to send a malformed body for perimeter tests;
-        otherwise the body is built from the named params. Pass ``acting_uid``
-        to impersonate by Odoo user id (``X-Tuqui-Acting-Uid``) instead of by
-        login — the per-member path.
+        otherwise the body is built from the named params.
         """
         token = token or self._get_token()
         if body_override is not None:
@@ -109,10 +128,9 @@ class TestTuquiRpcGateway(HttpCase):
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
-        if acting_uid is not None:
-            headers["X-Tuqui-Acting-Uid"] = str(acting_uid)
-        else:
-            headers["X-Tuqui-Acting-User"] = acting_user
+        if not connection:
+            uid = self.admin_uid if acting_uid == "__admin__" else acting_uid
+            headers["X-Tuqui-Acting-Uid"] = str(uid)
         resp = self.url_open(
             "/tuqui/rpc",
             data=json.dumps(body),
@@ -261,13 +279,22 @@ class TestTuquiRpcGateway(HttpCase):
         resp = self._rpc("does.not.exist", "search_read", args=[[]], expect_status=400)
         self.assertEqual(resp.json()["error"]["code"], "validation_error")
 
-    def test_unknown_acting_user(self):
-        resp = self._rpc("res.partner", "search_read", args=[[]], acting_user="ghost", expect_status=400)
-        self.assertEqual(resp.json()["error"]["code"], "unknown_acting_user")
-
     def test_unknown_acting_uid(self):
-        resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid=99999999, expect_status=400)
-        self.assertEqual(resp.json()["error"]["code"], "unknown_acting_user")
+        resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid=99999999, expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "forbidden_acting_user")
+
+    # ─── Acting-user vetting (member path) ────────────────────────────
+
+    def test_acting_uid_superuser_is_forbidden(self):
+        """uid == SUPERUSER_ID (1) must never be impersonable — it would bypass
+        every record rule."""
+        resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid=1, expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "forbidden_acting_user")
+
+    def test_acting_uid_share_user_is_forbidden(self):
+        """A share (portal/public) user is not an internal member → refused."""
+        resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid=self.portal_user.id, expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "forbidden_acting_user")
 
     # ─── Per-member impersonation by uid ─────────────────────────────
 
@@ -290,6 +317,64 @@ class TestTuquiRpcGateway(HttpCase):
         log = self._latest_log(method="search_read", model_name="ir.config_parameter")
         self.assertEqual(log.acting_user_id.id, self.basic_user.id)
 
+    # ─── Connection path (no acting uid → superuser, read-only) ──────
+
+    def test_connection_path_read_runs_as_superuser(self):
+        """No acting uid → run as superuser. A read that even admin's own ACL
+        allows returns data; the audit row has no acting user."""
+        resp = self._rpc(
+            "ir.config_parameter",
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["key"], "limit": 1},
+            connection=True,
+            expect_status=200,
+        )
+        self.assertTrue(resp.json()["ok"])
+        log = self._latest_log(method="search_read", model_name="ir.config_parameter")
+        self.assertFalse(log.acting_user_id, "connection-path calls have no acting member")
+
+    def test_connection_path_blocks_writes_even_when_flag_off(self):
+        """The connection path is read-only UNCONDITIONALLY: a write/execute is
+        refused with connection_read_only even though read_only is False."""
+        self.assertFalse(self.client.read_only)
+        # write
+        resp = self._rpc("res.partner", "create", args=[{"name": "conn_blocked"}], connection=True, expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "connection_read_only")
+        # execute
+        resp = self._rpc("res.partner", "action_archive", args=[[1]], connection=True, expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "connection_read_only")
+        # the denial is logged on the policy axis
+        log = self._latest_log(method="action_archive")
+        self.assertFalse(log.policy_allowed)
+        self.assertEqual(log.policy_denied_reason, "connection_read_only")
+
+    # ─── Token expiry ────────────────────────────────────────────────
+
+    def test_expired_access_token_is_rejected(self):
+        """A token whose exp is in the past is refused by /tuqui/rpc with 401,
+        even though its signature still verifies.
+
+        Minted with the real ``_issue_access_token`` helper but with the clock
+        wound back past the TTL so the resulting ``exp`` is already in the past.
+        """
+        from unittest.mock import patch
+
+        from odoo.addons.tuqui.controllers import oauth as oauth_mod
+
+        backdated = int(time.time()) - oauth_mod._ACCESS_TOKEN_TTL_SECONDS - 3600
+        with patch.object(oauth_mod.time, "time", return_value=backdated):
+            expired_token = oauth_mod._issue_access_token(self.env, self.client_id)
+
+        resp = self._rpc(
+            "res.partner",
+            "search_read",
+            args=[[]],
+            token=expired_token,
+            expect_status=401,
+        )
+        self.assertEqual(resp.json()["error"]["code"], "unauthorized")
+
     # ─── Error mapping ───────────────────────────────────────────────
 
     def test_access_error_maps_to_403(self):
@@ -299,7 +384,7 @@ class TestTuquiRpcGateway(HttpCase):
             "search_read",
             args=[[]],
             kwargs={"fields": ["key"]},
-            acting_user=self.basic_user.login,
+            acting_uid=self.basic_user.id,
             expect_status=403,
         )
         self.assertEqual(resp.json()["error"]["code"], "access_denied")
@@ -360,7 +445,7 @@ class TestTuquiRpcGateway(HttpCase):
             "search_read",
             args=[[]],
             kwargs={"fields": ["key"]},
-            acting_user=self.basic_user.login,
+            acting_uid=self.basic_user.id,
             expect_status=403,
         )
         log = self._latest_log(method="search_read", model_name="ir.config_parameter")

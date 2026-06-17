@@ -5,8 +5,8 @@ from odoo.exceptions import ValidationError
 
 # How long a nonce stays redeemable once issued. Tight on purpose —
 # activation is a synchronous flow; if the admin doesn't complete it in
-# five minutes, they restart from the button.
-_NONCE_TTL_MINUTES = 5
+# two minutes, they restart from the button.
+_NONCE_TTL_MINUTES = 2
 
 # How long expired/consumed nonces are kept around before the cron purges
 # them. Not a security knob — the security is the NULL of
@@ -40,7 +40,7 @@ class TuquiActivationNonce(models.Model):
        Tuqui workspace to this Odoo instance.
 
     Plaintext-secret rationale: the column holds the secret in clear for
-    a max of 5 minutes, and only inside this module's DB (which the
+    a max of 2 minutes, and only inside this module's DB (which the
     workspace admin already controls). Encryption would add ceremony
     without changing the threat model — a DB-level attacker reading the
     nonce row also has access to the OAuth client hash next to it.
@@ -66,9 +66,9 @@ class TuquiActivationNonce(models.Model):
         readonly=True,
         help=(
             "Odoo ``res.users.login`` of the admin who triggered the activation. "
-            "Tuqui will use this value in the ``X-Tuqui-Acting-User`` header for "
-            "every RPC call once activation completes. Captured at /start because "
-            "the request context isn't available at /exchange time."
+            "Returned by /exchange and stored by Tuqui as provenance (who wired "
+            "this connection). Captured at /start because the request context "
+            "isn't available at /exchange time."
         ),
     )
 

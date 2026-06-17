@@ -21,11 +21,13 @@ class TuquiActivation(http.Controller):
     1. Admin clicks "Activate Tuqui" in the OAuth client form — the
        button returns an ``act_url`` action that opens this endpoint in
        the same tab.
-    2. This route (auth='user', group_system required) rotates the
-       client_secret on the OAuth singleton, mints a fresh activation
-       nonce holding the plaintext secret for up to 5 minutes, and
-       302s to the configured Tuqui frontend URL with ``?nonce=...``
-       and ``?companion_url=...`` in the query string.
+    2. This route (auth='user', group_system required) ensures a fresh
+       activation nonce holding the plaintext secret for up to 2 minutes
+       (reusing a still-valid unconsumed nonce instead of rotating the
+       secret on every click), and 302s to the configured Tuqui frontend
+       URL with ``?nonce=...`` and ``?companion_url=...`` in the query
+       string. The redirect carries ``Referrer-Policy: no-referrer`` so
+       the nonce in the URL never leaks via the Referer header.
     3. The Tuqui frontend exchanges the nonce for the credentials via
        ``POST /tuqui/activation/exchange`` (see ``exchange``) and then
        calls its own ``/api/onboarding/companion/activate`` to wire the
@@ -57,23 +59,43 @@ class TuquiActivation(http.Controller):
         if oauth_client and oauth_client.state == "active":
             raise UserError(_("Tuqui is already activated. Disconnect first to re-activate."))
 
-        # Lazy-create the singleton on first activation; otherwise rotate the
-        # secret so the plaintext we hand to Tuqui isn't whatever leftover
-        # value a previous abandoned attempt left behind.
+        # Lazy-create the singleton on first activation.
         if not oauth_client:
-            oauth_client, plain_secret = env["tuqui.oauth.client"].sudo()._get_or_create_singleton()
-        else:
-            plain_secret = oauth_client._rotate_secret_silent()
+            oauth_client, _plain_secret = env["tuqui.oauth.client"].sudo()._get_or_create_singleton()
 
-        nonce, _expires_at = (
+        # Idempotent /start: if a still-valid, unconsumed nonce already exists
+        # for this client, reuse it (same nonce) instead of rotating the secret
+        # again. Rotating on every click would invalidate the secret Tuqui is
+        # about to exchange and let a stray double-click break a live handshake.
+        existing = (
             env["tuqui.activation.nonce"]
             .sudo()
-            ._issue(
-                client_id=oauth_client.client_id,
-                client_secret_plaintext=plain_secret,
-                acting_user_login=env.user.login,
+            .search(
+                [
+                    ("client_id", "=", oauth_client.client_id),
+                    ("consumed_at", "=", False),
+                    ("expires_at", ">", fields.Datetime.now()),
+                ],
+                order="id desc",
+                limit=1,
             )
         )
+        if existing:
+            nonce = existing.nonce
+        else:
+            # No reusable nonce: rotate the secret so the plaintext we hand to
+            # Tuqui isn't whatever leftover value a previous abandoned attempt
+            # left behind, then mint a fresh nonce holding it.
+            plain_secret = oauth_client._rotate_secret_silent()
+            nonce, _expires_at = (
+                env["tuqui.activation.nonce"]
+                .sudo()
+                ._issue(
+                    client_id=oauth_client.client_id,
+                    client_secret_plaintext=plain_secret,
+                    acting_user_login=env.user.login,
+                )
+            )
 
         frontend_url = env["tuqui.oauth.client"].sudo()._get_activation_frontend_url().rstrip("/")
         companion_url = request.httprequest.host_url.rstrip("/")
@@ -90,10 +112,19 @@ class TuquiActivation(http.Controller):
         redirect_to = f"{frontend_url}?{query}"
 
         _LOG.info(
-            "tuqui.activation.start: nonce minted, redirecting (companion_url=%s)",
+            "tuqui.activation.start: nonce ready, redirecting (companion_url=%s)",
             companion_url,
         )
-        return Response("", status=302, headers={"Location": redirect_to})
+        # Referrer-Policy: no-referrer so the nonce in the redirect URL is never
+        # leaked to the Tuqui frontend (or any further hop) via the Referer header.
+        return Response(
+            "",
+            status=302,
+            headers={
+                "Location": redirect_to,
+                "Referrer-Policy": "no-referrer",
+            },
+        )
 
     @http.route(
         "/tuqui/activation/exchange",
@@ -106,7 +137,7 @@ class TuquiActivation(http.Controller):
     def exchange(self, **_kwargs):
         """Redeem a single-use nonce for the activation credentials.
 
-        Auth is the nonce itself — single-use, 5-minute TTL, sent only
+        Auth is the nonce itself — single-use, 2-minute TTL, sent only
         via the redirect from /start to the Tuqui frontend (HTTPS to a
         trusted origin). The exchange marks the row consumed in the same
         UPDATE that nullifies the plaintext secret, so a leaked nonce
