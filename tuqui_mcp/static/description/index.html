@@ -1,0 +1,345 @@
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Corben:wght@400;700&family=Inter:wght@400;500;600&display=swap');
+
+/* ── Brand v4 Salvia ────────────────────────────────── */
+.tq { font-family: 'Inter', 'Helvetica Neue', sans-serif; }
+.tq-hero { background-color: #1F3327; color: #fff; position: relative; overflow: hidden; }
+.tq-paper { background-color: #F7F6F3; }
+.tq-white { background-color: #fff; }
+.tq-dark  { background-color: #1F3327; }
+
+.tq h1, .tq h2, .tq-display {
+  font-family: 'Corben', Georgia, serif;
+  font-weight: 700;
+  line-height: 1.15;
+}
+.tq-hero-title {
+  font-family: 'New Kansas', Georgia, serif;
+  font-weight: 500;
+  font-size: 3.2em;
+  line-height: 1.15;
+  color: #fff;
+  margin: 0 0 20px;
+}
+.tq-section-title {
+  font-family: 'Inter', 'Helvetica Neue', sans-serif;
+  font-weight: 600;
+  font-size: 1.4em;
+  color: #0A0A0A;
+  margin: 0 0 16px;
+}
+.tq-section-title-inv {
+  font-family: 'Inter', 'Helvetica Neue', sans-serif;
+  font-weight: 600;
+  font-size: 1.4em;
+  color: #fff;
+  margin: 0 0 16px;
+}
+.tq-body   { font-family: 'Inter', 'Helvetica Neue', sans-serif; color: #0A0A0A; }
+.tq-muted  { color: #525251; font-family: 'Inter', 'Helvetica Neue', sans-serif; }
+.tq-lead   { color: #B8C9BF; font-family: 'Inter', 'Helvetica Neue', sans-serif; font-size: 1.05em; }
+.tq-link   { color: #3F5E4E; font-weight: 600; }
+.tq-pill   {
+  display: inline-block;
+  background: #3F5E4E;
+  color: #fff;
+  border-radius: 4px;
+  padding: 3px 12px;
+  font-size: 0.78em;
+  font-family: 'Inter', 'Helvetica Neue', sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.tq-card {
+  background: #fff;
+  border: 1px solid #B8C9BF;
+  border-radius: 10px;
+  padding: 22px 26px;
+  font-family: 'Inter', 'Helvetica Neue', sans-serif;
+}
+.tq-quote {
+  border-left: 3px solid #3F5E4E;
+  background: #fff;
+  padding: 11px 16px;
+  border-radius: 0 6px 6px 0;
+  font-family: 'Inter', 'Helvetica Neue', sans-serif;
+  color: #0A0A0A;
+  font-size: 0.97em;
+}
+
+/* ── SVG background animation ───────────────────────── */
+.lp-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.lp-path {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000px;
+  opacity: 0;
+}
+.lp-dot {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.lp-a    { animation: lp-a    14s ease-in-out infinite; }
+.lp-b    { animation: lp-b    14s ease-in-out infinite; }
+.lp-c    { animation: lp-c    14s ease-in-out infinite; }
+.lp-d    { animation: lp-d    14s ease-in-out infinite; }
+.lp-e    { animation: lp-e    14s ease-in-out infinite; }
+.lp-f    { animation: lp-f    14s ease-in-out infinite; }
+.lp-g    { animation: lp-g    14s ease-in-out infinite; }
+.lp-dot1 { animation: lp-dot1 14s ease-in-out infinite; }
+.lp-dot2 { animation: lp-dot2 14s ease-in-out infinite; }
+.lp-dot3 { animation: lp-dot3 14s ease-in-out infinite; }
+.lp-dot4 { animation: lp-dot4 14s ease-in-out infinite; }
+
+@keyframes lp-a {
+  0%  { opacity: 0; stroke-dashoffset: 1000px; }
+  2%  { opacity: .09; stroke-dashoffset: 1000px; }
+  25% { opacity: .09; stroke-dashoffset: 0; }
+  42% { opacity: .09; stroke-dashoffset: 0; }
+  52% { opacity: 0;   stroke-dashoffset: 0; }
+  53% { opacity: 0;   stroke-dashoffset: 1000px; }
+  100%{ opacity: 0;   stroke-dashoffset: 1000px; }
+}
+@keyframes lp-b {
+  0%  { opacity: 0;   stroke-dashoffset: 1000px; }
+  24% { opacity: 0;   stroke-dashoffset: 1000px; }
+  26% { opacity: .09; stroke-dashoffset: 1000px; }
+  50% { opacity: .09; stroke-dashoffset: 0; }
+  62% { opacity: .09; stroke-dashoffset: 0; }
+  72% { opacity: 0;   stroke-dashoffset: 0; }
+  73% { opacity: 0;   stroke-dashoffset: 1000px; }
+  100%{ opacity: 0;   stroke-dashoffset: 1000px; }
+}
+@keyframes lp-c {
+  0%  { opacity: 0;   stroke-dashoffset: 1000px; }
+  49% { opacity: 0;   stroke-dashoffset: 1000px; }
+  51% { opacity: .08; stroke-dashoffset: 1000px; }
+  75% { opacity: .08; stroke-dashoffset: 0; }
+  87% { opacity: .08; stroke-dashoffset: 0; }
+  97% { opacity: 0;   stroke-dashoffset: 0; }
+  98% { opacity: 0;   stroke-dashoffset: 1000px; }
+  100%{ opacity: 0;   stroke-dashoffset: 1000px; }
+}
+@keyframes lp-d {
+  0%  { opacity: 0;   stroke-dashoffset: 1000px; }
+  49% { opacity: 0;   stroke-dashoffset: 1000px; }
+  51% { opacity: .08; stroke-dashoffset: 1000px; }
+  68% { opacity: .08; stroke-dashoffset: 0; }
+  79% { opacity: .08; stroke-dashoffset: 0; }
+  88% { opacity: 0;   stroke-dashoffset: 0; }
+  89% { opacity: 0;   stroke-dashoffset: 1000px; }
+  100%{ opacity: 0;   stroke-dashoffset: 1000px; }
+}
+@keyframes lp-e {
+  0%  { opacity: 0;   stroke-dashoffset: 1000px; }
+  67% { opacity: 0;   stroke-dashoffset: 1000px; }
+  69% { opacity: .08; stroke-dashoffset: 1000px; }
+  88% { opacity: .08; stroke-dashoffset: 0; }
+  97% { opacity: .08; stroke-dashoffset: 0; }
+  100%{ opacity: 0;   stroke-dashoffset: 0; }
+}
+@keyframes lp-f {
+  0%  { opacity: 0;   stroke-dashoffset: 1000px; }
+  3%  { opacity: .09; stroke-dashoffset: 1000px; }
+  25% { opacity: .09; stroke-dashoffset: 0; }
+  37% { opacity: .09; stroke-dashoffset: 0; }
+  47% { opacity: 0;   stroke-dashoffset: 0; }
+  48% { opacity: 0;   stroke-dashoffset: 1000px; }
+  100%{ opacity: 0;   stroke-dashoffset: 1000px; }
+}
+@keyframes lp-g {
+  0%,23%{ opacity: 0;   stroke-dashoffset: 1000px; }
+  25%   { opacity: .09; stroke-dashoffset: 1000px; }
+  45%   { opacity: .09; stroke-dashoffset: 0; }
+  57%   { opacity: .09; stroke-dashoffset: 0; }
+  67%   { opacity: 0;   stroke-dashoffset: 0; }
+  68%   { opacity: 0;   stroke-dashoffset: 1000px; }
+  100%  { opacity: 0;   stroke-dashoffset: 1000px; }
+}
+@keyframes lp-dot1 {
+  0%,24%{ opacity: 0;   transform: scale(0); }
+  26%   { opacity: .18; transform: scale(1.5); }
+  28%   { opacity: .12; transform: scale(1); }
+  50%   { opacity: .12; transform: scale(1); }
+  58%   { opacity: 0;   transform: scale(0); }
+  100%  { opacity: 0;   transform: scale(0); }
+}
+@keyframes lp-dot2 {
+  0%,49%{ opacity: 0;   transform: scale(0); }
+  51%   { opacity: .18; transform: scale(1.5); }
+  53%   { opacity: .12; transform: scale(1); }
+  74%   { opacity: .12; transform: scale(1); }
+  83%   { opacity: 0;   transform: scale(0); }
+  100%  { opacity: 0;   transform: scale(0); }
+}
+@keyframes lp-dot3 {
+  0%,67%{ opacity: 0;   transform: scale(0); }
+  69%   { opacity: .18; transform: scale(1.5); }
+  71%   { opacity: .12; transform: scale(1); }
+  86%   { opacity: .12; transform: scale(1); }
+  94%   { opacity: 0;   transform: scale(0); }
+  100%  { opacity: 0;   transform: scale(0); }
+}
+@keyframes lp-dot4 {
+  0%,24%{ opacity: 0;   transform: scale(0); }
+  26%   { opacity: .18; transform: scale(1.5); }
+  28%   { opacity: .12; transform: scale(1); }
+  45%   { opacity: .12; transform: scale(1); }
+  55%   { opacity: 0;   transform: scale(0); }
+  100%  { opacity: 0;   transform: scale(0); }
+}
+</style>
+
+<!-- Hero -->
+<section class="oe_container tq-hero">
+  <div style="padding: 60px 24px 56px; position: relative; z-index: 1; text-align: center;">
+
+    <img src="icon.png" alt="Tuqui" style="width: 64px; height: 64px; border-radius: 14px; margin-bottom: 14px; display: block; margin-left: auto; margin-right: auto;" />
+
+    <p style="font-family: 'New Kansas', Georgia, serif; font-weight: 500; font-size: 1.15em; color: #fff; margin: 0 0 18px; letter-spacing: -0.01em;">
+      Tuqui<span style="color: #3F5E4E;">.</span>
+    </p>
+
+    <p class="tq-hero-title" style="margin: 0 auto 20px;">
+      El primer asistente que conoce<br><span style="color: #B8C9BF;">todo tu negocio.</span>
+    </p>
+
+    <p class="tq-lead" style="max-width: 500px; margin: 0 auto 24px; font-size: 1.05em;">
+      Tuqui conecta tu Odoo con <strong style="color:#fff;">Claude</strong>,
+      <strong style="color:#fff;">ChatGPT</strong> y cualquier asistente de IA
+      vía <strong style="color:#fff;">Odoo MCP</strong>.
+      Preguntá en lenguaje natural, respondé con datos reales.
+    </p>
+
+    <span class="tq-pill">Odoo MCP · Claude · ChatGPT · AI</span>
+  </div>
+
+  <!-- animated SVG lines (same as tuqui.com) -->
+  <svg aria-hidden="true" class="lp-bg" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" fill="none">
+    <path class="lp-path lp-a" d="M -60,860 C 80,730 200,650 360,530"    stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <path class="lp-path lp-b" d="M 360,530 C 520,410 690,365 850,395"    stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <path class="lp-path lp-c" d="M 850,395 C 990,420 1110,335 1270,215"  stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <circle class="lp-dot lp-dot1" cx="360"  cy="530" r="7" fill="white"/>
+    <circle class="lp-dot lp-dot2" cx="850"  cy="395" r="7" fill="white"/>
+    <path class="lp-path lp-d" d="M 1490,810 C 1370,680 1240,600 1085,538" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <path class="lp-path lp-e" d="M 1085,538 C 930,475 785,525 655,648"   stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <circle class="lp-dot lp-dot3" cx="1085" cy="538" r="7" fill="white"/>
+    <path class="lp-path lp-f" d="M 60,80 C 200,140 380,200 560,270"      stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <path class="lp-path lp-g" d="M 560,270 C 740,340 920,365 1100,340"   stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <circle class="lp-dot lp-dot4" cx="560"  cy="270" r="7" fill="white"/>
+  </svg>
+</section>
+
+<!-- What is Tuqui -->
+<section class="oe_container tq-paper">
+  <div class="oe_row oe_spaced tq-body" style="padding: 40px 24px;">
+    <h2 class="tq-section-title">¿Qué es Tuqui?</h2>
+    <div class="oe_span12">
+      <p>
+        Tuqui es un <strong>servidor MCP para Odoo</strong> — expone tus datos de negocio
+        (ventas, facturas, stock, CRM, empleados) como herramientas que los asistentes de IA
+        pueden leer en tiempo real. Una vez activado, tu Odoo se convierte en la fuente de
+        verdad que Claude, ChatGPT o cualquier cliente MCP puede consultar.
+      </p>
+      <p class="tq-muted" style="margin-top: 12px;">
+        Sin exportaciones. Sin copiar y pegar. Sin prompts con datos desactualizados.
+        La IA lee tu Odoo en vivo y responde en lenguaje natural.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- Works with -->
+<section class="oe_container tq-white">
+  <div class="oe_row oe_spaced tq-body" style="padding: 40px 24px;">
+    <h2 class="tq-section-title">Compatible con tu asistente de IA</h2>
+    <div class="oe_span12" style="display: flex; flex-wrap: wrap; gap: 16px; justify-content: center;">
+
+      <div class="tq-card" style="text-align: center; min-width: 160px;">
+        <div aria-hidden="true" style="font-size: 1.8em; margin-bottom: 8px;">🤖</div>
+        <strong style="color: #0A0A0A; display: block;">Claude</strong>
+        <span class="tq-muted" style="font-size: 0.88em;">Anthropic · claude.ai</span>
+      </div>
+
+      <div class="tq-card" style="text-align: center; min-width: 160px;">
+        <div aria-hidden="true" style="font-size: 1.8em; margin-bottom: 8px;">💬</div>
+        <strong style="color: #0A0A0A; display: block;">ChatGPT</strong>
+        <span class="tq-muted" style="font-size: 0.88em;">OpenAI · chatgpt.com</span>
+      </div>
+
+      <div class="tq-card" style="text-align: center; min-width: 160px;">
+        <div aria-hidden="true" style="font-size: 1.8em; margin-bottom: 8px;">⚡</div>
+        <strong style="color: #0A0A0A; display: block;">Any MCP client</strong>
+        <span class="tq-muted" style="font-size: 0.88em;">Estándar abierto MCP</span>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- What you can ask -->
+<section class="oe_container tq-paper">
+  <div class="oe_row oe_spaced tq-body" style="padding: 40px 24px;">
+    <h2 class="tq-section-title">Preguntá lo que necesitás</h2>
+    <p class="tq-muted" style="margin-bottom: 20px;">
+      Con Tuqui activado, tu asistente responde preguntas reales sobre tu negocio:
+    </p>
+    <div class="oe_span12" style="display: grid; gap: 10px; max-width: 620px; margin: 0 auto;">
+      <div class="tq-quote">"¿Cuáles son mis 10 clientes con mayor facturación este trimestre?"</div>
+      <div class="tq-quote">"¿Qué facturas están vencidas y desde hace cuántos días?"</div>
+      <div class="tq-quote">"Mostrá las órdenes de venta abiertas agrupadas por vendedor."</div>
+      <div class="tq-quote">"¿Cuánto stock queda del producto X?"</div>
+      <div class="tq-quote">"¿Qué leads del CRM llevan más de 30 días sin actividad?"</div>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section class="oe_container tq-white">
+  <div class="oe_row oe_spaced tq-body" style="padding: 40px 24px;">
+    <h2 class="tq-section-title">Cómo funciona</h2>
+    <div class="oe_span12">
+      <ol style="color: #0A0A0A; line-height: 2.1; padding-left: 20px; max-width: 560px; font-family: 'Inter', sans-serif;">
+        <li><strong>Instalá el módulo <code>tuqui</code></strong> — el companion que corre el servidor MCP dentro de tu Odoo.</li>
+        <li><strong>Activá desde Ajustes → Tuqui</strong> — un click genera tus credenciales OAuth 2.0 y tu endpoint MCP.</li>
+        <li><strong>Conectá tu asistente de IA</strong> — agregá el endpoint a Claude, ChatGPT o cualquier cliente compatible.</li>
+        <li><strong>Empezá a preguntar</strong> — la IA lee tu Odoo en vivo y responde en lenguaje natural.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- Security -->
+<section class="oe_container tq-dark">
+  <div class="oe_row oe_spaced" style="padding: 40px 24px;">
+    <h2 class="tq-section-title-inv">Seguro por diseño</h2>
+    <div class="oe_span12">
+      <ul style="color: #B8C9BF; line-height: 2.1; padding-left: 20px; font-family: 'Inter', sans-serif;">
+        <li><strong style="color:#fff;">Solo lectura por defecto.</strong> La IA nunca puede escribir en tu Odoo. Cada llamada pasa por el ACL estándar de Odoo.</li>
+        <li><strong style="color:#fff;">OAuth 2.0 con PKCE.</strong> Autenticación estándar de la industria. Las credenciales se pueden rotar o revocar cuando quieras.</li>
+        <li><strong style="color:#fff;">Tus datos se quedan en tu Odoo.</strong> Tuqui nunca almacena ni cachea tu información de negocio en servidores externos.</li>
+        <li><strong style="color:#fff;">Log de acceso.</strong> Cada consulta queda registrada con usuario, modelo, método y resultado.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Get started -->
+<section class="oe_container tq-paper">
+  <div class="oe_row oe_spaced tq-body" style="text-align: center; padding: 48px 24px;">
+    <h2 class="tq-section-title">¿Listo para conectar tu Odoo con IA?</h2>
+    <p style="color: #525251; font-family: 'Inter', sans-serif; font-size: 1.02em; margin-bottom: 8px;">
+      Instalá el módulo <strong>tuqui</strong> y visitá
+      <a href="https://tuqui.com" class="tq-link">tuqui.com</a>
+      para activar y obtener tu endpoint MCP.
+    </p>
+  </div>
+</section>
