@@ -41,11 +41,20 @@ def _is_absolutely_blocked(method: str) -> bool:
 # explicit write set, or the read prefix family. Business methods and
 # actions land in `execute` and only get bouncing by explicit rules.
 
+# These sets mirror the typed method names Tuqui's CompanionTransport posts to
+# this gateway — see tuqui_core/integrations/odoo/transports/companion.py and
+# the contract test ``test_classify_covers_companion_transport_surface``. Keep
+# all three in sync. Asymmetry to remember when the transport gains a method:
+#   * a READ it sends but not recognized here → ``execute`` → wrongly refused on
+#     a read_only connection (that was the formatted_read_group bug).
+#   * a WRITE not listed → also ``execute`` → still blocked under read_only
+#     (safe); only its audit row gets mislabelled.
+# This classifier is the coarse read_only edge gate + audit label, NOT the
+# authorization boundary: writes are really gated by the backend whitelist
+# (workspace_write_models) and the acting user's Odoo ACL.
 _WRITE_METHODS = frozenset({"create", "write", "unlink", "copy", "name_create"})
-# Reads that don't begin with the search/read prefix must be listed explicitly.
-# ``formatted_read_group`` is the Odoo 19 grouped read (what CompanionTransport
-# sends for ``odoo_read_group``); without it here it falls through to ``execute``
-# and gets wrongly refused on a read_only connection.
+# Reads that don't begin with the search/read prefix must be listed explicitly
+# (e.g. ``formatted_read_group``, the Odoo 19 grouped read).
 _READ_METHODS = frozenset(
     {
         "name_search",
