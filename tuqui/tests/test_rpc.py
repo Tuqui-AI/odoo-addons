@@ -39,7 +39,16 @@ class TestTuquiRpcGateway(HttpCase):
     def setUpClass(cls):
         super().setUpClass()
         cls.client_id, cls.client_secret = _rotate_oauth_secret(cls.env)
-        cls.admin_uid = cls.env.ref("base.user_admin").id
+        # Acting "admin" for the member-path tests: the stock administrator,
+        # forced active. On Adhoc SaaS/runbot builds the server-wide saas_client
+        # module ships res.users data that deactivates base.user_admin
+        # (active=False), and the gateway correctly refuses inactive acting
+        # users — so a member-path test that impersonates it would 403. Keeping
+        # the real admin (rather than a hand-rolled group set) preserves its
+        # full rights; the write is rolled back at class teardown.
+        cls.admin_user = cls.env.ref("base.user_admin")
+        cls.admin_user.active = True
+        cls.admin_uid = cls.admin_user.id
         cls.basic_user = cls.env["res.users"].create(
             {
                 "name": "Tuqui Basic Test",
