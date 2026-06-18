@@ -195,7 +195,15 @@ class TuquiOAuthClient(models.Model):
             requests.post(url, json={"client_id": self.client_id}, timeout=4)
             _logger.info("Tuqui disconnect hint sent for client_id %s", self.client_id)
         except Exception as exc:  # noqa: BLE001 - best-effort, must never raise
-            _logger.warning("Tuqui disconnect hint failed for client_id %s: %s", self.client_id, exc)
+            # Best-effort nudge; Tuqui's health cron is the backstop. Under the
+            # test harness (runbot/CI) outbound HTTP is forbidden ("External
+            # requests verboten") — expected noise, so log that at DEBUG; a
+            # genuine production failure stays a WARNING worth noticing. The hint
+            # still fires (so the disconnect tests that assert the POST pass).
+            from odoo.tools import config
+
+            level = logging.DEBUG if config["test_enable"] else logging.WARNING
+            _logger.log(level, "Tuqui disconnect hint failed for client_id %s: %s", self.client_id, exc)
 
     @api.model
     def _get_tuqui_base_url(self):
