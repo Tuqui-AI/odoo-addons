@@ -356,3 +356,94 @@ class TestTuquiActivationExchange(HttpCase):
             _start("https://evil.example.com/phish"),
             "a cross-origin Referer must never become return_url",
         )
+
+
+@tagged("post_install", "-at_install", "tuqui")
+class TestTuquiActivationStartAdminGate(HttpCase):
+    """Security regression: /tuqui/activation/start is admin-only.
+
+    Minting the activation nonce is the only path to the plaintext credentials
+    and to flipping the OAuth client to ``state='active'``. The route is
+    ``auth='user'`` AND raises ``AccessError`` unless the caller is in
+    ``base.group_system`` (see controllers/activation.py). These tests pin that
+    gate so a refactor can't silently let a non-admin mint a nonce.
+
+    Refusal signal mirrors ``test_start_rejects_only_active``: a blocked caller
+    must NOT 302-redirect into the activation handshake. An ``AccessError`` from
+    an ``auth='user'`` http route surfaces as 403 Forbidden, so we also assert
+    that for the authenticated (non-admin) cases.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # A singleton in 'pending' would otherwise 302 an admin through — keep one
+        # around so the only thing standing between these callers and a redirect
+        # is the admin gate itself, not a missing/active client.
+        cls.env["tuqui.oauth.client"].sudo()._get_or_create_singleton()
+        cls.env["tuqui.oauth.client"].sudo()._get_singleton().write({"state": "pending"})
+
+        # A regular INTERNAL user (NOT in base.group_system). A password is set so
+        # self.authenticate() can log in as them. No demo data — created in-test.
+        cls.internal_user = cls.env["res.users"].create(
+            {
+                "name": "Tuqui Activation Non-Admin",
+                "login": "tuqui_activation_non_admin",
+                "password": "tuqui_activation_non_admin",
+                "group_ids": [(6, 0, [cls.env.ref("base.group_user").id])],
+            }
+        )
+        # A share (portal) user — also outside group_system, exercises the
+        # non-internal branch of the same gate.
+        cls.portal_user = cls.env["res.users"].create(
+            {
+                "name": "Tuqui Activation Portal",
+                "login": "tuqui_activation_portal",
+                "password": "tuqui_activation_portal",
+                "group_ids": [(6, 0, [cls.env.ref("base.group_portal").id])],
+            }
+        )
+
+    def setUp(self):
+        super().setUp()
+        # Keep the singleton 'pending' between tests — HttpCase only rolls back at
+        # class teardown, so a prior test's write would otherwise leak.
+        self.env["tuqui.oauth.client"].sudo()._get_singleton().write({"state": "pending"})
+
+    def _db_headers(self):
+        return {"X-Odoo-Database": self.env.cr.dbname}
+
+    def _start_status(self):
+        resp = self.url_open("/tuqui/activation/start", allow_redirects=False, headers=self._db_headers())
+        return resp
+
+    # The AccessError raised by the gate is logged at WARNING by odoo.http —
+    # expected here, muted so it doesn't redden runbot.
+    @mute_logger("odoo.http")
+    def test_start_refuses_regular_internal_user(self):
+        """A logged-in internal user without base.group_system must be refused —
+        AccessError → 403, and crucially NOT a 302 into the handshake."""
+        self.assertTrue(
+            not self.internal_user.has_group("base.group_system"),
+            "test precondition: the user must NOT be an Odoo administrator",
+        )
+        self.authenticate("tuqui_activation_non_admin", "tuqui_activation_non_admin")
+        resp = self._start_status()
+        self.assertNotEqual(resp.status_code, 302, "a non-admin internal user must not reach the activation handshake")
+        self.assertEqual(resp.status_code, 403, "the admin gate raises AccessError → 403 Forbidden")
+
+    @mute_logger("odoo.http")
+    def test_start_refuses_portal_user(self):
+        """A share (portal) user is likewise outside group_system → refused."""
+        self.authenticate("tuqui_activation_portal", "tuqui_activation_portal")
+        resp = self._start_status()
+        self.assertNotEqual(resp.status_code, 302, "a portal user must not reach the activation handshake")
+        self.assertEqual(resp.status_code, 403, "the admin gate raises AccessError → 403 Forbidden")
+
+    @mute_logger("odoo.http")
+    def test_start_redirects_for_admin(self):
+        """Control: an admin IS allowed through (302) — proves the refusals above
+        are the gate doing its job, not a singleton/state misconfiguration."""
+        self.authenticate("admin", "admin")
+        resp = self._start_status()
+        self.assertEqual(resp.status_code, 302, resp.text)
