@@ -7,9 +7,7 @@ import uuid
 from datetime import timedelta
 
 import requests
-
-from odoo import _, api, fields, models
-from odoo.exceptions import UserError
+from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
@@ -258,9 +256,3 @@ class TuquiOAuthClient(models.Model):
         count = self.env["tuqui.access.log"].sudo().search_count([("create_date", ">=", since)])
         for rec in self:
             rec.access_count_7d = count
-
-    # ---------- Guard ----------
-
-    def _ensure_admin(self):
-        if not self.env.user.has_group("base.group_system"):
-            raise UserError(_("Only Odoo administrators can manage Tuqui."))
