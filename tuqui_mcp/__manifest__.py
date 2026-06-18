@@ -1,0 +1,16 @@
+{
+    "name": "Tuqui - Odoo MCP",
+    "version": "17.0.1.0.0",
+    "category": "Productivity",
+    "summary": "Connect your Odoo to Claude, ChatGPT and any AI assistant via Odoo MCP.",
+    "author": "Tuqui-AI",
+    "website": "https://tuqui.com",
+    "license": "LGPL-3",
+    "depends": ["base"],
+    "data": [
+        "data/tuqui_mcp_data.xml",
+    ],
+    "installable": True,
+    "application": False,
+    "auto_install": False,
+}
