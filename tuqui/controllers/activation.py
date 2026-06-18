@@ -22,7 +22,7 @@ class TuquiActivation(http.Controller):
        button returns an ``act_url`` action that opens this endpoint in
        the same tab.
     2. This route (auth='user', group_system required) ensures a fresh
-       activation nonce holding the plaintext secret for up to 2 minutes
+       activation nonce holding the plaintext secret for up to 10 minutes
        (reusing a still-valid unconsumed nonce instead of rotating the
        secret on every click), and 302s to the configured Tuqui frontend
        URL with ``?nonce=...`` and ``?companion_url=...`` in the query
@@ -158,7 +158,7 @@ class TuquiActivation(http.Controller):
     def exchange(self, **_kwargs):
         """Redeem a single-use nonce for the activation credentials.
 
-        Auth is the nonce itself — single-use, 2-minute TTL, sent only
+        Auth is the nonce itself — single-use, 10-minute TTL, sent only
         via the redirect from /start to the Tuqui frontend (HTTPS to a
         trusted origin). The exchange marks the row consumed in the same
         UPDATE that nullifies the plaintext secret, so a leaked nonce

@@ -5,8 +5,10 @@ from odoo.exceptions import ValidationError
 
 # How long a nonce stays redeemable once issued. Tight on purpose —
 # activation is a synchronous flow; if the admin doesn't complete it in
-# two minutes, they restart from the button.
-_NONCE_TTL_MINUTES = 2
+# ten minutes, they restart from the button. Ten (rather than two) leaves
+# slack for the human round-trip through the Tuqui frontend (login,
+# workspace pick/create) without forcing a restart.
+_NONCE_TTL_MINUTES = 10
 
 # How long expired/consumed nonces are kept around before the cron purges
 # them. Not a security knob — the security is the NULL of
@@ -40,7 +42,7 @@ class TuquiActivationNonce(models.Model):
        Tuqui workspace to this Odoo instance.
 
     Plaintext-secret rationale: the column holds the secret in clear for
-    a max of 2 minutes, and only inside this module's DB (which the
+    a max of 10 minutes, and only inside this module's DB (which the
     workspace admin already controls). Encryption would add ceremony
     without changing the threat model — a DB-level attacker reading the
     nonce row also has access to the OAuth client hash next to it.
@@ -127,7 +129,7 @@ class TuquiActivationNonce(models.Model):
         """Purge nonces past the retention window.
 
         Wired to a daily ``ir.cron``. Not a security control — security
-        is the NULL on consume + the 2-minute TTL. This is housekeeping
+        is the NULL on consume + the short TTL. This is housekeeping
         to keep the table bounded.
         """
         cutoff = fields.Datetime.subtract(fields.Datetime.now(), days=_GC_RETENTION_DAYS)
