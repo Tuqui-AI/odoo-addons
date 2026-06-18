@@ -390,7 +390,7 @@ class TestTuquiActivationStartAdminGate(HttpCase):
                 "name": "Tuqui Activation Non-Admin",
                 "login": "tuqui_activation_non_admin",
                 "password": "tuqui_activation_non_admin",
-                "group_ids": [(6, 0, [cls.env.ref("base.group_user").id])],
+                "groups_id": [(6, 0, [cls.env.ref("base.group_user").id])],
             }
         )
         # A share (portal) user — also outside group_system, exercises the
@@ -400,7 +400,7 @@ class TestTuquiActivationStartAdminGate(HttpCase):
                 "name": "Tuqui Activation Portal",
                 "login": "tuqui_activation_portal",
                 "password": "tuqui_activation_portal",
-                "group_ids": [(6, 0, [cls.env.ref("base.group_portal").id])],
+                "groups_id": [(6, 0, [cls.env.ref("base.group_portal").id])],
             }
         )
 
