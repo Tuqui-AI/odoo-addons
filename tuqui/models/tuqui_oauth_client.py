@@ -1,12 +1,17 @@
 import hashlib
 import hmac
+import logging
 import secrets
 import urllib.parse
 import uuid
 from datetime import timedelta
 
+import requests
+
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
+
+_logger = logging.getLogger(__name__)
 
 _STATE_SELECTION = [
     ("pending", "Pending activation"),
@@ -106,21 +111,6 @@ class TuquiOAuthClient(models.Model):
 
     # ---------- Actions ----------
 
-    def action_rotate_secret(self):
-        """Rotate the secret and surface the plaintext via a sticky notification."""
-        self.ensure_one()
-        plain_secret = self._rotate_secret_silent()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "type": "warning",
-                "title": _("Tuqui secret rotated"),
-                "message": _("New client_secret (shown once): %s\n\nUpdate Tuqui with this value.") % plain_secret,
-                "sticky": True,
-            },
-        }
-
     def _rotate_secret_silent(self) -> str:
         """Generate a new ``client_secret`` and return the plaintext.
 
@@ -166,6 +156,11 @@ class TuquiOAuthClient(models.Model):
         /exchange) flips state back to 'active'; a new key is minted lazily.
         """
         self.ensure_one()
+        # Decide BEFORE the teardown whether this connection was ever real.
+        # A client that never activated (still 'pending', no workspace) has
+        # nothing for Tuqui to re-probe, so skip the hint entirely.
+        was_connected = bool(self.workspace_id_external) or self.state == "active"
+
         # Local import: the rotation primitive lives with the token-signing code
         # in the controller; importing at module load would couple model and
         # controller import order for no benefit.
@@ -173,6 +168,35 @@ class TuquiOAuthClient(models.Model):
 
         rotate_signing_key(self.env)
         self.write({"state": "disconnected"})
+
+        # Hint Tuqui to re-probe AFTER the local teardown, so its authenticated
+        # liveness check hits the now-disconnected state (401) and confirms the
+        # disconnect. Best-effort: a failed notify must never break the local
+        # teardown above, which has already cut Tuqui off regardless.
+        if was_connected:
+            self._notify_tuqui_disconnect()
+
+    def _notify_tuqui_disconnect(self):
+        """Best-effort, credential-free disconnect hint to Tuqui.
+
+        POSTs ``{client_id}`` to Tuqui's
+        ``/api/onboarding/companion/disconnected`` so Tuqui re-runs its own
+        authenticated liveness check and marks the workspace disconnected only
+        when that probe gets a 401 (which it now will — see ``action_disconnect``
+        ordering). Carries no secret: it's a hint, not an authenticated command.
+
+        NEVER raises. The local teardown is the source of truth; this call only
+        nudges Tuqui to notice sooner instead of waiting for its cached token to
+        expire. Any failure (network, non-200, Tuqui down) is logged and
+        swallowed.
+        """
+        self.ensure_one()
+        try:
+            url = self._get_tuqui_base_url().rstrip("/") + "/api/onboarding/companion/disconnected"
+            requests.post(url, json={"client_id": self.client_id}, timeout=4)
+            _logger.info("Tuqui disconnect hint sent for client_id %s", self.client_id)
+        except Exception as exc:  # noqa: BLE001 - best-effort, must never raise
+            _logger.warning("Tuqui disconnect hint failed for client_id %s: %s", self.client_id, exc)
 
     @api.model
     def _get_tuqui_base_url(self):

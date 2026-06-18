@@ -95,10 +95,6 @@ class ResConfigSettings(models.TransientModel):
         client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         return client.action_open_tuqui()
 
-    def action_tuqui_rotate_secret(self):
-        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
-        return client.action_rotate_secret()
-
     def action_tuqui_disconnect(self):
         client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         client.action_disconnect()
