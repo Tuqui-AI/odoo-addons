@@ -6,8 +6,12 @@
   <title>Tuqui — Odoo MCP · Connect your Odoo to Claude &amp; ChatGPT, free</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
+    /* Tuqui brand display font (New Kansas) — served from the module */
+    @font-face { font-family: 'New Kansas'; src: url('fonts/NewKansas-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: swap; }
+    @font-face { font-family: 'New Kansas'; src: url('fonts/NewKansas-Medium.otf') format('opentype'); font-weight: 500; font-style: normal; font-display: swap; }
+    @font-face { font-family: 'New Kansas'; src: url('fonts/NewKansas-SemiBold.otf') format('opentype'); font-weight: 600; font-style: normal; font-display: swap; }
     :root {
       --tuqui-violet:      #3F5E4E;
       --tuqui-violet-dark: #344E41;
@@ -19,7 +23,7 @@
       --tuqui-mustard:     #FEA912;
       --tuqui-white:       #FFFFFF;
       --tuqui-border:      rgba(63,94,78,.16);
-      --font-display: 'Fraunces', Georgia, serif;
+      --font-display: 'New Kansas', Georgia, serif;
       --font-sans: 'Inter', 'Helvetica Neue', Arial, sans-serif;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
