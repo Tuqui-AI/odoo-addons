@@ -1,6 +1,6 @@
 {
     "name": "Tuqui",
-    "version": "19.0.0.9.0",
+    "version": "19.0.0.10.0",
     "category": "Productivity",
     "summary": "Connect this Odoo to Tuqui in one click.",
     "author": "Tuqui-AI",
