@@ -6,6 +6,8 @@
     "author": "Tuqui-AI",
     "website": "https://tuqui.com",
     "license": "LGPL-3",
+    "images": ["static/description/portada.png"],
+    "images": ["static/description/portada.png"],
     "depends": ["base"],
     "data": [
         "data/tuqui_mcp_data.xml",
