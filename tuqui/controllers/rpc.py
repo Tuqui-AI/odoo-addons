@@ -7,6 +7,7 @@ from odoo import SUPERUSER_ID, http
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.http import Response, request
 from odoo.models import BaseModel
+from odoo.service.model import get_public_method
 from odoo.tools.json import json_default as odoo_json_default
 
 from .oauth import verify_access_token
@@ -58,17 +59,20 @@ _WRITE_METHODS = frozenset({"create", "write", "unlink", "copy", "name_create"})
 _READ_METHODS = frozenset(
     {
         "name_search",
-        "name_get",
         "fields_get",
         "default_get",
-        "models_list",
-        "model_list",
         "formatted_read_group",
     }
 )
 _READ_PREFIXES = ("search", "read")
 
 
+# L1: read_only is enforced by method-NAME classification, not at the cursor
+# level. A mutating method whose name starts with ``read``/``search`` (or is
+# listed in ``_READ_METHODS``) would classify as ``read`` and slip past the
+# read_only gate — and on the connection path it would run as superuser. No
+# core Odoo method does this, but a custom client module could; a cursor-level
+# read-only guard was deemed disproportionate vs. the LOCKED auth design.
 def _classify(method: str) -> str:
     if method.startswith("_"):
         return "private_execute"
@@ -118,21 +122,34 @@ def _evaluate_policy(read_only: bool, method: str, op_type: str, *, is_connectio
 # ─── Dispatch ────────────────────────────────────────────────────────
 # Mirrors odoo.service.model.call_kw — same args[0]=ids semantics for
 # record methods, same context popping, same recordset → ids result
-# adaptation. The deliberate divergence is that call_kw rejects all
-# private (``_``-prefixed) methods up front via ``get_public_method``;
-# we skip that check because our policy engine already decided whether
-# the call is permitted. ``_UNSAFE_ATTRIBUTES`` (Python introspection
-# slots like ``mro``, ``f_code``) are not handled here because the
-# policy classifies them as ``execute`` and any allow rule covering
-# them would have to be authored deliberately by an admin — that
-# alarm-level friction is the intended guardrail.
+# adaptation. Method resolution delegates to Odoo's own
+# ``get_public_method`` (the same guard ``call_kw`` uses), so the gateway
+# honors the platform's ``@api.private`` / classmethod / unsafe-attribute
+# contracts and can't drift from them. ``_UNSAFE_ATTRIBUTES`` (Python
+# introspection slots like ``mro``, ``f_code``) and public-named private
+# methods (``init``, ``mapped``, ``new``, …) are refused here as
+# ``AccessError`` → 403 ``access_denied``, in parity with native RPC. The
+# policy gate upstream still refuses ``_``-prefixed / sudo / with_* /
+# flush* / invalidate* / dunders with their own explicit codes first.
 
 
 def _dispatch(model, method_name: str, args: list, kwargs: dict):
-    """Invoke ``method_name`` on ``model`` with execute_kw-style args."""
-    cls = type(model)
-    method = getattr(cls, method_name, None)
-    if not callable(method):
+    """Invoke ``method_name`` on ``model`` with execute_kw-style args.
+
+    Method resolution delegates to Odoo's own ``get_public_method`` (the same
+    guard ``call_kw`` uses) so the gateway honors ``@api.private`` /
+    classmethod / unsafe-attribute contracts and can't drift from the platform.
+    The policy gate already refused ``_``-prefixed / sudo / with_* / flush* /
+    invalidate* / dunders upstream with explicit codes; anything that reaches
+    here and is still non-public-callable (``init``, ``mapped``, ``new``, …) is
+    refused as AccessError → 403 ``access_denied`` (parity with native RPC).
+    """
+    try:
+        method = get_public_method(model, method_name)
+    except AccessError:
+        raise  # rpc() maps AccessError → access_denied (403)
+    except AttributeError:
+        # Unknown / non-callable method → preserve the prior 400 mapping.
         raise ValidationError(f"Model {model._name!r} has no callable method {method_name!r}")
 
     args = list(args)
@@ -293,6 +310,37 @@ def _log(
         _LOG.exception("tuqui.access.log: failed to record access")
 
 
+def _bind_logger(env, *, method, model_name, operation_type, acting_user):
+    """Bind the audit-log context invariant across one request and return an
+    ``emit(...)`` closure for the per-outcome fields. Pure convenience over
+    ``_log`` — same arguments, same values, no behavior change."""
+
+    def emit(
+        *,
+        policy_allowed,
+        success,
+        policy_denied_reason=None,
+        error_code=None,
+        duration_ms=0,
+        result_count=0,
+    ):
+        _log(
+            env,
+            method=method,
+            model_name=model_name,
+            operation_type=operation_type,
+            acting_user=acting_user,
+            policy_allowed=policy_allowed,
+            policy_denied_reason=policy_denied_reason,
+            success=success,
+            error_code=error_code,
+            duration_ms=duration_ms,
+            result_count=result_count,
+        )
+
+    return emit
+
+
 # Policy-deny reasons that should surface as HTTP 403. Anything else
 # from the gate (currently nothing) would surface as 400.
 _POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "read_only_mode", "connection_read_only"})
@@ -396,6 +444,7 @@ class TuquiRpc(http.Controller):
         else:
             acting_user, acting_denied = _resolve_acting_member(env, acting_uid)
             if acting_denied:
+                # Fires before the member is resolved → acting_user is None.
                 _log(
                     env,
                     method=method,
@@ -415,42 +464,28 @@ class TuquiRpc(http.Controller):
                     status=403,
                 )
 
+        # acting_user is now settled for both paths (None on the connection
+        # path); bind the audit context once and emit per-outcome below.
+        emit = _bind_logger(
+            env,
+            method=method,
+            model_name=model_name,
+            operation_type=operation_type,
+            acting_user=acting_user,
+        )
+
         # ─── Policy gate ───────────────────────────────────────────────────
         client = env["tuqui.oauth.client"].sudo()._get_singleton()
         read_only = bool(client.read_only) if client else False
         allowed, denied_reason = _evaluate_policy(read_only, method, operation_type, is_connection=is_connection)
         if not allowed:
-            _log(
-                env,
-                method=method,
-                model_name=model_name,
-                operation_type=operation_type,
-                acting_user=acting_user,
-                policy_allowed=False,
-                policy_denied_reason=denied_reason,
-                success=False,
-                error_code=None,
-                duration_ms=0,
-                result_count=0,
-            )
+            emit(policy_allowed=False, policy_denied_reason=denied_reason, success=False)
             status = 403 if denied_reason in _POLICY_DENY_403 else 400
             return _error(denied_reason, f"Call blocked by policy: {denied_reason}", status=status)
 
         # ─── Dispatch ──────────────────────────────────────────────────────
         if model_name not in env:
-            _log(
-                env,
-                method=method,
-                model_name=model_name,
-                operation_type=operation_type,
-                acting_user=acting_user,
-                policy_allowed=True,
-                policy_denied_reason=None,
-                success=False,
-                error_code="validation_error",
-                duration_ms=0,
-                result_count=0,
-            )
+            emit(policy_allowed=True, success=False, error_code="validation_error")
             return _error("validation_error", f"Unknown model: {model_name!r}", status=400)
 
         # Member path runs under the member's ACL; connection path runs as
@@ -467,35 +502,11 @@ class TuquiRpc(http.Controller):
             result = _dispatch(recordset, method, args, kwargs)
         except AccessError as exc:
             duration_ms = int((time.monotonic() - started) * 1000)
-            _log(
-                env,
-                method=method,
-                model_name=model_name,
-                operation_type=operation_type,
-                acting_user=acting_user,
-                policy_allowed=True,
-                policy_denied_reason=None,
-                success=False,
-                error_code="access_denied",
-                duration_ms=duration_ms,
-                result_count=0,
-            )
+            emit(policy_allowed=True, success=False, error_code="access_denied", duration_ms=duration_ms)
             return _error("access_denied", str(exc), status=403)
         except (ValidationError, UserError) as exc:
             duration_ms = int((time.monotonic() - started) * 1000)
-            _log(
-                env,
-                method=method,
-                model_name=model_name,
-                operation_type=operation_type,
-                acting_user=acting_user,
-                policy_allowed=True,
-                policy_denied_reason=None,
-                success=False,
-                error_code="validation_error",
-                duration_ms=duration_ms,
-                result_count=0,
-            )
+            emit(policy_allowed=True, success=False, error_code="validation_error", duration_ms=duration_ms)
             return _error("validation_error", str(exc), status=400)
         except Exception:  # noqa: BLE001
             # Server-side: full traceback. Client-side: generic copy.
@@ -503,34 +514,10 @@ class TuquiRpc(http.Controller):
             # underlying call into the response body.
             _LOG.exception("tuqui.rpc: unhandled error in %s.%s", model_name, method)
             duration_ms = int((time.monotonic() - started) * 1000)
-            _log(
-                env,
-                method=method,
-                model_name=model_name,
-                operation_type=operation_type,
-                acting_user=acting_user,
-                policy_allowed=True,
-                policy_denied_reason=None,
-                success=False,
-                error_code="internal_error",
-                duration_ms=duration_ms,
-                result_count=0,
-            )
+            emit(policy_allowed=True, success=False, error_code="internal_error", duration_ms=duration_ms)
             return _error("internal_error", "An internal error occurred.", status=500)
 
         duration_ms = int((time.monotonic() - started) * 1000)
         result_count = _result_count(result, method)
-        _log(
-            env,
-            method=method,
-            model_name=model_name,
-            operation_type=operation_type,
-            acting_user=acting_user,
-            policy_allowed=True,
-            policy_denied_reason=None,
-            success=True,
-            error_code=None,
-            duration_ms=duration_ms,
-            result_count=result_count,
-        )
+        emit(policy_allowed=True, success=True, duration_ms=duration_ms, result_count=result_count)
         return _ok(result)
