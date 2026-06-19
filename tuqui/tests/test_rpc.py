@@ -325,6 +325,20 @@ class TestTuquiRpcGateway(HttpCase):
         log = self._latest_log(method="search_read", model_name="ir.config_parameter")
         self.assertEqual(log.acting_user_id.id, self.basic_user.id)
 
+    def test_api_private_method_is_refused_on_member_path(self):
+        """A public-named @api.private ORM method (init, mapped, …) must be
+        refused even with read_only OFF on the member path — parity with Odoo's
+        native get_public_method, which the gateway delegates to. Without the
+        guard these reach the ORM (init runs raw DDL outside ACL)."""
+        self.assertFalse(self.client.read_only)  # member path, writes/execute allowed
+        for method in ("init", "mapped", "filtered", "new"):  # @api.private in 18 AND 19
+            resp = self._rpc("res.partner", method, args=[[1]], expect_status=403)
+            self.assertEqual(
+                resp.json()["error"]["code"],
+                "access_denied",
+                f"{method} is @api.private and must be refused",
+            )
+
     # ─── Connection path (no acting uid → superuser, read-only) ──────
 
     def test_connection_path_read_runs_as_superuser(self):
