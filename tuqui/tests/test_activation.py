@@ -287,6 +287,18 @@ class TestTuquiActivationExchange(HttpCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp.headers.get("Referrer-Policy"), "no-referrer")
 
+    def test_start_forwards_admin_email_for_login_prefill(self):
+        """/start forwards the activating admin's email so the Tuqui frontend can
+        pre-fill its login form when the admin isn't logged into Tuqui yet."""
+        self.authenticate("admin", "admin")
+        self.env.ref("base.user_admin").write({"email": "admin-prefill@example.com"})
+        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        client.write({"state": "pending"})
+        resp = self.url_open("/tuqui/activation/start", allow_redirects=False, headers=self._db_headers())
+        self.assertEqual(resp.status_code, 302, resp.text)
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(resp.headers["Location"]).query)
+        self.assertEqual(query.get("email", [None])[0], "admin-prefill@example.com")
+
     def test_start_reuses_unconsumed_nonce_without_rotating_secret(self):
         """Two /start calls in a row must reuse the still-valid nonce and leave
         the client_secret hash untouched — rotating on every click would break a
