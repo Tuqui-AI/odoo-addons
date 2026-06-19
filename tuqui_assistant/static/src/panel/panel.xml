@@ -2,37 +2,87 @@
 <templates xml:space="preserve">
     <t t-name="tuqui_assistant.Panel">
         <div t-if="state.panelOpen" class="o-tuqui-panel d-flex flex-column">
-            <div class="o-tuqui-panel-header d-flex align-items-center justify-content-between p-2">
-                <span class="fw-bold"><i class="fa fa-comments-o me-1"/> Tuqui</span>
-                <button class="btn btn-sm btn-link text-reset" t-on-click="close" title="Cerrar">
+            <!-- Header -->
+            <div class="o-tuqui-panel-header d-flex align-items-center justify-content-between">
+                <span class="o-tuqui-brand d-flex align-items-center">
+                    <img class="o-tuqui-logo me-2"
+                         src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
+                    <span class="o-tuqui-title">Tuqui</span>
+                </span>
+                <button class="btn btn-sm o-tuqui-close" t-on-click="close" title="Cerrar">
                     <i class="fa fa-times"/>
                 </button>
             </div>
-            <div class="o-tuqui-panel-body flex-grow-1 p-2 overflow-auto">
-                <t t-if="state.context">
-                    <div class="text-muted small mb-2">
-                        Contexto: <b t-esc="state.context.model"/> #<t t-esc="state.context.resId"/>
-                        <div t-if="state.context.displayName" t-esc="state.context.displayName"/>
-                    </div>
-                </t>
-                <t t-else="">
-                    <div class="text-muted small mb-2">Abrí un formulario para dar contexto.</div>
-                </t>
 
-                <label class="form-label small mb-1">Propuesta de cambios (JSON)</label>
-                <textarea
-                    class="form-control font-monospace small"
-                    rows="5"
-                    t-model="ui.rawChanges"
-                    placeholder='{"priority": "1"}'/>
-                <button class="btn btn-primary btn-sm mt-2 w-100" t-on-click="onApply">
-                    Proponer cambios al formulario
-                </button>
-                <div class="text-muted small mt-2">
-                    Se aplica en memoria: el formulario queda con cambios sin guardar.
-                    Revisá y usá Guardar o Descartar de Odoo.
-                </div>
+            <!-- Contexto del registro abierto -->
+            <div class="o-tuqui-context small" t-att-class="{ 'o-tuqui-context-empty': !state.context }">
+                <i class="fa fa-crosshairs me-1"/>
+                <t t-esc="contextLabel"/>
             </div>
+
+            <!-- L1: iframe del SPA de Tuqui (modo embed) -->
+            <t t-if="ui.spaUrl">
+                <iframe class="o-tuqui-iframe flex-grow-1"
+                        t-ref="iframe"
+                        t-att-src="embedUrl"
+                        allow="microphone; clipboard-write; clipboard-read"
+                        title="Tuqui"/>
+            </t>
+
+            <!-- Fallback: shell de chat nativo OWL -->
+            <t t-else="">
+                <div class="o-tuqui-body flex-grow-1 overflow-auto" t-ref="body">
+                    <t t-foreach="ui.messages" t-as="m" t-key="m.id">
+                        <div class="o-tuqui-msg" t-attf-class="o-tuqui-msg-{{ m.role }}">
+                            <div t-if="m.text" class="o-tuqui-bubble" t-esc="m.text"/>
+
+                            <!-- Tarjeta de propuesta (propose-then-apply, estilo Copilot Edits) -->
+                            <div t-if="m.proposal" class="o-tuqui-proposal">
+                                <div class="o-tuqui-proposal-head">
+                                    <i class="fa fa-magic me-1"/>
+                                    <t t-esc="fieldsOf(m.proposal).length"/> cambio(s) propuesto(s)
+                                </div>
+                                <div class="o-tuqui-proposal-fields">
+                                    <label t-foreach="fieldsOf(m.proposal)" t-as="f" t-key="f"
+                                           class="o-tuqui-field">
+                                        <input type="checkbox"
+                                               t-att-checked="m.proposal.selected[f]"
+                                               t-att-disabled="m.proposal.applied"
+                                               t-on-change="(ev) => this.setField(m.proposal, f, ev.target.checked)"/>
+                                        <span class="o-tuqui-field-name" t-esc="f"/>
+                                        <span class="o-tuqui-field-arrow">→</span>
+                                        <span class="o-tuqui-field-val"
+                                              t-esc="formatValue(m.proposal.changes[f])"/>
+                                    </label>
+                                </div>
+                                <div t-if="!m.proposal.applied" class="o-tuqui-proposal-actions">
+                                    <button class="btn btn-sm o-tuqui-btn-primary"
+                                            t-on-click="() => this.applyProposal(m)">
+                                        Aplicar al formulario
+                                    </button>
+                                    <button class="btn btn-sm btn-link text-muted"
+                                            t-on-click="() => this.discardProposal(m)">
+                                        Descartar
+                                    </button>
+                                </div>
+                                <div t-else="" class="o-tuqui-proposal-done small">
+                                    <i class="fa fa-check me-1"/> Resuelto
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                </div>
+
+                <div class="o-tuqui-composer">
+                    <textarea class="o-tuqui-input form-control" rows="1"
+                              t-model="ui.draft"
+                              t-on-keydown="onKeydown"
+                              placeholder="Escribile a Tuqui…  (o pegá un JSON de cambios)"/>
+                    <button class="btn o-tuqui-send" t-on-click="onSend" title="Enviar">
+                        <i class="fa fa-paper-plane"/>
+                    </button>
+                </div>
+            </t>
         </div>
     </t>
 </templates>

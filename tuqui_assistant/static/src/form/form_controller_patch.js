@@ -18,8 +18,8 @@ patch(FormController.prototype, {
         this.tuquiAssistant = useService("tuquiAssistant");
         useEffect(
             () => {
-                this.tuquiAssistant.setActiveRecord(this.model.root);
-                return () => this.tuquiAssistant.clearActiveRecord(this.model.root);
+                this.tuquiAssistant.setRecordContext(this, this.model.root);
+                return () => this.tuquiAssistant.clearContext(this);
             },
             () => [this.model.root.resModel, this.model.root.resId]
         );
