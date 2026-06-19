@@ -111,6 +111,14 @@ class TuquiActivation(http.Controller):
         if instance_name:
             params["instance_name"] = instance_name
 
+        # The activating admin's email. Tuqui pre-fills its login form with it
+        # when the admin isn't logged into Tuqui yet (activation from Odoo while
+        # logged out) so they don't retype it. It's the admin's own email, sent
+        # over the same no-referrer redirect as the nonce; omitted if unset.
+        user_email = env.user.email
+        if user_email:
+            params["email"] = user_email
+
         # Capture the Settings page URL from the Referer header so Tuqui can
         # redirect the admin back after a successful activation — the settings
         # page then reloads and shows the connected state without a manual F5.
