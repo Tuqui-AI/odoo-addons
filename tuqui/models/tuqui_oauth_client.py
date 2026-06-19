@@ -167,12 +167,19 @@ class TuquiOAuthClient(models.Model):
         rotate_signing_key(self.env)
         self.write({"state": "disconnected"})
 
-        # Hint Tuqui to re-probe AFTER the local teardown, so its authenticated
-        # liveness check hits the now-disconnected state (401) and confirms the
-        # disconnect. Best-effort: a failed notify must never break the local
-        # teardown above, which has already cut Tuqui off regardless.
+        # Hint Tuqui to re-probe — but only AFTER this transaction COMMITS, via a
+        # post-commit callback. Firing it inline (mid-transaction) is a trap: our
+        # state='disconnected' write is still uncommitted (Odoo flushes lazily),
+        # so Tuqui's synchronous re-probe (a /tuqui/oauth/token call that runs
+        # touch_last_seen on THIS row) commits a concurrent update to a row we
+        # haven't flushed yet -> psycopg2 SerializationFailure at request-end
+        # flush, which `retrying` then re-runs (re-POSTing each time) until it
+        # surfaces an RPC_ERROR. It also defeats the hint's purpose: the re-probe
+        # would read the still-uncommitted 'active' state and conclude "connected".
+        # Post-commit, the row is durably 'disconnected' (the probe gets its 401)
+        # and there is no write to conflict with. Best-effort: never raises.
         if was_connected:
-            self._notify_tuqui_disconnect()
+            self.env.cr.postcommit.add(self._notify_tuqui_disconnect)
 
     def _notify_tuqui_disconnect(self):
         """Best-effort, credential-free disconnect hint to Tuqui.
