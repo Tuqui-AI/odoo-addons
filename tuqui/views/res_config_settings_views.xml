@@ -40,7 +40,7 @@
                                     class="btn-link p-0"/>
                             <button name="action_tuqui_disconnect" type="object"
                                     string="Disconnect" icon="fa-chain-broken"
-                                    class="btn-link p-0 text-danger"
+                                    class="btn-link p-0"
                                     confirm="Disconnect this Odoo from Tuqui? Tuqui will lose access until you re-activate."/>
                         </div>
                     </div>

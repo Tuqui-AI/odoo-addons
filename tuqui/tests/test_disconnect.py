@@ -50,10 +50,15 @@ class TestTuquiDisconnect(HttpCase):
         super().setUp()
         # Every test starts from a live, active connection.
         self.client.write({"state": "active"})
-        # action_disconnect now fires a best-effort hint to Tuqui via
-        # requests.post. Stub it across the suite so no test reaches the real
-        # https://tuqui.com — the network behaviour is asserted explicitly in
-        # the dedicated tests below via their own patches.
+        # action_disconnect now defers its Tuqui hint to cr.postcommit. HttpCase
+        # shares one cursor across the class, so a callback queued by a prior
+        # test (one that didn't run postcommit) would otherwise leak into this
+        # test's assertions. Start each test with an empty queue.
+        self.env.cr.postcommit.clear()
+        # action_disconnect fires a best-effort hint to Tuqui via requests.post.
+        # Stub it across the suite so no test reaches the real https://tuqui.com —
+        # the network behaviour is asserted explicitly in the dedicated tests
+        # below via their own patches (which then run cr.postcommit).
         patcher = patch(
             "odoo.addons.tuqui.models.tuqui_oauth_client.requests.post",
             return_value=None,
@@ -225,8 +230,11 @@ class TestTuquiDisconnect(HttpCase):
     # ─── disconnect hint to Tuqui (option A) ─────────────────────────
 
     def test_disconnect_notifies_tuqui_after_teardown(self):
-        """The hint POSTs {client_id} to the right URL, and only AFTER the
-        local teardown so Tuqui's re-probe sees the disconnected (401) state."""
+        """The hint POSTs {client_id} to the right URL, deferred to a POST-COMMIT
+        callback: it must not fire during action_disconnect (that would let
+        Tuqui's re-probe write this row before our own flush commits ->
+        SerializationFailure) and, once it does fire, the teardown is durable so
+        the re-probe sees the disconnected (401) state."""
         observed = {}
 
         def fake_post(url, json=None, timeout=None):
@@ -248,6 +256,11 @@ class TestTuquiDisconnect(HttpCase):
             side_effect=fake_post,
         ) as mocked:
             self.client.action_disconnect()
+            # Regression guard for the SerializationFailure fix: the hint is
+            # registered on cr.postcommit, so NOTHING is sent until the
+            # transaction commits. An inline POST here is what raced the flush.
+            mocked.assert_not_called()
+            self.env.cr.postcommit.run()
 
         mocked.assert_called_once()
         self.assertTrue(observed["url"].endswith("/api/onboarding/companion/disconnected"))
@@ -268,8 +281,10 @@ class TestTuquiDisconnect(HttpCase):
             "odoo.addons.tuqui.models.tuqui_oauth_client.requests.post",
             side_effect=RuntimeError("tuqui unreachable"),
         ) as mocked:
-            # Must NOT raise despite the POST blowing up.
+            # action_disconnect only registers the post-commit hint — it must not
+            # raise. The hint itself (which blows up) runs on commit and swallows.
             self.client.action_disconnect()
+            self.env.cr.postcommit.run()
 
         mocked.assert_called_once()
         self.client.invalidate_recordset()
