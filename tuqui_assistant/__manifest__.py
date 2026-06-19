@@ -21,9 +21,13 @@ iframe del SPA de Tuqui y la tool `propose_odoo_form_changes` se integran luego
     "author": "Tuqui-AI",
     "website": "https://tuqui.com",
     "license": "LGPL-3",
-    # Spike aislado: solo `web`. Al integrar con el connector se suma `tuqui`.
-    "depends": ["web"],
-    "data": [],
+    # Requiere el connector companion `tuqui` (ADR 0001): el embed usa SSO con la
+    # identidad del companion (sin login en el iframe, sin compat jsonrpc-embed).
+    "depends": ["web", "tuqui"],
+    "data": [
+        "security/ir.model.access.csv",
+        "data/ir_cron.xml",
+    ],
     "assets": {
         "web.assets_backend": [
             "tuqui_assistant/static/src/**/*",

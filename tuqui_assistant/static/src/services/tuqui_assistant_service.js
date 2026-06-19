@@ -92,19 +92,33 @@ export const tuquiAssistantService = {
             state.panelOpen = !state.panelOpen;
         }
 
-        /** URL del SPA a embeber (system param `tuqui_assistant.spa_url`). */
-        async function getSpaUrl() {
+        /**
+         * SSO embebido (ADR 0001 / spec §2.2): mintea un nonce single-use atado
+         * al usuario Odoo logueado y devuelve { nonce, client_id } para pasárselo
+         * al iframe. El SPA lo canjea contra Tuqui por un token de sesión corto,
+         * así no hay login dentro del iframe. Devuelve null si el companion no
+         * está activado (sin client_id) → el SPA muestra "usuario no vinculado".
+         */
+        async function getSsoAuth() {
             try {
-                const rows = await orm.searchRead(
-                    "ir.config_parameter",
-                    [["key", "=", "tuqui_assistant.spa_url"]],
-                    ["value"],
-                    { limit: 1 }
-                );
-                const value = rows?.[0]?.value?.trim();
-                return value || null;
+                return await orm.call("tuqui.assistant.sso.nonce", "issue_for_current_user", []);
             } catch {
                 return null;
+            }
+        }
+
+        /**
+         * Bootstrap del embed resuelto desde companion (ADR 0001): devuelve
+         * `{ connected, base_url, slug }`. La base sale de `tuqui.base_url`
+         * (default tuqui.com) y el slug del workspace activado en el oauth client
+         * — ya no hay `tuqui_assistant.spa_url`. Lee vía un método sudo porque
+         * `tuqui.oauth.client` es admin-only.
+         */
+        async function getEmbedBootstrap() {
+            try {
+                return await orm.call("tuqui.assistant.sso.nonce", "embed_bootstrap", []);
+            } catch {
+                return { connected: false, base_url: null, slug: null };
             }
         }
 
@@ -171,7 +185,8 @@ export const tuquiAssistantService = {
             clearContext,
             togglePanel,
             applyProposal,
-            getSpaUrl,
+            getEmbedBootstrap,
+            getSsoAuth,
             getContextPayload,
             getActiveRecord: () => activeRecord,
         };

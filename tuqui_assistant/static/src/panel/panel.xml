@@ -20,8 +20,9 @@
                 <t t-esc="contextLabel"/>
             </div>
 
-            <!-- L1: iframe del SPA de Tuqui (modo embed) -->
-            <t t-if="ui.spaUrl">
+            <!-- L1: iframe del SPA de Tuqui (modo embed). Solo si el companion
+                 está conectado (slug + estado active, resueltos del oauth client). -->
+            <t t-if="ui.connected and ui.slug">
                 <iframe class="o-tuqui-iframe flex-grow-1"
                         t-ref="iframe"
                         t-att-src="embedUrl"
@@ -29,58 +30,16 @@
                         title="Tuqui"/>
             </t>
 
-            <!-- Fallback: shell de chat nativo OWL -->
+            <!-- Sin companion conectado: prompt para conectar Tuqui. El chat
+                 vive atado a companion (ADR 0001), así que no hay fallback. -->
             <t t-else="">
-                <div class="o-tuqui-body flex-grow-1 overflow-auto" t-ref="body">
-                    <t t-foreach="ui.messages" t-as="m" t-key="m.id">
-                        <div class="o-tuqui-msg" t-attf-class="o-tuqui-msg-{{ m.role }}">
-                            <div t-if="m.text" class="o-tuqui-bubble" t-esc="m.text"/>
-
-                            <!-- Tarjeta de propuesta (propose-then-apply, estilo Copilot Edits) -->
-                            <div t-if="m.proposal" class="o-tuqui-proposal">
-                                <div class="o-tuqui-proposal-head">
-                                    <i class="fa fa-magic me-1"/>
-                                    <t t-esc="fieldsOf(m.proposal).length"/> cambio(s) propuesto(s)
-                                </div>
-                                <div class="o-tuqui-proposal-fields">
-                                    <label t-foreach="fieldsOf(m.proposal)" t-as="f" t-key="f"
-                                           class="o-tuqui-field">
-                                        <input type="checkbox"
-                                               t-att-checked="m.proposal.selected[f]"
-                                               t-att-disabled="m.proposal.applied"
-                                               t-on-change="(ev) => this.setField(m.proposal, f, ev.target.checked)"/>
-                                        <span class="o-tuqui-field-name" t-esc="f"/>
-                                        <span class="o-tuqui-field-arrow">→</span>
-                                        <span class="o-tuqui-field-val"
-                                              t-esc="formatValue(m.proposal.changes[f])"/>
-                                    </label>
-                                </div>
-                                <div t-if="!m.proposal.applied" class="o-tuqui-proposal-actions">
-                                    <button class="btn btn-sm o-tuqui-btn-primary"
-                                            t-on-click="() => this.applyProposal(m)">
-                                        Aplicar al formulario
-                                    </button>
-                                    <button class="btn btn-sm btn-link text-muted"
-                                            t-on-click="() => this.discardProposal(m)">
-                                        Descartar
-                                    </button>
-                                </div>
-                                <div t-else="" class="o-tuqui-proposal-done small">
-                                    <i class="fa fa-check me-1"/> Resuelto
-                                </div>
-                            </div>
-                        </div>
-                    </t>
-                </div>
-
-                <div class="o-tuqui-composer">
-                    <textarea class="o-tuqui-input form-control" rows="1"
-                              t-model="ui.draft"
-                              t-on-keydown="onKeydown"
-                              placeholder="Escribile a Tuqui…  (o pegá un JSON de cambios)"/>
-                    <button class="btn o-tuqui-send" t-on-click="onSend" title="Enviar">
-                        <i class="fa fa-paper-plane"/>
-                    </button>
+                <div class="o-tuqui-disconnected flex-grow-1 d-flex flex-column align-items-center justify-content-center text-center p-4">
+                    <img class="o-tuqui-logo mb-3" style="width: 48px; opacity: .8;"
+                         src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
+                    <p class="mb-1 fw-bold">Tuqui no está conectado a este Odoo</p>
+                    <p class="small text-muted mb-0">
+                        Conectá Tuqui (companion) desde Ajustes para usar el asistente desde acá.
+                    </p>
                 </div>
             </t>
         </div>

@@ -1,10 +1,9 @@
 /** @odoo-module **/
-import { Component, useState, useRef, useEffect, onWillStart, onMounted, onWillUnmount, onPatched } from "@odoo/owl";
+import { Component, useState, useRef, useEffect, onWillStart, onMounted, onWillUnmount } from "@odoo/owl";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 
-let _msgSeq = 0;
 
 /**
  * Panel lateral del asistente Tuqui.
@@ -31,28 +30,36 @@ export class TuquiPanel extends Component {
         this.notification = useService("notification");
         this.state = useState(this.tuquiAssistant.state); // { panelOpen, context }
         this.ui = useState({
-            draft: "",
-            spaUrl: null,
+            // Resuelto del companion (oauth client): si está conectado, la base
+            // de Tuqui (tuqui.base_url) y el slug del workspace activado. Ver
+            // ADR 0001 §2.2 — la URL del embed ya no es un param hardcodeado.
+            connected: false,
+            baseUrl: null,
+            slug: null,
             embedReady: false,
-            messages: [
-                {
-                    id: ++_msgSeq,
-                    role: "assistant",
-                    text: _t(
-                        "Hola, soy Tuqui. Todavía me estoy conectando a mi cerebro real; " +
-                            "por ahora puedo proponer cambios al formulario que tengas abierto. " +
-                            'Pegá un JSON de campos (ej. {"priority": "1"}) y te lo propongo ' +
-                            "para que lo revises antes de guardar."
-                    ),
-                },
-            ],
         });
         this.iframeRef = useRef("iframe");
-        this.bodyRef = useRef("body");
 
-        onWillStart(async () => {
-            this.ui.spaUrl = await this.tuquiAssistant.getSpaUrl();
-        });
+        const loadBootstrap = async () => {
+            const boot = await this.tuquiAssistant.getEmbedBootstrap();
+            this.ui.connected = Boolean(boot?.connected);
+            this.ui.baseUrl = boot?.base_url || null;
+            this.ui.slug = boot?.slug || null;
+        };
+        onWillStart(loadBootstrap);
+        // Re-chequear al abrir el panel: si un admin desconectó companion mientras
+        // estaba cerrado, refleja el estado nuevo (y el corte duro vive además en
+        // issue_for_current_user, que exige state=='active').
+        useEffect(
+            () => {
+                if (this.state.panelOpen) {
+                    this.ui.embedReady = false;
+                    this._authPosted = false;
+                    void loadBootstrap();
+                }
+            },
+            () => [this.state.panelOpen]
+        );
 
         // Puente postMessage con el iframe del SPA.
         this._onMessage = this._handleMessage.bind(this);
@@ -63,29 +70,27 @@ export class TuquiPanel extends Component {
         // re-empujarlo al iframe si ya está listo.
         useEffect(
             () => {
-                if (this.ui.spaUrl && this.ui.embedReady) {
+                if (this.ui.connected && this.ui.embedReady) {
                     this._postContext();
                 }
             },
             () => [this._contextKey()]
         );
-
-        onPatched(() => this._scrollToBottom());
     }
 
     // --- iframe (L1) ---
 
     get embedUrl() {
-        if (!this.ui.spaUrl) {
+        if (!this.ui.connected || !this.ui.baseUrl || !this.ui.slug) {
             return "";
         }
-        const sep = this.ui.spaUrl.includes("?") ? "&" : "?";
-        return `${this.ui.spaUrl}${sep}embed=1`;
+        const base = this.ui.baseUrl.replace(/\/+$/, "");
+        return `${base}/embed/${encodeURIComponent(this.ui.slug)}?embed=1`;
     }
 
     get _spaOrigin() {
         try {
-            return new URL(this.ui.spaUrl).origin;
+            return new URL(this.ui.baseUrl).origin;
         } catch {
             return "*";
         }
@@ -105,6 +110,40 @@ export class TuquiPanel extends Component {
                 return `list:${c.model}:${c.count}:${JSON.stringify(c.domain || [])}`;
         }
         return "";
+    }
+
+    async _postAuth() {
+        // SSO embebido: mintea un nonce atado al usuario Odoo y se lo pasa al
+        // iframe; el SPA lo canjea por un token de sesión (sin login). Ver
+        // ADR 0001 / spec §2.2. Sin companion activado, getSsoAuth() → null.
+        //
+        // UNA sola vez por apertura del panel: el SPA postea "ready" varias veces
+        // (gate + ChatPage + re-renders) y un nonce de más se gasta dos veces →
+        // 401 en el exchange → apiFetch desloguea. El flag se resetea al abrir.
+        if (this._authPosted) {
+            return;
+        }
+        const win = this.iframeRef.el?.contentWindow;
+        if (!win) {
+            return;
+        }
+        const auth = await this.tuquiAssistant.getSsoAuth();
+        if (!auth?.nonce || !auth?.client_id) {
+            return;
+        }
+        this._authPosted = true;
+        try {
+            win.postMessage(
+                {
+                    source: "tuqui-odoo",
+                    type: "auth",
+                    payload: { client_id: auth.client_id, nonce: auth.nonce },
+                },
+                this._spaOrigin
+            );
+        } catch {
+            // origin distinto / iframe aún no navegado: se reintenta al próximo "ready"
+        }
     }
 
     _postContext() {
@@ -141,6 +180,7 @@ export class TuquiPanel extends Component {
         switch (data.type) {
             case "ready":
                 this.ui.embedReady = true;
+                this._postAuth(); // SSO: nonce + client_id al iframe (antes del contexto)
                 this._postContext();
                 break;
             case "apply":
@@ -175,117 +215,6 @@ export class TuquiPanel extends Component {
         this.tuquiAssistant.togglePanel();
     }
 
-    _scrollToBottom() {
-        const el = this.bodyRef.el;
-        if (el) {
-            el.scrollTop = el.scrollHeight;
-        }
-    }
-
-    // --- shell nativo (fallback) ---
-
-    onKeydown(ev) {
-        if (ev.key === "Enter" && !ev.shiftKey) {
-            ev.preventDefault();
-            this.onSend();
-        }
-    }
-
-    _addMessage(msg) {
-        this.ui.messages.push({ id: ++_msgSeq, ...msg });
-    }
-
-    onSend() {
-        const text = (this.ui.draft || "").trim();
-        if (!text) {
-            return;
-        }
-        this._addMessage({ role: "user", text });
-        this.ui.draft = "";
-
-        const changes = this._tryParseChanges(text);
-        if (changes) {
-            this._addMessage({
-                role: "assistant",
-                text: _t("Te propongo estos cambios para el formulario abierto:"),
-                proposal: {
-                    changes,
-                    selected: Object.fromEntries(Object.keys(changes).map((k) => [k, true])),
-                    applied: false,
-                },
-            });
-        } else {
-            this._addMessage({
-                role: "assistant",
-                text: _t(
-                    "Todavía no estoy conectado a Tuqui real, así que no puedo razonar tu " +
-                        "mensaje. Mientras tanto, pegá un JSON de campos y te propongo los " +
-                        "cambios al formulario."
-                ),
-            });
-        }
-    }
-
-    _tryParseChanges(text) {
-        try {
-            const obj = JSON.parse(text);
-            if (obj && typeof obj === "object" && !Array.isArray(obj) && Object.keys(obj).length) {
-                return obj;
-            }
-        } catch {
-            // No es JSON: lo tratamos como mensaje de chat normal.
-        }
-        return null;
-    }
-
-    fieldsOf(proposal) {
-        return Object.keys(proposal.changes);
-    }
-
-    setField(proposal, field, checked) {
-        proposal.selected[field] = checked;
-    }
-
-    formatValue(value) {
-        if (value === null || value === undefined) {
-            return "∅";
-        }
-        if (typeof value === "object") {
-            return JSON.stringify(value);
-        }
-        return String(value);
-    }
-
-    async applyProposal(message) {
-        const proposal = message.proposal;
-        const picked = {};
-        for (const f of Object.keys(proposal.changes)) {
-            if (proposal.selected[f]) {
-                picked[f] = proposal.changes[f];
-            }
-        }
-        if (!Object.keys(picked).length) {
-            this.notification.add(_t("No seleccionaste ningún campo."), { type: "warning" });
-            return;
-        }
-        const ok = await this.tuquiAssistant.applyProposal(picked);
-        if (ok) {
-            proposal.applied = true;
-            this._addMessage({
-                role: "system",
-                text: _t(
-                    "Apliqué %s campo(s) al formulario (sin guardar). Revisá y usá Guardar o " +
-                        "Descartar de Odoo.",
-                    Object.keys(picked).length
-                ),
-            });
-        }
-    }
-
-    discardProposal(message) {
-        message.proposal.applied = true;
-        this._addMessage({ role: "system", text: _t("Propuesta descartada.") });
-    }
 }
 
 registry.category("main_components").add("tuqui_assistant.Panel", { Component: TuquiPanel });

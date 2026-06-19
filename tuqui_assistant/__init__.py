@@ -1,1 +1,3 @@
-# Tuqui Assistant — superficie embebida (solo assets OWL por ahora, sin modelos Python).
+# Tuqui Assistant — superficie embebida (OWL) + capa de identidad/SSO companion.
+from . import models
+from . import controllers
