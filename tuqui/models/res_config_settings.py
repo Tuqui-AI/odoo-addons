@@ -10,9 +10,9 @@ class ResConfigSettings(models.TransientModel):
     """Tuqui block under Settings > General Settings > Integrations.
 
     The whole admin surface of the module lives here: connection state +
-    activation, security policy, and the entry points to the rules table
-    and the access log. There are no Tuqui menus — the module is
-    connection infrastructure, not an app the user navigates.
+    activation, security policy, and the entry point to the access log.
+    There are no Tuqui menus — the module is connection infrastructure,
+    not an app the user navigates.
     """
 
     _inherit = "res.config.settings"
@@ -40,7 +40,10 @@ class ResConfigSettings(models.TransientModel):
             "When enabled, Tuqui can read but never create, update, delete "
             "or run methods on this database. Reads still follow each user's "
             "own Odoo permissions. Private methods and ORM escape hatches are "
-            "always blocked regardless of this flag."
+            "always blocked regardless of this flag. Note: read-only is "
+            "enforced by classifying the method name (not at the cursor "
+            "level), so a mutating method whose name starts with read/search "
+            "could be classified as a read."
         ),
     )
 

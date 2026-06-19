@@ -161,6 +161,39 @@ class TestTuquiDisconnect(HttpCase):
         self.assertEqual(self._rpc_with_token(token).status_code, 401)
         self._post_token(expect_status=401)
 
+    @mute_logger("odoo.addons.tuqui.controllers.rpc")
+    def test_revoke_with_wrong_secret_does_not_disconnect(self):
+        """A leaked access token alone must not tear down the connection.
+
+        ``/oauth/revoke`` is authenticated by the ``client_secret``; a wrong
+        secret → 401 ``invalid_client`` and the teardown never runs: the
+        singleton stays ``active`` and the signing key is intact, so a token
+        minted before the failed revoke still verifies.
+        """
+        token = self._post_token(expect_status=200).json()["access_token"]
+        self.assertEqual(self._rpc_with_token(token).status_code, 200)
+
+        resp = self.url_open(
+            "/tuqui/oauth/revoke",
+            data={"client_id": self.client_id, "client_secret": "wrong-secret"},
+            headers=self._db_headers(),
+        )
+        self.assertEqual(resp.status_code, 401, resp.text)
+        self.assertEqual(resp.json()["error"], "invalid_client")
+
+        # Nothing was torn down: state intact and the signing key never rotated.
+        self.client.invalidate_recordset()
+        self.assertEqual(self.client.state, "active")
+        self.assertIsNotNone(
+            verify_access_token(self.env, token),
+            "a failed revoke must not rotate the signing key",
+        )
+        self.assertEqual(
+            self._rpc_with_token(token).status_code,
+            200,
+            "the pre-revoke token must still work after a failed revoke",
+        )
+
     # ─── reactivation restores access ────────────────────────────────
 
     @mute_logger("odoo.addons.tuqui.controllers.oauth")
