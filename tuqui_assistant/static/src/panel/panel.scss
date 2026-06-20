@@ -138,21 +138,6 @@
     }
 }
 
-.o-tuqui-context {
-    background: var(--tuqui-salvia-100);
-    color: var(--tuqui-salvia-800);
-    padding: 0.35rem 0.75rem;
-    border-bottom: 1px solid var(--tuqui-salvia-300);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-
-    &.o-tuqui-context-empty {
-        color: var(--tuqui-salvia-700);
-        opacity: 0.75;
-    }
-}
-
 // L1: iframe del SPA
 .o-tuqui-iframe {
     flex: 1 1 auto;

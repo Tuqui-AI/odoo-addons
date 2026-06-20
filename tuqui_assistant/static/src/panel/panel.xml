@@ -16,31 +16,28 @@
                 </span>
                 <span class="o-tuqui-header-actions d-flex align-items-center">
                     <button class="btn btn-sm o-tuqui-open-external" t-on-click="openInTuqui"
-                            title="Abrir en Tuqui">
+                            t-att-title="openInTuquiLabel" t-att-aria-label="openInTuquiLabel">
                         <i class="fa fa-external-link"/>
                     </button>
                     <button class="btn btn-sm o-tuqui-pin"
                             t-att-class="{ 'o-tuqui-pin--active': state.followContext }"
-                            t-on-click="toggleFollowContext" title="Seguir el contexto de Odoo">
+                            t-on-click="toggleFollowContext"
+                            t-att-title="followContextLabel" t-att-aria-label="followContextLabel">
                         <i class="fa fa-thumb-tack"/>
                     </button>
                     <button class="btn btn-sm o-tuqui-expand" t-on-click="toggleExpand"
-                            t-att-title="state.expanded ? 'Contraer' : 'Expandir'">
+                            t-att-title="expandLabel" t-att-aria-label="expandLabel">
                         <i class="fa" t-att-class="state.expanded ? 'fa-compress' : 'fa-expand'"/>
                     </button>
-                    <button class="btn btn-sm o-tuqui-minimize" t-on-click="minimize" title="Minimizar">
+                    <button class="btn btn-sm o-tuqui-minimize" t-on-click="minimize"
+                            t-att-title="minimizeLabel" t-att-aria-label="minimizeLabel">
                         <i class="fa fa-window-minimize"/>
                     </button>
-                    <button class="btn btn-sm o-tuqui-close" t-on-click="close" title="Cerrar">
+                    <button class="btn btn-sm o-tuqui-close" t-on-click="close"
+                            t-att-title="closeLabel" t-att-aria-label="closeLabel">
                         <i class="fa fa-times"/>
                     </button>
                 </span>
-            </div>
-
-            <!-- Contexto del registro abierto -->
-            <div class="o-tuqui-context small" t-att-class="{ 'o-tuqui-context-empty': !state.context }">
-                <i class="fa fa-crosshairs me-1"/>
-                <t t-esc="contextLabel"/>
             </div>
 
             <!-- L1: iframe del SPA de Tuqui (modo embed). Solo si el companion
@@ -71,7 +68,8 @@
              iframe). Click → restore() vuelve a mostrar la card ya montada. -->
         <button t-if="state.panelOpen and state.minimized"
                 class="o-tuqui-bubble-launcher btn"
-                t-on-click="restore" title="Abrir Tuqui">
+                t-on-click="restore"
+                t-att-title="restoreLabel" t-att-aria-label="restoreLabel">
             <img class="o-tuqui-bubble-logo"
                  src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
         </button>

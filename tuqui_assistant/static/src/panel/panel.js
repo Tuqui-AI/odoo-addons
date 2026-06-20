@@ -201,24 +201,25 @@ export class TuquiPanel extends Component {
 
     // --- común ---
 
-    get contextLabel() {
-        const c = this.state.context;
-        if (!c) {
-            return _t("Sin contexto");
-        }
-        switch (c.kind) {
-            case "record": {
-                const name = c.displayName ? ` · ${c.displayName}` : "";
-                return `${c.model} #${c.resId}${name}`;
-            }
-            case "selection":
-                return c.allMatching
-                    ? _t("%s · %s seleccionados (todo el filtro)", c.model, c.count)
-                    : _t("%s · %s seleccionados", c.model, c.count);
-            case "list":
-                return _t("%s · lista filtrada (~%s)", c.model, c.count ?? "?");
-        }
-        return c.model || "";
+    // Etiquetas de los botones icon-only del header (title + aria-label, para que
+    // los lectores de pantalla los anuncien). Wrapped en _t() → traducibles.
+    get openInTuquiLabel() {
+        return _t("Abrir en Tuqui");
+    }
+    get followContextLabel() {
+        return _t("Seguir el contexto de Odoo");
+    }
+    get expandLabel() {
+        return this.state.expanded ? _t("Contraer") : _t("Expandir");
+    }
+    get minimizeLabel() {
+        return _t("Minimizar");
+    }
+    get closeLabel() {
+        return _t("Cerrar");
+    }
+    get restoreLabel() {
+        return _t("Abrir Tuqui");
     }
 
     close() {

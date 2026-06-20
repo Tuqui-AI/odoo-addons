@@ -1,0 +1,236 @@
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* tuqui_assistant
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 19.0+e\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-06-20 19:51+0000\n"
+"PO-Revision-Date: 2026-06-20 19:51+0000\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: \n"
+"Plural-Forms: \n"
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+msgid "Abrir Tuqui"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+msgid "Abrir en Tuqui"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Abrí un formulario (1 registro) para aplicar cambios desde acá."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Abrí un formulario (1 registro) para mandar al chatter."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid ""
+"Cambios aplicados al formulario (sin guardar). Revisá y Guardá o Descartá."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+msgid "Cerrar"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__client_id
+msgid "Client"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,help:tuqui_assistant.field_tuqui_assistant_sso_nonce__client_id
+msgid ""
+"Companion OAuth client_id this nonce is bound to (anti cross-workspace "
+"replay)."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid ""
+"Conectá Tuqui (companion) desde Ajustes para usar el asistente desde acá."
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__consumed_at
+msgid "Consumed At"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+msgid "Contraer"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__create_uid
+msgid "Created by"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__create_date
+msgid "Created on"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__display_name
+msgid "Display Name"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Enviar mensaje"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+msgid "Expandir"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__expires_at
+msgid "Expires At"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__id
+msgid "ID"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "La propuesta debe ser un objeto { campo: valor }."
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__write_uid
+msgid "Last Updated by"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__write_date
+msgid "Last Updated on"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+msgid "Minimizar"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Ningún campo de la propuesta se puede aplicar al formulario abierto."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "No se pudieron aplicar los cambios: %s"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "No se pudo abrir el compositor del chatter: %s"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__nonce
+msgid "Nonce"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__odoo_uid
+msgid "Odoo Uid"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Registrar nota"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Se ignoraron campos que no se pueden editar en este formulario: %s"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+msgid "Seguir el contexto de Odoo"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+#: code:addons/tuqui_assistant/static/src/systray/systray.xml:0
+msgid "Tuqui"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model,name:tuqui_assistant.model_tuqui_assistant_sso_nonce
+msgid "Tuqui Assistant SSO Nonce"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.actions.server,name:tuqui_assistant.ir_cron_gc_sso_nonces_ir_actions_server
+msgid "Tuqui Assistant: GC SSO nonces"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.constraint,message:tuqui_assistant.constraint_tuqui_assistant_sso_nonce_nonce_unique
+msgid "Tuqui SSO nonce must be unique."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid "Tuqui no está conectado a este Odoo"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-python
+#: code:addons/tuqui_assistant/models/tuqui_assistant_sso_nonce.py:0
+msgid ""
+"Tuqui no está conectado a este Odoo (companion). Activá la conexión primero."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+msgid "Tuqui no está conectado: no se puede abrir la app."
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,help:tuqui_assistant.field_tuqui_assistant_sso_nonce__odoo_uid
+msgid ""
+"res.users id the SSO token will be minted for (captured from env.uid at "
+"mint)."
+msgstr ""
