@@ -20,17 +20,69 @@
 }
 
 // --- Panel ---
+// Card flotante anclada abajo-derecha (ya NO una columna full-height que tapa
+// el chatter/diálogos de Odoo). z-index $zindex-sticky (=1020, var de Bootstrap
+// vía `web`) queda POR DEBAJO de modales/popovers (≥1055) → no los ocluye.
 .o-tuqui-panel {
     position: fixed;
-    top: 0;
-    right: 0;
+    bottom: 0;
+    right: 12px;
     width: 380px;
-    max-width: 92vw;
-    height: 100vh;
+    max-width: 100vw;
+    height: Min(70vh, 720px);
     background: var(--o-view-background-color, #fff);
-    border-left: 1px solid var(--tuqui-salvia-300);
-    box-shadow: -2px 0 12px rgba(0, 0, 0, 0.12);
-    z-index: 1050;
+    border: 1px solid var(--tuqui-salvia-300);
+    border-bottom: 0;
+    border-radius: 0.6rem 0.6rem 0 0;
+    box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.18);
+    overflow: hidden;
+    z-index: $zindex-sticky;
+}
+
+// Card expandida (Fase 2): toggle de tamaño, sin resize libre. Cap por viewport
+// para no desbordar en pantallas chicas (el media query mobile la lleva a full).
+.o-tuqui-panel.o-tuqui--expanded {
+    width: Min(720px, 92vw);
+    height: Min(92vh, 1000px);
+}
+
+// Burbuja flotante (panel minimizado): botón redondo abajo-derecha. Mismo
+// z-index que la card → tampoco tapa modales.
+.o-tuqui-bubble-launcher {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--tuqui-salvia-600);
+    border: 0;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: $zindex-sticky;
+    &:hover,
+    &:focus {
+        background: var(--tuqui-salvia-700);
+    }
+    .o-tuqui-bubble-logo {
+        width: 30px;
+        height: 30px;
+    }
+}
+
+// Mobile: la card ocupa el viewport completo (un card de 380px no entra bien).
+@media (max-width: 575.98px) {
+    .o-tuqui-panel {
+        right: 0;
+        width: 100vw;
+        max-width: 100vw;
+        height: 100dvh;
+        border-radius: 0;
+        border: 0;
+    }
 }
 
 .o-tuqui-panel-header {
@@ -47,11 +99,42 @@
         font-size: 1.05rem;
         letter-spacing: -0.3px;
     }
+    .o-tuqui-header-actions {
+        gap: 0.15rem;
+    }
+    .o-tuqui-open-external,
+    .o-tuqui-pin,
+    .o-tuqui-expand,
+    .o-tuqui-minimize,
     .o-tuqui-close {
         color: rgba(255, 255, 255, 0.85);
         &:hover {
             color: #fff;
         }
+    }
+    // Pin "Seguir contexto": inactivo apagado/diagonal; activo en mostaza + recto.
+    .o-tuqui-pin {
+        color: rgba(255, 255, 255, 0.55);
+        .fa-thumb-tack {
+            transform: rotate(40deg);
+            transition: transform 0.12s ease;
+        }
+        &:hover {
+            color: rgba(255, 255, 255, 0.85);
+        }
+        &.o-tuqui-pin--active {
+            color: var(--tuqui-mostaza);
+            &:hover {
+                color: var(--tuqui-mostaza);
+            }
+            .fa-thumb-tack {
+                transform: rotate(0deg);
+            }
+        }
+    }
+    // El glyph fa-window-minimize es un guión bajo pegado abajo; centrarlo.
+    .o-tuqui-minimize .fa-window-minimize {
+        vertical-align: middle;
     }
 }
 

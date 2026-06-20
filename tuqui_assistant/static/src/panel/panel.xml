@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <templates xml:space="preserve">
     <t t-name="tuqui_assistant.Panel">
-        <div t-if="state.panelOpen" class="o-tuqui-panel d-flex flex-column">
+        <!-- La card se mantiene MONTADA mientras panelOpen (con el iframe dentro):
+             al minimizar se oculta por CSS (d-none), NO se desmonta — un remount
+             gastaría un 2º nonce SSO single-use → 401. La burbuja es un elemento
+             aparte (t-if), sin iframe. Ver service.minimize/restore. -->
+        <div t-if="state.panelOpen" class="o-tuqui-panel d-flex flex-column"
+             t-att-class="{ 'd-none': state.minimized, 'o-tuqui--expanded': state.expanded }">
             <!-- Header -->
             <div class="o-tuqui-panel-header d-flex align-items-center justify-content-between">
                 <span class="o-tuqui-brand d-flex align-items-center">
@@ -9,9 +14,27 @@
                          src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
                     <span class="o-tuqui-title">Tuqui</span>
                 </span>
-                <button class="btn btn-sm o-tuqui-close" t-on-click="close" title="Cerrar">
-                    <i class="fa fa-times"/>
-                </button>
+                <span class="o-tuqui-header-actions d-flex align-items-center">
+                    <button class="btn btn-sm o-tuqui-open-external" t-on-click="openInTuqui"
+                            title="Abrir en Tuqui">
+                        <i class="fa fa-external-link"/>
+                    </button>
+                    <button class="btn btn-sm o-tuqui-pin"
+                            t-att-class="{ 'o-tuqui-pin--active': state.followContext }"
+                            t-on-click="toggleFollowContext" title="Seguir el contexto de Odoo">
+                        <i class="fa fa-thumb-tack"/>
+                    </button>
+                    <button class="btn btn-sm o-tuqui-expand" t-on-click="toggleExpand"
+                            t-att-title="state.expanded ? 'Contraer' : 'Expandir'">
+                        <i class="fa" t-att-class="state.expanded ? 'fa-compress' : 'fa-expand'"/>
+                    </button>
+                    <button class="btn btn-sm o-tuqui-minimize" t-on-click="minimize" title="Minimizar">
+                        <i class="fa fa-window-minimize"/>
+                    </button>
+                    <button class="btn btn-sm o-tuqui-close" t-on-click="close" title="Cerrar">
+                        <i class="fa fa-times"/>
+                    </button>
+                </span>
             </div>
 
             <!-- Contexto del registro abierto -->
@@ -43,5 +66,14 @@
                 </div>
             </t>
         </div>
+
+        <!-- Burbuja flotante cuando está minimizado: elemento SEPARADO (sin
+             iframe). Click → restore() vuelve a mostrar la card ya montada. -->
+        <button t-if="state.panelOpen and state.minimized"
+                class="o-tuqui-bubble-launcher btn"
+                t-on-click="restore" title="Abrir Tuqui">
+            <img class="o-tuqui-bubble-logo"
+                 src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
+        </button>
     </t>
 </templates>

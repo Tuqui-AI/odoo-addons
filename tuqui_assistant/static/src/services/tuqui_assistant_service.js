@@ -71,8 +71,32 @@ function serializeRecordFields(record) {
 export const tuquiAssistantService = {
     dependencies: ["notification", "orm"],
     start(env, { notification, orm }) {
+        // Preferencias persistidas (sobreviven recargas): card expandida y si el
+        // panel sigue el contexto de Odoo. Lectura tolerante a fallos (localStorage
+        // puede tirar en modo privado / cuota). `followContext` default true.
+        const LS_EXPANDED = "tuqui_assistant.expanded";
+        const LS_FOLLOW = "tuqui_assistant.followContext";
+        function readBool(key, fallback) {
+            try {
+                const raw = window.localStorage.getItem(key);
+                return raw === null ? fallback : raw === "1";
+            } catch {
+                return fallback;
+            }
+        }
+        function writeBool(key, value) {
+            try {
+                window.localStorage.setItem(key, value ? "1" : "0");
+            } catch {
+                // sin persistencia (modo privado / cuota): el estado vive en memoria.
+            }
+        }
+
         const state = reactive({
             panelOpen: false,
+            minimized: false,
+            expanded: readBool(LS_EXPANDED, false),
+            followContext: readBool(LS_FOLLOW, true),
             context: null,
         });
 
@@ -140,6 +164,34 @@ export const tuquiAssistantService = {
 
         function togglePanel() {
             state.panelOpen = !state.panelOpen;
+            // Al cerrar/reabrir desde el systray, arrancá con la card visible: el
+            // estado minimizado es per-apertura y no debe sobrevivir un toggle.
+            state.minimized = false;
+        }
+
+        // Minimizar a burbuja / restaurar la card. NO cierra el panel: el iframe
+        // sigue montado (la card se oculta por CSS, no se desmonta) — un remount
+        // gastaría un 2º nonce SSO single-use → 401. Ver panel.xml.
+        function minimize() {
+            state.minimized = true;
+        }
+        function restore() {
+            state.minimized = false;
+        }
+
+        // Expandir / colapsar la card (Fase 2): toggle de tamaño, sin resize libre.
+        // Se persiste para que la preferencia sobreviva recargas.
+        function toggleExpand() {
+            state.expanded = !state.expanded;
+            writeBool(LS_EXPANDED, state.expanded);
+        }
+
+        // Seguir contexto (Fase 3a): cuando está OFF, navegar a otro registro de
+        // Odoo NO empuja contexto nuevo al iframe (la conversación congela el suyo).
+        // El gate vive en el panel (useEffect del _contextKey). Se persiste.
+        function toggleFollowContext() {
+            state.followContext = !state.followContext;
+            writeBool(LS_FOLLOW, state.followContext);
         }
 
         /**
@@ -257,6 +309,10 @@ export const tuquiAssistantService = {
             setSearchContext,
             clearContext,
             togglePanel,
+            minimize,
+            restore,
+            toggleExpand,
+            toggleFollowContext,
             applyProposal,
             getEmbedBootstrap,
             getSsoAuth,

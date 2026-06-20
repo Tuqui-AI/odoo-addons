@@ -67,14 +67,17 @@ export class TuquiPanel extends Component {
         onWillUnmount(() => window.removeEventListener("message", this._onMessage));
 
         // Cuando cambia el contexto (record abierto / cambios sin guardar),
-        // re-empujarlo al iframe si ya está listo.
+        // re-empujarlo al iframe si ya está listo. Gateado por `followContext`
+        // (Fase 3a): si el pin está OFF, navegar a otro registro NO empuja
+        // contexto nuevo → la conversación congela el suyo. Se sigue dependiendo
+        // de `state.followContext` para que reactivar el pin re-dispare el push.
         useEffect(
             () => {
-                if (this.ui.connected && this.ui.embedReady) {
+                if (this.ui.connected && this.ui.embedReady && this.state.followContext) {
                     this._postContext();
                 }
             },
-            () => [this._contextKey()]
+            () => [this._contextKey(), this.state.followContext]
         );
     }
 
@@ -213,6 +216,53 @@ export class TuquiPanel extends Component {
 
     close() {
         this.tuquiAssistant.togglePanel();
+    }
+
+    // Minimizar a burbuja: oculta la card por CSS (NO desmonta el iframe → no
+    // gasta un 2º nonce SSO). Restaurar vuelve a mostrarla.
+    minimize() {
+        this.tuquiAssistant.minimize();
+    }
+
+    restore() {
+        this.tuquiAssistant.restore();
+    }
+
+    // Expandir / colapsar la card (Fase 2). La clase la aplica el template vía
+    // t-att-class sobre state.expanded.
+    toggleExpand() {
+        this.tuquiAssistant.toggleExpand();
+    }
+
+    // Pin "Seguir contexto" (Fase 3a): togglea si los cambios de registro en Odoo
+    // se empujan al iframe. El gate efectivo vive en el useEffect del _contextKey.
+    toggleFollowContext() {
+        this.tuquiAssistant.toggleFollowContext();
+    }
+
+    // URL de la web app COMPLETA del workspace (ruta canónica /w/:slug → dashboard;
+    // ver main.tsx routes). Misma fuente que embedUrl (base_url + slug de
+    // getEmbedBootstrap). "" si falta base/slug.
+    get _tuquiAppUrl() {
+        const base = (this.ui.baseUrl || "").replace(/\/+$/, "");
+        if (!base || !this.ui.slug) {
+            return "";
+        }
+        return `${base}/w/${encodeURIComponent(this.ui.slug)}`;
+    }
+
+    // "Abrir en Tuqui" (item CTO #1): abre la web app del workspace en una pestaña
+    // nueva. Guard si falta slug/base (companion no conectado).
+    openInTuqui() {
+        const url = this._tuquiAppUrl;
+        if (!url) {
+            this.notification.add(
+                _t("Tuqui no está conectado: no se puede abrir la app."),
+                { type: "warning" }
+            );
+            return;
+        }
+        window.open(url, "_blank", "noopener");
     }
 
 }
