@@ -19,7 +19,8 @@ import { _t } from "@web/core/l10n/translation";
  * Protocolo postMessage (alineado con el hook `useEmbedBridge` del SPA):
  *  Odoo → SPA: { source: "tuqui-odoo", type: "context", payload: PageContext }
  *  SPA → Odoo: { source: "tuqui-spa",  type: "ready" }
- *              { source: "tuqui-spa",  type: "apply", payload: { changes, rationale } }
+ *              { source: "tuqui-spa",  type: "apply",   payload: { changes, rationale } }
+ *              { source: "tuqui-spa",  type: "chatter", payload: { mode, body, subject } }
  */
 export class TuquiPanel extends Component {
     static props = {};
@@ -188,6 +189,12 @@ export class TuquiPanel extends Component {
                 break;
             case "apply":
                 this.tuquiAssistant.applyProposal(data.payload?.changes || {});
+                break;
+            case "chatter":
+                // Propuesta de contenido para el chatter: abre el compositor
+                // estándar de Odoo pre-cargado (el usuario revisa y envía). NUNCA
+                // se publica en silencio — el dispatch humano es estructural.
+                this.tuquiAssistant.proposeChatter(data.payload || {});
                 break;
         }
     }

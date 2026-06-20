@@ -68,9 +68,44 @@ function serializeRecordFields(record) {
     return out;
 }
 
+/**
+ * Sanitiza defensivamente un fragmento HTML (body de chatter) ANTES de pasarlo
+ * al compositor. El campo `body` de mail.compose.message es html con sanitize=True,
+ * así que el server limpia al guardar; esto es defensa en profundidad del lado
+ * cliente: parsea en un documento desconectado (NO se ejecuta nada — DOMParser
+ * no corre scripts ni dispara <img>/<iframe>) y elimina vectores activos:
+ *   - <script> / <style> / <iframe> / <object> / <embed> / <link> / <meta>
+ *   - atributos de evento on* (onclick, onerror, …)
+ *   - URLs javascript: en href/src
+ * Si el parseo falla por cualquier motivo, devuelve "" (no se arriesga a inyectar).
+ */
+function sanitizeChatterBody(html) {
+    if (typeof html !== "string" || !html.trim()) {
+        return "";
+    }
+    try {
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const KILL = ["script", "style", "iframe", "object", "embed", "link", "meta", "base"];
+        doc.querySelectorAll(KILL.join(",")).forEach((el) => el.remove());
+        doc.querySelectorAll("*").forEach((el) => {
+            for (const attr of [...el.attributes]) {
+                const name = attr.name.toLowerCase();
+                const value = (attr.value || "").replace(/\s+/g, "").toLowerCase();
+                if (name.startsWith("on") || ((name === "href" || name === "src") && value.startsWith("javascript:"))) {
+                    el.removeAttribute(attr.name);
+                }
+            }
+        });
+        return doc.body ? doc.body.innerHTML : "";
+    } catch {
+        return "";
+    }
+}
+
 export const tuquiAssistantService = {
-    dependencies: ["notification", "orm"],
-    start(env, { notification, orm }) {
+    // `action` es para abrir el compositor estándar (doAction) desde proposeChatter.
+    dependencies: ["notification", "orm", "action"],
+    start(env, { notification, orm, action }) {
         // Preferencias persistidas (sobreviven recargas): card expandida y si el
         // panel sigue el contexto de Odoo. Lectura tolerante a fallos (localStorage
         // puede tirar en modo privado / cuota). `followContext` default true.
@@ -303,6 +338,64 @@ export const tuquiAssistantService = {
             return true;
         }
 
+        /**
+         * Propone contenido para el chatter del registro abierto: abre el
+         * compositor ESTÁNDAR de Odoo (mail.compose.message) pre-cargado en un
+         * diálogo (target:"new"). El usuario revisa y hace clic en Enviar — NUNCA
+         * se publica en silencio (el dispatch humano es estructural). Mirror del
+         * `openFullComposer` del AI de Odoo Enterprise.
+         *
+         * GUARDRAILS (no se confía en el SPA):
+         *   - Requiere contexto "record" (model + resId). Si no hay form abierto,
+         *     avisa y corta (no se puede mandar al chatter de "nada").
+         *   - Default a NOTA INTERNA (mail.mt_note). Solo mode==="message" usa
+         *     mail.mt_comment (mensaje a seguidores).
+         *   - body se trata como HTML y se sanitiza defensivamente.
+         *
+         * @param {{mode?: string, body?: string, subject?: string}} payload
+         */
+        async function proposeChatter({ mode, body, subject } = {}) {
+            const ctx = state.context;
+            if (!ctx || ctx.kind !== "record" || !ctx.model || !ctx.resId) {
+                notification.add(
+                    _t("Abrí un formulario (1 registro) para mandar al chatter."),
+                    { type: "warning" }
+                );
+                return false;
+            }
+            // Default a nota interna; solo "message" notifica a seguidores.
+            const isMessage = mode === "message";
+            const safeBody = sanitizeChatterBody(body);
+            const composerContext = {
+                default_model: ctx.model,
+                default_res_ids: [ctx.resId],
+                default_body: safeBody,
+                default_subtype_xmlid: isMessage ? "mail.mt_comment" : "mail.mt_note",
+                default_composition_mode: "comment",
+            };
+            if (typeof subject === "string" && subject.trim()) {
+                composerContext.default_subject = subject;
+            }
+            try {
+                await action.doAction({
+                    type: "ir.actions.act_window",
+                    name: isMessage ? _t("Enviar mensaje") : _t("Registrar nota"),
+                    res_model: "mail.compose.message",
+                    view_mode: "form",
+                    views: [[false, "form"]],
+                    target: "new",
+                    context: composerContext,
+                });
+            } catch (e) {
+                notification.add(
+                    _t("No se pudo abrir el compositor del chatter: %s", e.message || e),
+                    { type: "danger" }
+                );
+                return false;
+            }
+            return true;
+        }
+
         return {
             state,
             setRecordContext,
@@ -314,6 +407,7 @@ export const tuquiAssistantService = {
             toggleExpand,
             toggleFollowContext,
             applyProposal,
+            proposeChatter,
             getEmbedBootstrap,
             getSsoAuth,
             getContextPayload,
