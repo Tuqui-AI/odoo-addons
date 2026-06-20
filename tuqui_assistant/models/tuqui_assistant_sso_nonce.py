@@ -74,14 +74,8 @@ class TuquiAssistantSsoNonce(models.Model):
         "connect Tuqui" prompt instead of the iframe when it's False.
         """
         oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
-        base_url = (
-            oauth_client._get_tuqui_base_url() if oauth_client else "https://tuqui.com"
-        )
-        connected = bool(
-            oauth_client
-            and oauth_client.state == "active"
-            and oauth_client.workspace_id_external
-        )
+        base_url = oauth_client._get_tuqui_base_url() if oauth_client else "https://tuqui.com"
+        connected = bool(oauth_client and oauth_client.state == "active" and oauth_client.workspace_id_external)
         return {
             "connected": connected,
             "base_url": base_url,
@@ -104,9 +98,7 @@ class TuquiAssistantSsoNonce(models.Model):
         """
         oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         if not oauth_client or oauth_client.state != "active" or not oauth_client.client_id:
-            raise UserError(
-                _("Tuqui no está conectado a este Odoo (companion). Activá la conexión primero.")
-            )
+            raise UserError(_("Tuqui no está conectado a este Odoo (companion). Activá la conexión primero."))
 
         nonce = secrets.token_urlsafe(48)
         expires_at = fields.Datetime.add(fields.Datetime.now(), seconds=_NONCE_TTL_SECONDS)
