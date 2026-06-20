@@ -8,19 +8,31 @@ import { _t } from "@web/core/l10n/translation";
 /**
  * Panel lateral del asistente Tuqui.
  *
- * Dos modos:
- *  - L1 (iframe): si está seteado el system parameter `tuqui_assistant.spa_url`,
- *    embebe el SPA de Tuqui (modo embed) y habla con él por `postMessage`:
- *    contexto del form baja, propuesta de cambios sube → se aplica con el bridge
- *    `record._update`. Reusa TODA la UI de Tuqui (composer, micrófono, artifacts).
- *  - Fallback nativo: shell de chat OWL (composer + tarjetas de propuesta con
- *    accept/reject por campo). Útil sin SPA configurado.
+ * Embebe el SPA de Tuqui en un `<iframe>` (modo embed) y reusa TODA su UI
+ * (composer, micrófono, artifacts, streaming). NO hay system param ni shell de
+ * chat nativo de fallback: la URL del embed se DERIVA del companion (ADR 0001).
+ *
+ *  - La base de Tuqui (`tuqui.base_url`, default `https://tuqui.com`) y el slug
+ *    del workspace activado salen de `getEmbedBootstrap()` → `embed_bootstrap`
+ *    del modelo, que lee el oauth client del companion. Si el companion no está
+ *    `active` (o no hay slug), `connected` es false y el panel muestra un prompt
+ *    "conectá Tuqui desde Ajustes" en lugar del iframe — sin fallback.
+ *  - Auth: SSO sin login. Al `ready`, el panel mintea un nonce single-use atado
+ *    al usuario Odoo (`issue_for_current_user`) y se lo pasa al iframe por
+ *    postMessage; el SPA lo canjea por una sesión.
+ *  - Contexto del form baja por postMessage; las propuestas de cambio suben y se
+ *    aplican en memoria con el bridge `record._update` (Guardar/Descartar nativo).
  *
  * Protocolo postMessage (alineado con el hook `useEmbedBridge` del SPA):
- *  Odoo → SPA: { source: "tuqui-odoo", type: "context", payload: PageContext }
+ *  Odoo → SPA: { source: "tuqui-odoo", type: "auth",    payload: { client_id, nonce } }
+ *              { source: "tuqui-odoo", type: "context", payload: PageContext }
  *  SPA → Odoo: { source: "tuqui-spa",  type: "ready" }
  *              { source: "tuqui-spa",  type: "apply",   payload: { changes, rationale } }
  *              { source: "tuqui-spa",  type: "chatter", payload: { mode, body, subject } }
+ *
+ * El host valida que cada mensaje venga del iframe montado (`ev.source ===
+ * iframe.contentWindow`) Y de un origin concreto que matchee el del SPA (nunca
+ * "*"). Ver `_handleMessage`.
  */
 export class TuquiPanel extends Component {
     static props = {};
@@ -174,11 +186,23 @@ export class TuquiPanel extends Component {
         if (!data || data.source !== "tuqui-spa") {
             return;
         }
-        // Seguridad: el mensaje debe venir de nuestro iframe y del origin del SPA.
-        if (this.iframeRef.el && ev.source !== this.iframeRef.el.contentWindow) {
+        // Seguridad (defensa en profundidad). Un atacante puede falsificar
+        // `{source:"tuqui-spa"}` desde otra ventana/origin, así que NO alcanza
+        // con mirar el source: exigimos las dos condiciones, sin atajos.
+        //
+        // 1) El mensaje TIENE que venir de NUESTRO iframe. Si el iframe no está
+        //    montado (sin companion conectado, panel cerrado), `iframeRef.el` es
+        //    null → rechazamos en vez de aceptar a ciegas (antes el check se
+        //    salteaba cuando no había iframe).
+        const frame = this.iframeRef.el;
+        if (!frame || ev.source !== frame.contentWindow) {
             return;
         }
-        if (this._spaOrigin !== "*" && ev.origin !== this._spaOrigin) {
+        // 2) El origin TIENE que ser el del SPA y ser concreto. Si `_spaOrigin`
+        //    cayó a "*" (baseUrl inválida / sin resolver), NO validamos contra
+        //    "*" (aceptaría cualquier origin) — sin origin concreto, descartamos.
+        const spaOrigin = this._spaOrigin;
+        if (spaOrigin === "*" || ev.origin !== spaOrigin) {
             return;
         }
         switch (data.type) {

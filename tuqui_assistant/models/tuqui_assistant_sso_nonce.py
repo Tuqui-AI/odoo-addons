@@ -55,7 +55,15 @@ class TuquiAssistantSsoNonce(models.Model):
 
     _nonce_unique = models.Constraint(
         "unique(nonce)",
-        "Tuqui SSO nonce must be unique.",
+        # Translatable, env-aware message. ``models.Constraint`` accepts a callable
+        # ``message(env, diagnostics)`` (odoo/orm/table_objects.py
+        # ``Constraint.get_error_message``) that is invoked at *raise* time, so the
+        # text is resolved in the offending user's language. We use the callable
+        # form rather than a bare module-level ``_(...)``: calling ``_()`` at class
+        # definition has no language context yet and logs
+        # "no translation language detected" at boot. ``env._`` inside the lambda
+        # is still picked up by the i18n extractor.
+        lambda env, _diagnostics: env._("Tuqui SSO nonce must be unique."),
     )
 
     @api.model
@@ -120,20 +128,50 @@ class TuquiAssistantSsoNonce(models.Model):
     def redeem(self, nonce: str) -> dict | None:
         """Redeem a nonce → ``{"odoo_uid": int, "client_id": str}`` or None.
 
-        Single-use: marks ``consumed_at`` in the same transaction. Returns None
-        for unknown / already-consumed / expired nonces (caller maps to HTTP).
+        Single-use and **atomic**: the consume is a single guarded
+        ``UPDATE ... WHERE id=%s AND consumed_at IS NULL`` that also enforces the
+        TTL inline. Concurrent replays can't both win — only the first UPDATE
+        matches the ``consumed_at IS NULL`` predicate and gets a row back; the
+        loser sees zero rows and is treated as already-consumed. Returns None for
+        unknown / already-consumed / expired nonces (caller maps to HTTP 410).
+
+        A naive search → check ``consumed_at`` → write would let two requests
+        both pass the Python check before either marks the row, replaying the SSO
+        handoff; the DB predicate closes that window.
         """
         nonce = (nonce or "").strip()
         if not nonce:
             return None
+        # Resolve the row id cheaply; existence/empty handled here, but the
+        # consume + TTL gate live in the atomic UPDATE below (single source of
+        # truth, race-free).
         row = self.sudo().search([("nonce", "=", nonce)], limit=1)
-        if not row or row.consumed_at:
+        if not row:
             return None
-        if row.expires_at and row.expires_at < fields.Datetime.now():
+        # The guard below reads consumed_at/expires_at via raw SQL, so any pending
+        # ORM writes to this row must hit the DB first — otherwise the predicate
+        # would see stale column values (the ORM defers UPDATEs until flush).
+        self.env["tuqui.assistant.sso.nonce"].flush_model(["consumed_at", "expires_at"])
+        self.env.cr.execute(
+            """
+            UPDATE tuqui_assistant_sso_nonce
+               SET consumed_at = now() AT TIME ZONE 'UTC'
+             WHERE id = %s
+               AND consumed_at IS NULL
+               AND (expires_at IS NULL OR expires_at > (now() AT TIME ZONE 'UTC'))
+         RETURNING odoo_uid, client_id
+            """,
+            (row.id,),
+        )
+        claimed = self.env.cr.fetchone()
+        # Keep the ORM cache in sync with the raw UPDATE (consumed_at changed).
+        row.invalidate_recordset(["consumed_at"])
+        if not claimed:
+            # Lost the race, already consumed, or expired — single None result,
+            # no distinction leaked to the caller.
             return None
-        result = {"odoo_uid": row.odoo_uid, "client_id": row.client_id}
-        row.sudo().write({"consumed_at": fields.Datetime.now()})
-        return result
+        odoo_uid, client_id = claimed
+        return {"odoo_uid": odoo_uid, "client_id": client_id}
 
     @api.model
     def _gc_old_nonces(self) -> int:

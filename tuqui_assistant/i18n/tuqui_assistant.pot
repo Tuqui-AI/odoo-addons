@@ -205,7 +205,8 @@ msgid "Tuqui Assistant: GC SSO nonces"
 msgstr ""
 
 #. module: tuqui_assistant
-#: model:ir.model.constraint,message:tuqui_assistant.constraint_tuqui_assistant_sso_nonce_nonce_unique
+#. odoo-python
+#: code:addons/tuqui_assistant/models/tuqui_assistant_sso_nonce.py:0
 msgid "Tuqui SSO nonce must be unique."
 msgstr ""
 
