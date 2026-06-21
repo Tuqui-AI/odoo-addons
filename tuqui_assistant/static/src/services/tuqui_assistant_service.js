@@ -264,6 +264,18 @@ export const tuquiAssistantService = {
          * valores en memoria (`fields`, escalares por tipo; con cambios sin guardar).
          * Para "selection"/"list" manda ids/dominio/count — NO las filas (guard
          * de tamaño): el detalle lo pide Tuqui por el gateway si lo necesita.
+         *
+         * CRÍTICO: el resultado se manda por `postMessage`, que serializa con el
+         * structured clone algorithm — y ese algoritmo NO puede clonar Proxies.
+         * `state.context` es `reactive(...)`, así que sus valores ANIDADOS
+         * (`domain`, `filters`, `resIds`) son arrays Proxy: un `{...state.context}`
+         * los copia tal cual (siguen siendo Proxy) y `postMessage` tira
+         * `DataCloneError`. El form no lo sufría porque su `fields` se reconstruye
+         * como objeto plano (serializeRecordFields) y el resto son escalares — pero
+         * list/selection mandaban arrays reactivos y el `postMessage` reventaba en
+         * silencio (el catch de `_postContext`), así que NUNCA llegaba el contexto
+         * de lista/kanban al SPA. Devolvemos un objeto PLANO (deep copy) para que
+         * cualquier estructura reactiva quede aplanada, sin importar el `kind`.
          */
         function getContextPayload() {
             if (!state.context) {
@@ -274,7 +286,17 @@ export const tuquiAssistantService = {
                 ctx.dirty = Boolean(activeRecord.dirty);
                 ctx.fields = serializeRecordFields(activeRecord);
             }
-            return ctx;
+            // Aplanar a JSON puro: arranca los Proxies reactivos (domain/filters/
+            // resIds) que romperían el structured clone de postMessage. Los datos
+            // que llevan son JSON-safe (arrays/strings/números/booleanos), así que
+            // un round-trip por JSON es seguro y suficiente.
+            try {
+                return JSON.parse(JSON.stringify(ctx));
+            } catch {
+                // Defensa: si algo no fuese serializable, devolvé al menos la
+                // identidad mínima en vez de nada (mejor contexto parcial que cero).
+                return { kind: ctx.kind, model: ctx.model };
+            }
         }
 
         /**

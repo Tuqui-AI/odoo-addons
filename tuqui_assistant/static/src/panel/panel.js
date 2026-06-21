@@ -176,8 +176,13 @@ export class TuquiPanel extends Component {
                 },
                 this._spaOrigin
             );
-        } catch {
-            // origin distinto / iframe aún no navegado: se reintenta al próximo "ready"
+        } catch (e) {
+            // origin distinto / iframe aún no navegado: se reintenta al próximo
+            // "ready". Lo logueamos (warn, no silencioso): un DataCloneError acá
+            // —payload con un Proxy reactivo no clonable— hizo que el contexto de
+            // lista/kanban NUNCA llegara al SPA sin dejar rastro. getContextPayload
+            // ahora devuelve JSON plano, pero si vuelve a fallar, que se vea.
+            console.warn("[tuqui_assistant] no se pudo postear el contexto al iframe:", e);
         }
     }
 
