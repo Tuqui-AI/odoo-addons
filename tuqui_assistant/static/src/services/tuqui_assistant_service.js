@@ -671,10 +671,10 @@ export const tuquiAssistantService = {
             }
             if (notApplied.length) {
                 notification.add(
+                    // Single string literal (no `+` concat) so Odoo's i18n
+                    // extractor captures the full msgid. Same runtime output.
                     _t(
-                        "Se aplicaron los cambios, pero no se pudo agregar la(s) línea(s) en: %s. " +
-                            "Revisá el formulario; puede que falte resolver un dato (p.ej. el producto). " +
-                            "No des por hecho que la línea quedó agregada.",
+                        "Se aplicaron los cambios, pero no se pudo agregar la(s) línea(s) en: %s. Revisá el formulario; puede que falte resolver un dato (p.ej. el producto). No des por hecho que la línea quedó agregada.",
                         notApplied.join(", ")
                     ),
                     { type: "warning" }

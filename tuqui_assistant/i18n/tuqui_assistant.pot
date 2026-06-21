@@ -6,8 +6,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 19.0+e\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-20 19:51+0000\n"
-"PO-Revision-Date: 2026-06-20 19:51+0000\n"
+"POT-Creation-Date: 2026-06-21 04:32+0000\n"
+"PO-Revision-Date: 2026-06-21 04:32+0000\n"
 "Last-Translator: \n"
 "Language-Team: \n"
 "MIME-Version: 1.0\n"
@@ -160,6 +160,24 @@ msgid "No se pudo abrir el compositor del chatter: %s"
 msgstr ""
 
 #. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "No se pudo abrir el formulario nuevo en Odoo: %s"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "No se pudo abrir la vista en Odoo: %s"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "No se pudo navegar: falta el modelo de Odoo a abrir."
+msgstr ""
+
+#. module: tuqui_assistant
 #: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__nonce
 msgid "Nonce"
 msgstr ""
@@ -173,6 +191,15 @@ msgstr ""
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
 msgid "Registrar nota"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid ""
+"Se aplicaron los cambios, pero no se pudo agregar la(s) línea(s) en: %s. "
+"Revisá el formulario; puede que falte resolver un dato (p.ej. el producto). "
+"No des por hecho que la línea quedó agregada."
 msgstr ""
 
 #. module: tuqui_assistant

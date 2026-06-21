@@ -170,7 +170,6 @@ export class TuquiPanel extends Component {
         if (!auth?.nonce || !auth?.client_id) {
             return;
         }
-        this._authPosted = true;
         try {
             win.postMessage(
                 {
@@ -180,6 +179,11 @@ export class TuquiPanel extends Component {
                 },
                 this._spaOrigin
             );
+            // Solo tras un postMessage exitoso: si tira (origin distinto / iframe
+            // aún no navegado), el flag queda en false y el próximo "ready"
+            // reintenta — el caso que el catch documenta. Marcarlo antes hacía que
+            // el early-return de arriba lo bloqueara para siempre.
+            this._authPosted = true;
         } catch {
             // origin distinto / iframe aún no navegado: se reintenta al próximo "ready"
         }
