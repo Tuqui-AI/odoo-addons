@@ -279,7 +279,12 @@ export const tuquiAssistantService = {
          */
         function getContextPayload() {
             if (!state.context) {
-                return null;
+                // Sin registro/lista abiertos (home, dashboard, settings…): NO
+                // devolvemos null. Un sentinel {kind:"none"} hace que el SPA mande
+                // SIEMPRE un odoo_context, así el backend trata el turno como embed
+                // y expone open_odoo_view (navegar desde el home). Ver _build_odoo_
+                // context_note (rama kind=="none") y el panel (_postContext on open).
+                return { kind: "none" };
             }
             const ctx = { ...state.context };
             if (ctx.kind === "record" && activeRecord) {
@@ -418,6 +423,100 @@ export const tuquiAssistantService = {
             return true;
         }
 
+        // View types que el frontend puede abrir en modo browse. En sync con la
+        // allow-list del backend (open_odoo_view); cualquier otra cosa cae a "list".
+        const BROWSE_VIEW_TYPES = ["list", "kanban", "pivot", "graph", "calendar", "form"];
+
+        /**
+         * Navega la UI de Odoo desde el chat embebido (tool open_odoo_view del
+         * SPA vía postMessage). NO escribe nada: abre una pantalla con el
+         * act_window estándar de Odoo (que chequea permisos como cualquier acción).
+         * A diferencia de proposeChatter, navega la ventana completa
+         * (target:"current"), NO un diálogo.
+         *
+         *   - mode==="browse": abre una lista/pivot/gráfico filtrado por `domain`.
+         *     `viewType` se valida contra BROWSE_VIEW_TYPES (default "list"); se
+         *     incluyen también form y list para que el usuario pueda alternar vista.
+         *   - mode==="new" (default): abre un formulario VACÍO para crear un
+         *     registro, con `defaults` pre-cargados como default_<campo>.
+         *
+         * @param {{model?: string, mode?: string, viewType?: string, domain?: any[], defaults?: object, title?: string}} payload
+         */
+        async function navigate({ model, mode, viewType, domain, defaults, title } = {}) {
+            if (typeof model !== "string" || !model.trim()) {
+                notification.add(
+                    _t("No se pudo navegar: falta el modelo de Odoo a abrir."),
+                    { type: "danger" }
+                );
+                return false;
+            }
+            if (mode === "browse") {
+                let vt = BROWSE_VIEW_TYPES.includes(viewType) ? viewType : "list";
+                // "browse" es ver un CONJUNTO filtrado: un form como vista de
+                // apertura no tiene res_id → Odoo abre un form de CREACIÓN vacío y
+                // descarta el dominio. Para crear un registro está mode="new"; acá
+                // degradamos form→list (la lista filtrada, con form para drill-in).
+                if (vt === "form") {
+                    vt = "list";
+                }
+                // La vista pedida primero (la que abre), más form y list para que
+                // el usuario pueda navegar a un registro o volver a la lista.
+                const views = [[false, vt]];
+                if (vt !== "form") {
+                    views.push([false, "form"]);
+                }
+                if (vt !== "list") {
+                    views.push([false, "list"]);
+                }
+                try {
+                    await action.doAction(
+                        {
+                            type: "ir.actions.act_window",
+                            name: title || model,
+                            res_model: model,
+                            views,
+                            domain: Array.isArray(domain) ? domain : [],
+                            target: "current",
+                            context: {},
+                        },
+                        { viewType: vt }
+                    );
+                } catch (e) {
+                    notification.add(
+                        _t("No se pudo abrir la vista en Odoo: %s", e.message || e),
+                        { type: "danger" }
+                    );
+                    return false;
+                }
+                return true;
+            }
+            // mode "new" (default): formulario vacío para crear un registro.
+            const ctx = {};
+            if (defaults && typeof defaults === "object" && !Array.isArray(defaults)) {
+                for (const [name, value] of Object.entries(defaults)) {
+                    ctx[`default_${name}`] = value;
+                }
+            }
+            try {
+                await action.doAction({
+                    type: "ir.actions.act_window",
+                    name: title || model,
+                    res_model: model,
+                    views: [[false, "form"]],
+                    target: "current",
+                    view_id: false,
+                    context: ctx,
+                });
+            } catch (e) {
+                notification.add(
+                    _t("No se pudo abrir el formulario nuevo en Odoo: %s", e.message || e),
+                    { type: "danger" }
+                );
+                return false;
+            }
+            return true;
+        }
+
         return {
             state,
             setRecordContext,
@@ -430,6 +529,7 @@ export const tuquiAssistantService = {
             toggleFollowContext,
             applyProposal,
             proposeChatter,
+            navigate,
             getEmbedBootstrap,
             getSsoAuth,
             getContextPayload,

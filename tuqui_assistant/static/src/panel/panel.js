@@ -27,8 +27,9 @@ import { _t } from "@web/core/l10n/translation";
  *  Odoo → SPA: { source: "tuqui-odoo", type: "auth",    payload: { client_id, nonce } }
  *              { source: "tuqui-odoo", type: "context", payload: PageContext }
  *  SPA → Odoo: { source: "tuqui-spa",  type: "ready" }
- *              { source: "tuqui-spa",  type: "apply",   payload: { changes, rationale } }
- *              { source: "tuqui-spa",  type: "chatter", payload: { mode, body, subject } }
+ *              { source: "tuqui-spa",  type: "apply",    payload: { changes, rationale } }
+ *              { source: "tuqui-spa",  type: "chatter",  payload: { mode, body, subject } }
+ *              { source: "tuqui-spa",  type: "navigate", payload: { model, mode, viewType, domain, defaults, title } }
  *
  * El host valida que cada mensaje venga del iframe montado (`ev.source ===
  * iframe.contentWindow`) Y de un origin concreto que matchee el del SPA (nunca
@@ -224,6 +225,12 @@ export class TuquiPanel extends Component {
                 // estándar de Odoo pre-cargado (el usuario revisa y envía). NUNCA
                 // se publica en silencio — el dispatch humano es estructural.
                 this.tuquiAssistant.proposeChatter(data.payload || {});
+                break;
+            case "navigate":
+                // Navegación de Odoo desde el chat: abre un formulario NUEVO
+                // (crear) o una lista/pivot/gráfico filtrado, vía act_window
+                // estándar (chequea permisos). NO escribe nada.
+                this.tuquiAssistant.navigate(data.payload || {});
                 break;
         }
     }
