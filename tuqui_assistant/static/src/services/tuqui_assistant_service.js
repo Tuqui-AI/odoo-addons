@@ -133,6 +133,11 @@ export const tuquiAssistantService = {
             expanded: readBool(LS_EXPANDED, false),
             followContext: readBool(LS_FOLLOW, true),
             context: null,
+            // Contador-nonce que el systray incrementa para pedirle al panel
+            // (ya abierto) que arranque un chat NUEVO sin remontar el iframe
+            // (un remount gastaría un 2º nonce SSO → 401). El panel observa los
+            // cambios y postea `new-chat` al SPA. Ver openFreshChat / systray.
+            newChatRequest: 0,
         });
 
         // Record OWL del form activo (solo en modo "record"). No reactivo a
@@ -202,6 +207,24 @@ export const tuquiAssistantService = {
             // Al cerrar/reabrir desde el systray, arrancá con la card visible: el
             // estado minimizado es per-apertura y no debe sobrevivir un toggle.
             state.minimized = false;
+        }
+
+        // Click del systray (item CTO #4): SIEMPRE abre el panel en un chat NUEVO
+        // (cerrar queda en los botones minimizar/cerrar de la card, ya no togglea).
+        //   - Panel cerrado → abrirlo monta el iframe en `/embed/:slug`, que YA es
+        //     un chat nuevo: alcanza con mostrar la card (no se postea nada; el
+        //     iframe aún no está montado/hidratado).
+        //   - Panel ya abierto (o minimizado: el iframe sigue montado) → NO se
+        //     remonta el iframe (gastaría un 2º nonce SSO → 401): se restaura la
+        //     card y se incrementa newChatRequest para que el panel le postee
+        //     `new-chat` al SPA (navegación interna a un chat nuevo).
+        function openFreshChat() {
+            const wasOpen = state.panelOpen;
+            state.panelOpen = true;
+            state.minimized = false;
+            if (wasOpen) {
+                state.newChatRequest += 1;
+            }
         }
 
         // Minimizar a burbuja / restaurar la card. NO cierra el panel: el iframe
@@ -523,6 +546,7 @@ export const tuquiAssistantService = {
             setSearchContext,
             clearContext,
             togglePanel,
+            openFreshChat,
             minimize,
             restore,
             toggleExpand,

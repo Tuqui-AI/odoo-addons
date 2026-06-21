@@ -4,7 +4,10 @@ import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 
 /**
- * Botón en el systray que abre/cierra el panel del asistente Tuqui.
+ * Botón en el systray del asistente Tuqui. Click → SIEMPRE abre el panel en un
+ * chat NUEVO (item CTO #4): ya no togglea. Cerrar/minimizar vive en los botones
+ * propios de la card. openFreshChat resuelve el caso "ya abierto" sin remontar
+ * el iframe (no gasta un 2º nonce SSO).
  */
 export class TuquiSystray extends Component {
     static props = {};
@@ -15,7 +18,7 @@ export class TuquiSystray extends Component {
     }
 
     onClick() {
-        this.tuquiAssistant.togglePanel();
+        this.tuquiAssistant.openFreshChat();
     }
 }
 

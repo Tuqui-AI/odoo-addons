@@ -24,12 +24,14 @@ import { _t } from "@web/core/l10n/translation";
  *    aplican en memoria con el bridge `record._update` (Guardar/Descartar nativo).
  *
  * Protocolo postMessage (alineado con el hook `useEmbedBridge` del SPA):
- *  Odoo → SPA: { source: "tuqui-odoo", type: "auth",    payload: { client_id, nonce } }
- *              { source: "tuqui-odoo", type: "context", payload: PageContext }
+ *  Odoo → SPA: { source: "tuqui-odoo", type: "auth",     payload: { client_id, nonce } }
+ *              { source: "tuqui-odoo", type: "context",  payload: PageContext }
+ *              { source: "tuqui-odoo", type: "new-chat" }
  *  SPA → Odoo: { source: "tuqui-spa",  type: "ready" }
  *              { source: "tuqui-spa",  type: "apply",    payload: { changes, rationale } }
  *              { source: "tuqui-spa",  type: "chatter",  payload: { mode, body, subject } }
  *              { source: "tuqui-spa",  type: "navigate", payload: { model, mode, viewType, domain, defaults, title } }
+ *              { source: "tuqui-spa",  type: "location", payload: { path } }
  *
  * El host valida que cada mensaje venga del iframe montado (`ev.source ===
  * iframe.contentWindow`) Y de un origin concreto que matchee el del SPA (nunca
@@ -69,6 +71,11 @@ export class TuquiPanel extends Component {
                 if (this.state.panelOpen) {
                     this.ui.embedReady = false;
                     this._authPosted = false;
+                    // El iframe remonta en `/embed/:slug` (chat nuevo) al reabrir
+                    // → la ruta vieja queda stale. La olvidamos hasta que el SPA
+                    // re-postee `location` (lo hace al montar EmbedShell), para
+                    // que "Abrir en Tuqui" no abra una conversación anterior.
+                    this._lastSpaPath = null;
                     void loadBootstrap();
                 }
             },
@@ -92,6 +99,21 @@ export class TuquiPanel extends Component {
                 }
             },
             () => [this._contextKey(), this.state.followContext]
+        );
+
+        // Systray "chat nuevo" (item CTO #4): el systray incrementa
+        // newChatRequest cuando el panel YA estaba abierto. Le posteamos
+        // `new-chat` al SPA para que navegue internamente a un chat nuevo (sin
+        // remontar el iframe → sin gastar un 2º nonce SSO). Gateado por
+        // embedReady: si el iframe todavía no avisó "ready", el SPA no tiene
+        // listener montado; igual el caso "recién abierto" arranca en chat nuevo.
+        useEffect(
+            () => {
+                if (this.state.newChatRequest > 0 && this.ui.connected && this.ui.embedReady) {
+                    this._postNewChat();
+                }
+            },
+            () => [this.state.newChatRequest]
         );
     }
 
@@ -187,6 +209,22 @@ export class TuquiPanel extends Component {
         }
     }
 
+    _postNewChat() {
+        // Le pide al SPA (ya montado e hidratado) que arranque un chat nuevo como
+        // navegación INTERNA (no cambia el src del iframe → no gasta un 2º nonce
+        // SSO). El SPA lo maneja en useEmbedBridge (onNewChat). Mismo origin
+        // concreto que el resto de los posts (nunca "*").
+        const win = this.iframeRef.el?.contentWindow;
+        if (!win) {
+            return;
+        }
+        try {
+            win.postMessage({ source: "tuqui-odoo", type: "new-chat" }, this._spaOrigin);
+        } catch {
+            // origin distinto / iframe aún no navegado: el próximo click reintenta.
+        }
+    }
+
     _handleMessage(ev) {
         const data = ev.data;
         if (!data || data.source !== "tuqui-spa") {
@@ -231,6 +269,20 @@ export class TuquiPanel extends Component {
                 // (crear) o una lista/pivot/gráfico filtrado, vía act_window
                 // estándar (chequea permisos). NO escribe nada.
                 this.tuquiAssistant.navigate(data.payload || {});
+                break;
+            case "location":
+                // El SPA nos dice su ruta standalone-equivalente actual
+                // (`/w/:slug/...`) en cada cambio de ruta del embed. La guardamos
+                // para que "Abrir en Tuqui" abra la conversación/vista que el
+                // usuario está mirando, no /settings/home. Validamos que sea un
+                // path relativo seguro (empieza con "/" pero no "//") antes de
+                // confiar en él para construir una URL absoluta.
+                {
+                    const path = data.payload?.path;
+                    if (typeof path === "string" && path.startsWith("/") && !path.startsWith("//")) {
+                        this._lastSpaPath = path;
+                    }
+                }
                 break;
         }
     }
@@ -284,19 +336,23 @@ export class TuquiPanel extends Component {
         this.tuquiAssistant.toggleFollowContext();
     }
 
-    // URL de la web app COMPLETA del workspace (ruta canónica /w/:slug → dashboard;
-    // ver main.tsx routes). Misma fuente que embedUrl (base_url + slug de
-    // getEmbedBootstrap). "" si falta base/slug.
+    // URL de la web app COMPLETA del workspace en una pestaña nueva. Abre la
+    // VISTA ACTUAL del usuario en el embed (conversación / proyectos / agentes),
+    // no el dashboard: el SPA nos postea su ruta standalone-equivalente
+    // (`_lastSpaPath`, p.ej. `/w/:slug/chat/:id`) en cada cambio de ruta. Si
+    // todavía no llegó ningún `location` (recién montado), caemos al canónico
+    // `/w/:slug` (→ /chat → home del workspace). "" si falta base/slug.
     get _tuquiAppUrl() {
         const base = (this.ui.baseUrl || "").replace(/\/+$/, "");
         if (!base || !this.ui.slug) {
             return "";
         }
-        return `${base}/w/${encodeURIComponent(this.ui.slug)}`;
+        const path = this._lastSpaPath || `/w/${encodeURIComponent(this.ui.slug)}`;
+        return `${base}${path}`;
     }
 
-    // "Abrir en Tuqui" (item CTO #1): abre la web app del workspace en una pestaña
-    // nueva. Guard si falta slug/base (companion no conectado).
+    // "Abrir en Tuqui" (item CTO #1): abre la web app del workspace en la VISTA
+    // ACTUAL, en una pestaña nueva. Guard si falta slug/base (companion no conectado).
     openInTuqui() {
         const url = this._tuquiAppUrl;
         if (!url) {
