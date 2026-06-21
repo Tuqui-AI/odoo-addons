@@ -69,6 +69,198 @@ function serializeRecordFields(record) {
 }
 
 /**
+ * Detecta si un elemento de un valor x2many YA es una tupla-comando web de Odoo
+ * (`[op, id, vals]`, op numérico 0..6) en vez de un objeto plano de valores.
+ * El frontend de Odoo (`StaticList._applyCommands`) SOLO entiende tuplas-comando:
+ * `[[0, false, {vals}]]` para CREATE, `[[1, id, {vals}]]` UPDATE, etc. Un objeto
+ * plano `{product_id: 1}` como "comando" tiene `command[0] === undefined`, no
+ * matchea ningún case y `_applyCommands` no tiene `default` → NO-OP SILENCIOSO
+ * (la línea nunca se crea y `_update` igual resuelve "ok"). Ver record.js
+ * `_preprocessX2manyChanges` + static_list.js `_applyCommands`.
+ */
+function isX2manyCommandTuple(el) {
+    return Array.isArray(el) && typeof el[0] === "number";
+}
+
+/**
+ * Normaliza el valor de UN campo x2many a tuplas-comando web de Odoo, tolerando
+ * la forma "amigable" (lista de objetos planos) que un LLM tiende a mandar:
+ *   - `[{product_id: 1, product_uom_qty: 2}]`  → `[[0, false, {product_id: 1, …}]]`
+ *     (cada objeto plano se vuelve un CREATE, op 0).
+ *   - `[[0, false, {…}]]` (ya tuplas)          → se deja igual.
+ *   - listas mixtas                            → se normaliza elemento por elemento.
+ *   - ids sueltos `[1, 2]` (atajo LINK m2m)    → `[[4, 1], [4, 2]]` (op 4 = LINK).
+ * Devuelve el valor tal cual si no es un array (no se entromete con otras formas).
+ * CREATE=0, LINK=4 son los códigos del web command set de Odoo (orm_service.js).
+ */
+function normalizeX2manyValue(value) {
+    if (!Array.isArray(value)) {
+        return value;
+    }
+    return value.map((el) => {
+        if (isX2manyCommandTuple(el)) {
+            return el; // ya es [op, id, vals]
+        }
+        if (el && typeof el === "object" && !Array.isArray(el)) {
+            // Objeto plano de valores → CREATE (agregar línea nueva).
+            return [0, false, el];
+        }
+        if (typeof el === "number") {
+            // Id suelto → LINK (vincular registro existente, típico m2m).
+            return [4, el];
+        }
+        return el; // forma desconocida: no la tocamos (que falle visible, no en silencio)
+    });
+}
+
+/**
+ * Normaliza una propuesta `{campo: valor}` ya validada contra los campos del
+ * form: para cada campo one2many/many2many, convierte la forma amigable (lista
+ * de objetos planos) a tuplas-comando que `record._update` sí aplica. Pura (sin
+ * dependencias de OWL) → testeable en aislamiento. No muta la entrada.
+ *
+ * @param {Object} known   propuesta filtrada {campo: valor}
+ * @param {Object} fieldDefs  `record.fields` (defs con `.type`)
+ * @returns {Object} nueva propuesta con los x2many normalizados a tuplas-comando
+ */
+function normalizeProposalX2many(known, fieldDefs) {
+    const defs = fieldDefs || {};
+    const out = {};
+    for (const [name, value] of Object.entries(known)) {
+        const type = defs[name]?.type;
+        if (type === "one2many" || type === "many2many") {
+            out[name] = normalizeX2manyValue(value);
+        } else {
+            out[name] = value;
+        }
+    }
+    return out;
+}
+
+/**
+ * Coerce los valores RELACIONALES dentro de las `vals` de un comando CREATE/UPDATE
+ * de un x2many a la forma que el record OWL del sub-modelo entiende.
+ *
+ * Por qué hace falta: `StaticList._applyCommands` (case CREATE) crea el datapoint
+ * de la línea con `new Record(..., command[2])`, y `parseServerValue` para un
+ * many2one acepta `[id, name]` o `{id, display_name}` pero un **entero pelado lo
+ * devuelve tal cual** (no lo reconoce como m2o seteado). Un LLM manda
+ * `{"product_id": 1}` (id pelado) → la línea queda SIN producto y el onchange ve
+ * un producto vacío (no calcula name/price). Convertimos cada valor de un sub-
+ * campo many2one/many2one_reference de `<int>` a `{id: <int>}` para que el m2o
+ * quede seteado y el onchange del padre resuelva el resto (name, precio, totales).
+ *
+ * `subFields` son las defs de campo del SUB-modelo (las del StaticList del x2many).
+ * Sin ellas (no resolubles) devolvemos las vals sin tocar (best-effort, no rompe).
+ */
+function coerceRelationalCommandVals(vals, subFields) {
+    if (!vals || typeof vals !== "object" || Array.isArray(vals) || !subFields) {
+        return vals;
+    }
+    const out = {};
+    for (const [k, v] of Object.entries(vals)) {
+        const t = subFields[k]?.type;
+        if ((t === "many2one" || t === "many2one_reference") && typeof v === "number") {
+            out[k] = { id: v };
+        } else {
+            out[k] = v;
+        }
+    }
+    return out;
+}
+
+/**
+ * Aplica coerceRelationalCommandVals a cada comando CREATE(0)/UPDATE(1) de un
+ * valor x2many ya normalizado a tuplas-comando. Deja intactos LINK/DELETE/UNLINK
+ * (no llevan vals que coercer) y cualquier forma que no sea tupla.
+ */
+function coerceX2manyCommandRelations(commands, subFields) {
+    if (!Array.isArray(commands) || !subFields) {
+        return commands;
+    }
+    return commands.map((cmd) => {
+        if (Array.isArray(cmd) && (cmd[0] === 0 || cmd[0] === 1) && cmd[2] && typeof cmd[2] === "object") {
+            return [cmd[0], cmd[1], coerceRelationalCommandVals(cmd[2], subFields)];
+        }
+        return cmd;
+    });
+}
+
+/**
+ * Separa los comandos x2many de un valor (ya normalizado a tuplas) en:
+ *   - `creates`: comandos CREATE (op 0) → se aplican vía `list.addNewRecord` +
+ *     `line._update(campo)` para que dispare el ONCHANGE de la línea (sin eso, el
+ *     producto queda sin name/precio: el onchange del padre NO computa la línea
+ *     nueva — verificado en runtime). `vals` = el objeto de valores del comando.
+ *   - `rest`: el resto (UPDATE/DELETE/UNLINK/LINK/SET) → se mandan tal cual a
+ *     `record._update` (esos sí los maneja bien `_applyCommands`).
+ * Si el valor no es un array de tuplas, va entero a `rest` (no nos arriesgamos).
+ */
+function splitX2manyCreates(value) {
+    const creates = [];
+    const rest = [];
+    if (!Array.isArray(value)) {
+        return { creates, rest: value };
+    }
+    for (const cmd of value) {
+        if (Array.isArray(cmd) && cmd[0] === 0 && cmd[2] && typeof cmd[2] === "object") {
+            creates.push(cmd[2]); // las vals del CREATE
+        } else {
+            rest.push(cmd);
+        }
+    }
+    return { creates, rest };
+}
+
+/**
+ * Cuenta los registros vivos de un campo x2many en un record OWL (para el
+ * chequeo "honesto": ¿la propuesta realmente agregó la línea?). El StaticList
+ * expone `.count` y, defensivamente, `.records`/`.currentIds`. Devuelve null si
+ * no se puede leer (no es x2many, o no hay valor) → el caller no infiere nada.
+ */
+function x2manyCount(record, name) {
+    try {
+        const val = record?.data?.[name];
+        if (!val) {
+            return null;
+        }
+        if (typeof val.count === "number") {
+            return val.count;
+        }
+        if (Array.isArray(val.records)) {
+            return val.records.length;
+        }
+        if (Array.isArray(val.currentIds)) {
+            return val.currentIds.length;
+        }
+    } catch {
+        // sin lectura confiable: no afirmamos nada sobre si tomó o no.
+    }
+    return null;
+}
+
+/**
+ * Dada la propuesta NORMALIZADA, devuelve los campos x2many que incluyen al
+ * menos un comando que AGREGA filas (CREATE=0 o LINK=4) — esos son los que
+ * deberían hacer crecer el `count`. Sirve para el chequeo honesto post-apply:
+ * si pedimos agregar una línea y el count no subió, fue un no-op → warning.
+ */
+function x2manyFieldsExpectingGrowth(normalized, fieldDefs) {
+    const defs = fieldDefs || {};
+    const fields = [];
+    for (const [name, value] of Object.entries(normalized)) {
+        const type = defs[name]?.type;
+        if ((type === "one2many" || type === "many2many") && Array.isArray(value)) {
+            const adds = value.filter((c) => Array.isArray(c) && (c[0] === 0 || c[0] === 4)).length;
+            if (adds > 0) {
+                fields.push({ name, adds });
+            }
+        }
+    }
+    return fields;
+}
+
+/**
  * Sanitiza defensivamente un fragmento HTML (body de chatter) ANTES de pasarlo
  * al compositor. El campo `body` de mail.compose.message es html con sanitize=True,
  * así que el server limpia al guardar; esto es defensa en profundidad del lado
@@ -373,12 +565,120 @@ export const tuquiAssistantService = {
                 );
                 return false;
             }
+            // Normalizar x2many a tuplas-comando web: el LLM suele mandar la forma
+            // amigable `[{product_id:1,…}]` (lista de objetos planos), pero
+            // `record._update` → `StaticList._applyCommands` SOLO entiende
+            // `[[0,false,{…}]]` (CREATE). Un objeto plano es un NO-OP silencioso
+            // (no matchea ningún case, sin `default`) → la línea nunca se agrega y
+            // `_update` igual resuelve "ok". Toleramos AMBAS formas. Ver helpers arriba.
+            const normalized = normalizeProposalX2many(known, fieldDefs);
+            // Coerce los m2o pelados (id entero) dentro de las vals de cada comando
+            // CREATE/UPDATE a `{id}`: si no, la línea nueva queda SIN el m2o (p.ej.
+            // sin producto) y el onchange no calcula name/precio/totales. Las defs
+            // del sub-modelo salen del StaticList vivo del x2many (`.fields`).
+            for (const [name, value] of Object.entries(normalized)) {
+                const type = fieldDefs[name]?.type;
+                if (type === "one2many" || type === "many2many") {
+                    const subFields = activeRecord.data?.[name]?.fields;
+                    normalized[name] = coerceX2manyCommandRelations(value, subFields);
+                }
+            }
+            // Las líneas NUEVAS (comando CREATE) NO se aplican con
+            // `_update({campo:[[0,false,vals]]})`: por ese camino la línea se crea
+            // pero su ONCHANGE no dispara → queda sin name/precio (p.ej. producto en
+            // blanco) — verificado en runtime. Se aplican aparte con
+            // `list.addNewRecord()` + `line._update(campo)` (lo que hace la grilla al
+            // elegir un producto: dispara el onchange de la línea y resuelve
+            // name/precio/totales). Separamos CREATE del resto (UPDATE/DELETE/LINK),
+            // que sí van bien por `_update`.
+            const updatePayload = {};
+            const createsByField = {}; // { campo: [vals, …] }
+            for (const [name, value] of Object.entries(normalized)) {
+                const type = fieldDefs[name]?.type;
+                if (type === "one2many" || type === "many2many") {
+                    const { creates, rest } = splitX2manyCreates(value);
+                    if (creates.length) {
+                        createsByField[name] = creates;
+                    }
+                    // Solo mandamos por _update el resto si quedó algún comando.
+                    if (Array.isArray(rest) ? rest.length : rest != null) {
+                        updatePayload[name] = rest;
+                    }
+                } else {
+                    updatePayload[name] = value;
+                }
+            }
+            // Snapshot del count de los x2many que esperamos que CREZCAN (CREATE/LINK),
+            // para el chequeo honesto post-apply: si pedimos agregar una línea y el
+            // count no sube, fue un no-op y NO mostramos el "aplicado" verde a secas.
+            const growthExpected = x2manyFieldsExpectingGrowth(normalized, fieldDefs);
+            const countsBefore = {};
+            for (const { name } of growthExpected) {
+                countsBefore[name] = x2manyCount(activeRecord, name);
+            }
             try {
-                await activeRecord.model.mutex.exec(() => activeRecord._update(known));
+                // 1) Escalares + m2o + comandos x2many que NO son CREATE → _update
+                //    (lo serializamos por el mutex del modelo, como antes).
+                if (Object.keys(updatePayload).length) {
+                    await activeRecord.model.mutex.exec(() => activeRecord._update(updatePayload));
+                }
+                // 2) Líneas nuevas: una por una vía `list.addNewRecord` + `line._update`
+                //    (dispara el onchange de la línea → resuelve name/precio/totales).
+                //    OJO: `addNewRecord` YA toma el `model.mutex` por dentro. NO lo
+                //    envolvemos en otro `mutex.exec` (sería deadlock: el exec interno
+                //    esperaría al externo que espera al interno). El `line._update`
+                //    posterior se llama directo (await secuencial), igual que la grilla.
+                for (const [fieldName, valsList] of Object.entries(createsByField)) {
+                    const list = activeRecord.data?.[fieldName];
+                    if (!list || typeof list.addNewRecord !== "function") {
+                        // Fallback defensivo: sin la API de StaticList, mandamos el
+                        // CREATE crudo por _update (al menos agrega la fila, aunque el
+                        // onchange no encadene). Mejor eso que perder la línea.
+                        await activeRecord.model.mutex.exec(() =>
+                            activeRecord._update({ [fieldName]: valsList.map((v) => [0, false, v]) })
+                        );
+                        continue;
+                    }
+                    for (const vals of valsList) {
+                        const line = await list.addNewRecord({
+                            activeFields: list.activeFields,
+                            context: {},
+                            mode: "edit",
+                        });
+                        // Aplicar cada campo de la línea (dispara su onchange). `_update`
+                        // toma el mutex por dentro, así que lo llamamos directo.
+                        for (const [k, v] of Object.entries(vals)) {
+                            await line._update({ [k]: v });
+                        }
+                    }
+                }
             } catch (e) {
                 notification.add(_t("No se pudieron aplicar los cambios: %s", e.message || e), {
                     type: "danger",
                 });
+                return false;
+            }
+            // Chequeo honesto: ¿los x2many que debían crecer realmente crecieron?
+            // Un count que no cambió (de un número conocido) = la línea no se aplicó
+            // (forma inválida, id inexistente, etc.). Avisamos en vez del verde feliz.
+            const notApplied = [];
+            for (const { name } of growthExpected) {
+                const before = countsBefore[name];
+                const after = x2manyCount(activeRecord, name);
+                if (typeof before === "number" && typeof after === "number" && after <= before) {
+                    notApplied.push(name);
+                }
+            }
+            if (notApplied.length) {
+                notification.add(
+                    _t(
+                        "Se aplicaron los cambios, pero no se pudo agregar la(s) línea(s) en: %s. " +
+                            "Revisá el formulario; puede que falte resolver un dato (p.ej. el producto). " +
+                            "No des por hecho que la línea quedó agregada.",
+                        notApplied.join(", ")
+                    ),
+                    { type: "warning" }
+                );
                 return false;
             }
             notification.add(
@@ -563,3 +863,15 @@ export const tuquiAssistantService = {
 };
 
 registry.category("services").add("tuquiAssistant", tuquiAssistantService);
+
+// Helpers puros de normalización x2many, exportados para test en aislamiento
+// (sin montar el servicio OWL). Ver embed_apply_x2many_normalize_test.js.
+export {
+    normalizeX2manyValue,
+    normalizeProposalX2many,
+    x2manyFieldsExpectingGrowth,
+    isX2manyCommandTuple,
+    coerceRelationalCommandVals,
+    coerceX2manyCommandRelations,
+    splitX2manyCreates,
+};
