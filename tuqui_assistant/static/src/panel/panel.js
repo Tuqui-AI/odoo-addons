@@ -133,7 +133,8 @@ export class TuquiPanel extends Component {
         try {
             return new URL(this.ui.baseUrl).origin;
         } catch {
-            return "*";
+            console.warn("[tuqui_assistant] baseUrl inválido, no se puede derivar origin del SPA:", this.ui.baseUrl);
+            return null;
         }
     }
 
@@ -161,15 +162,23 @@ export class TuquiPanel extends Component {
         // UNA sola vez por apertura del panel: el SPA postea "ready" varias veces
         // (gate + ChatPage + re-renders) y un nonce de más se gasta dos veces →
         // 401 en el exchange → apiFetch desloguea. El flag se resetea al abrir.
+        //
+        // El lock se fija ANTES del await: dos "ready" concurrentes pasarían el
+        // check juntos si el flag se pusiera después, cada uno minting su propio
+        // nonce. Solo el primero avanza; los siguientes ven el flag ya activo.
+        // Se resetea a false en todos los caminos de error para permitir reintento.
         if (this._authPosted) {
             return;
         }
+        this._authPosted = true;
         const win = this.iframeRef.el?.contentWindow;
         if (!win) {
+            this._authPosted = false;
             return;
         }
         const auth = await this.tuquiAssistant.getSsoAuth();
         if (!auth?.nonce || !auth?.client_id) {
+            this._authPosted = false;
             return;
         }
         try {
@@ -181,13 +190,9 @@ export class TuquiPanel extends Component {
                 },
                 this._spaOrigin
             );
-            // Solo tras un postMessage exitoso: si tira (origin distinto / iframe
-            // aún no navegado), el flag queda en false y el próximo "ready"
-            // reintenta — el caso que el catch documenta. Marcarlo antes hacía que
-            // el early-return de arriba lo bloqueara para siempre.
-            this._authPosted = true;
         } catch {
             // origin distinto / iframe aún no navegado: se reintenta al próximo "ready"
+            this._authPosted = false;
         }
     }
 
@@ -249,10 +254,9 @@ export class TuquiPanel extends Component {
             return;
         }
         // 2) El origin TIENE que ser el del SPA y ser concreto. Si `_spaOrigin`
-        //    cayó a "*" (baseUrl inválida / sin resolver), NO validamos contra
-        //    "*" (aceptaría cualquier origin) — sin origin concreto, descartamos.
+        //    es null (baseUrl inválida / sin resolver), descartamos.
         const spaOrigin = this._spaOrigin;
-        if (spaOrigin === "*" || ev.origin !== spaOrigin) {
+        if (!spaOrigin || ev.origin !== spaOrigin) {
             return;
         }
         switch (data.type) {

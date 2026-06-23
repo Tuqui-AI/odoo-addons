@@ -1,7 +1,6 @@
-import json as _json
 import secrets
-import urllib.request
 
+import requests
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
@@ -92,8 +91,9 @@ class TuquiAssistantSsoNonce(models.Model):
             try:
                 client_id = oauth_client.client_id
                 url = f"{base_url}/api/companion/bootstrap?client_id={client_id}"
-                with urllib.request.urlopen(url, timeout=3) as resp:  # noqa: S310
-                    chat_enabled = _json.loads(resp.read()).get("chat_enabled", False)
+                resp = requests.get(url, timeout=3)
+                resp.raise_for_status()
+                chat_enabled = resp.json().get("chat_enabled", False)
             except Exception:
                 chat_enabled = True  # fail-open: no bloquear si Tuqui no responde
 

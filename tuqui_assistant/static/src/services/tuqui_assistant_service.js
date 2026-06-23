@@ -3,6 +3,9 @@ import { registry } from "@web/core/registry";
 import { reactive } from "@odoo/owl";
 import { _t } from "@web/core/l10n/translation";
 
+// Guard de tamaño para ids de campos x2many enviados como contexto al SPA.
+const MAX_X2MANY_IDS = 50;
+
 /**
  * Estado compartido + puente (bridge) entre el panel del asistente y lo que el
  * usuario está mirando en Odoo.
@@ -49,7 +52,7 @@ function serializeRecordFields(record) {
                         : false;
             } else if (type === "one2many" || type === "many2many") {
                 const ids = (val.currentIds || []).filter((x) => typeof x === "number");
-                out[name] = { count: val.count ?? ids.length, ids: ids.slice(0, 50) };
+                out[name] = { count: val.count ?? ids.length, ids: ids.slice(0, MAX_X2MANY_IDS) };
             } else if (type === "date") {
                 out[name] = typeof val.toISODate === "function" ? val.toISODate() : String(val);
             } else if (type === "datetime") {
@@ -57,7 +60,7 @@ function serializeRecordFields(record) {
             } else if (type === "binary") {
                 out[name] = "<binary>";
             } else if (typeof val === "object") {
-                out[name] = JSON.parse(JSON.stringify(val));
+                out[name] = { ...val };
             } else {
                 out[name] = val;
             }
