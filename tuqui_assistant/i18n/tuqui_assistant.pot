@@ -67,8 +67,20 @@ msgstr ""
 #. module: tuqui_assistant
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid "Chat no disponible"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
 msgid ""
 "Conectá Tuqui (companion) desde Ajustes para usar el asistente desde acá."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid "El plan actual de este workspace no incluye Tuqui Chat."
 msgstr ""
 
 #. module: tuqui_assistant

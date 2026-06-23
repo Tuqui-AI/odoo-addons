@@ -1,4 +1,6 @@
+import json as _json
 import secrets
+import urllib.request
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
@@ -84,10 +86,22 @@ class TuquiAssistantSsoNonce(models.Model):
         oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         base_url = oauth_client._get_tuqui_base_url() if oauth_client else "https://tuqui.com"
         connected = bool(oauth_client and oauth_client.state == "active" and oauth_client.workspace_id_external)
+
+        chat_enabled = False
+        if connected:
+            try:
+                client_id = oauth_client.client_id
+                url = f"{base_url}/api/companion/bootstrap?client_id={client_id}"
+                with urllib.request.urlopen(url, timeout=3) as resp:  # noqa: S310
+                    chat_enabled = _json.loads(resp.read()).get("chat_enabled", False)
+            except Exception:
+                chat_enabled = True  # fail-open: no bloquear si Tuqui no responde
+
         return {
             "connected": connected,
             "base_url": base_url,
             "slug": oauth_client.workspace_id_external if oauth_client else False,
+            "chat_enabled": chat_enabled,
         }
 
     @api.model

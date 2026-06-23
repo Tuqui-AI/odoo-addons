@@ -52,6 +52,7 @@ export class TuquiPanel extends Component {
             connected: false,
             baseUrl: null,
             slug: null,
+            chatEnabled: false,
             embedReady: false,
         });
         this.iframeRef = useRef("iframe");
@@ -61,6 +62,7 @@ export class TuquiPanel extends Component {
             this.ui.connected = Boolean(boot?.connected);
             this.ui.baseUrl = boot?.base_url || null;
             this.ui.slug = boot?.slug || null;
+            this.ui.chatEnabled = Boolean(boot?.chat_enabled);
         };
         onWillStart(loadBootstrap);
         // Re-chequear al abrir el panel: si un admin desconectó companion mientras
