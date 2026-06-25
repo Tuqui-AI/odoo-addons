@@ -492,13 +492,13 @@ export const tuquiAssistantService = {
         async function applyProposal(changes) {
             if (!activeRecord) {
                 notification.add(
-                    _t("Abrí un formulario (1 registro) para aplicar cambios desde acá."),
+                    _t("Open a form (1 record) to apply changes from here."),
                     { type: "warning" }
                 );
                 return false;
             }
             if (!changes || typeof changes !== "object" || Array.isArray(changes)) {
-                notification.add(_t("La propuesta debe ser un objeto { campo: valor }."), {
+                notification.add(_t("The proposal must be an object { field: value }."), {
                     type: "danger",
                 });
                 return false;
@@ -519,13 +519,13 @@ export const tuquiAssistantService = {
             }
             if (dropped.length) {
                 notification.add(
-                    _t("Se ignoraron campos que no se pueden editar en este formulario: %s", dropped.join(", ")),
+                    _t("Skipped fields that cannot be edited in this form: %s", dropped.join(", ")),
                     { type: "warning" }
                 );
             }
             if (!Object.keys(known).length) {
                 notification.add(
-                    _t("Ningún campo de la propuesta se puede aplicar al formulario abierto."),
+                    _t("No field from the proposal can be applied to the open form."),
                     { type: "warning" }
                 );
                 return false;
@@ -618,7 +618,7 @@ export const tuquiAssistantService = {
                     }
                 }
             } catch (e) {
-                notification.add(_t("No se pudieron aplicar los cambios: %s", e.message || e), {
+                notification.add(_t("Could not apply changes: %s", e.message || e), {
                     type: "danger",
                 });
                 return false;
@@ -639,7 +639,7 @@ export const tuquiAssistantService = {
                     // Single string literal (no `+` concat) so Odoo's i18n
                     // extractor captures the full msgid. Same runtime output.
                     _t(
-                        "Se aplicaron los cambios, pero no se pudo agregar la(s) línea(s) en: %s. Revisá el formulario; puede que falte resolver un dato (p.ej. el producto). No des por hecho que la línea quedó agregada.",
+                        "Changes applied, but could not add line(s) for: %s. Check the form — a required field may be missing (e.g. the product). Do not assume the line was added.",
                         notApplied.join(", ")
                     ),
                     { type: "warning" }
@@ -647,7 +647,7 @@ export const tuquiAssistantService = {
                 return false;
             }
             notification.add(
-                _t("Cambios aplicados al formulario (sin guardar). Revisá y Guardá o Descartá."),
+                _t("Changes applied to the form (unsaved). Review and Save or Discard."),
                 { type: "success" }
             );
             return true;
@@ -673,7 +673,7 @@ export const tuquiAssistantService = {
             const ctx = state.context;
             if (!ctx || ctx.kind !== "record" || !ctx.model || !ctx.resId) {
                 notification.add(
-                    _t("Abrí un formulario (1 registro) para mandar al chatter."),
+                    _t("Open a form (1 record) to post to the chatter."),
                     { type: "warning" }
                 );
                 return false;
@@ -694,7 +694,7 @@ export const tuquiAssistantService = {
             try {
                 await action.doAction({
                     type: "ir.actions.act_window",
-                    name: isMessage ? _t("Enviar mensaje") : _t("Registrar nota"),
+                    name: isMessage ? _t("Send message") : _t("Log note"),
                     res_model: "mail.compose.message",
                     view_mode: "form",
                     views: [[false, "form"]],
@@ -703,7 +703,7 @@ export const tuquiAssistantService = {
                 });
             } catch (e) {
                 notification.add(
-                    _t("No se pudo abrir el compositor del chatter: %s", e.message || e),
+                    _t("Could not open the chatter composer: %s", e.message || e),
                     { type: "danger" }
                 );
                 return false;
@@ -733,7 +733,7 @@ export const tuquiAssistantService = {
         async function navigate({ model, mode, viewType, domain, defaults, title } = {}) {
             if (typeof model !== "string" || !model.trim()) {
                 notification.add(
-                    _t("No se pudo navegar: falta el modelo de Odoo a abrir."),
+                    _t("Cannot navigate: missing Odoo model to open."),
                     { type: "danger" }
                 );
                 return false;
@@ -771,7 +771,7 @@ export const tuquiAssistantService = {
                     );
                 } catch (e) {
                     notification.add(
-                        _t("No se pudo abrir la vista en Odoo: %s", e.message || e),
+                        _t("Could not open the view in Odoo: %s", e.message || e),
                         { type: "danger" }
                     );
                     return false;
@@ -797,7 +797,7 @@ export const tuquiAssistantService = {
                 });
             } catch (e) {
                 notification.add(
-                    _t("No se pudo abrir el formulario nuevo en Odoo: %s", e.message || e),
+                    _t("Could not open the new form in Odoo: %s", e.message || e),
                     { type: "danger" }
                 );
                 return false;

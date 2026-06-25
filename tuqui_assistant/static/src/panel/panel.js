@@ -130,7 +130,7 @@ export class TuquiPanel extends Component {
         try {
             return new URL(this.ui.baseUrl).origin;
         } catch {
-            console.warn("[tuqui_assistant] baseUrl inválido, no se puede derivar origin del SPA:", this.ui.baseUrl);
+            console.warn("[tuqui_assistant] Invalid baseUrl, cannot derive SPA origin:", this.ui.baseUrl);
             return null;
         }
     }
@@ -213,7 +213,7 @@ export class TuquiPanel extends Component {
             // —payload con un Proxy reactivo no clonable— hizo que el contexto de
             // lista/kanban NUNCA llegara al SPA sin dejar rastro. getContextPayload
             // ahora devuelve JSON plano, pero si vuelve a fallar, que se vea.
-            console.warn("[tuqui_assistant] no se pudo postear el contexto al iframe:", e);
+            console.warn("[tuqui_assistant] Could not post context to iframe:", e);
         }
     }
 
@@ -299,16 +299,16 @@ export class TuquiPanel extends Component {
     // Etiquetas de los botones icon-only del header (title + aria-label, para que
     // los lectores de pantalla los anuncien). Wrapped en _t() → traducibles.
     get openInTuquiLabel() {
-        return _t("Abrir en Tuqui");
+        return _t("Open in Tuqui");
     }
     get minimizeLabel() {
-        return _t("Minimizar");
+        return _t("Minimize");
     }
     get closeLabel() {
-        return _t("Cerrar");
+        return _t("Close");
     }
     get restoreLabel() {
-        return _t("Abrir Tuqui");
+        return _t("Open Tuqui");
     }
 
     close() {
@@ -346,7 +346,7 @@ export class TuquiPanel extends Component {
         const url = this._tuquiAppUrl;
         if (!url) {
             this.notification.add(
-                _t("Tuqui no está conectado: no se puede abrir la app."),
+                _t("Tuqui is not connected: cannot open the app."),
                 { type: "warning" }
             );
             return;

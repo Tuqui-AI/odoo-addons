@@ -120,7 +120,7 @@ class TuquiAssistantSsoNonce(models.Model):
         """
         oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         if not oauth_client or oauth_client.state != "active" or not oauth_client.client_id:
-            raise UserError(_("Tuqui no está conectado a este Odoo (companion). Activá la conexión primero."))
+            raise UserError(_("Tuqui is not connected to this Odoo (companion). Please activate the connection first."))
 
         nonce = secrets.token_urlsafe(48)
         expires_at = fields.Datetime.add(fields.Datetime.now(), seconds=_NONCE_TTL_SECONDS)
