@@ -498,14 +498,11 @@ class TuquiRpc(http.Controller):
             duration_ms = int((time.monotonic() - started) * 1000)
             emit(policy_allowed=True, success=False, error_code="validation_error", duration_ms=duration_ms)
             return _error("validation_error", str(exc), status=400)
-        except Exception:  # noqa: BLE001
-            # Server-side: full traceback. Client-side: generic copy.
-            # Never leak SQL, paths, repr(exc), or anything from the
-            # underlying call into the response body.
+        except Exception as exc:  # noqa: BLE001
             _LOG.exception("tuqui.rpc: unhandled error in %s.%s", model_name, method)
             duration_ms = int((time.monotonic() - started) * 1000)
             emit(policy_allowed=True, success=False, error_code="internal_error", duration_ms=duration_ms)
-            return _error("internal_error", "An internal error occurred.", status=500)
+            return _error("internal_error", str(exc), status=500)
 
         duration_ms = int((time.monotonic() - started) * 1000)
         result_count = _result_count(result, method)
