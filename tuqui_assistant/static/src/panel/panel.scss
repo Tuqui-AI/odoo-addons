@@ -1,0 +1,257 @@
+// Paleta Salvia (Tuqui brand v4). Local al módulo para no depender de tokens
+// externos. Ver brand/branding.md.
+.o-tuqui-panel {
+    --tuqui-salvia-800: #1f3327;
+    --tuqui-salvia-700: #344e41;
+    --tuqui-salvia-600: #3f5e4e;
+    --tuqui-salvia-300: #b8c9bf;
+    --tuqui-salvia-100: #e5ede8;
+    --tuqui-mostaza: #fea912;
+    --tuqui-ink: #0a0a0a;
+    --tuqui-paper: #f7f6f3;
+}
+
+// --- Systray ---
+// El botón usa `o_nav_entry` (clase estándar de la navbar) para alinearse
+// verticalmente igual que los demás íconos del systray (Discuss, AI, etc.).
+.o-tuqui-systray-icon {
+    height: 20px;
+    width: 20px;
+}
+
+// --- Panel ---
+// Card flotante anclada abajo-derecha (ya NO una columna full-height que tapa
+// el chatter/diálogos de Odoo). z-index $zindex-sticky (=1020, var de Bootstrap
+// vía `web`) queda POR DEBAJO de modales/popovers (≥1055) → no los ocluye.
+.o-tuqui-panel {
+    position: fixed;
+    bottom: 0;
+    right: 12px;
+    width: 380px;
+    max-width: 100vw;
+    height: Min(70vh, 720px);
+    background: var(--o-view-background-color, #fff);
+    border: 1px solid var(--tuqui-salvia-300);
+    border-bottom: 0;
+    border-radius: 0.6rem 0.6rem 0 0;
+    box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.18);
+    overflow: hidden;
+    z-index: $zindex-sticky;
+}
+
+// Burbuja flotante (panel minimizado): botón redondo abajo-derecha. Mismo
+// z-index que la card → tampoco tapa modales.
+.o-tuqui-bubble-launcher {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--tuqui-salvia-600);
+    border: 0;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: $zindex-sticky;
+    &:hover,
+    &:focus {
+        background: var(--tuqui-salvia-700);
+    }
+    .o-tuqui-bubble-logo {
+        width: 30px;
+        height: 30px;
+    }
+}
+
+// Mobile: la card ocupa el viewport completo (un card de 380px no entra bien).
+@media (max-width: 575.98px) {
+    .o-tuqui-panel {
+        right: 0;
+        width: 100vw;
+        max-width: 100vw;
+        height: 100dvh;
+        border-radius: 0;
+        border: 0;
+    }
+}
+
+.o-tuqui-panel-header {
+    background: var(--tuqui-salvia-600);
+    color: #fff;
+    padding: 0.6rem 0.75rem;
+
+    .o-tuqui-logo {
+        height: 24px;
+        width: 24px;
+    }
+    .o-tuqui-title {
+        font-weight: 700;
+        font-size: 1.05rem;
+        letter-spacing: -0.3px;
+    }
+    .o-tuqui-header-actions {
+        gap: 0.15rem;
+    }
+    .o-tuqui-open-external,
+    .o-tuqui-minimize,
+    .o-tuqui-close {
+        color: rgba(255, 255, 255, 0.85);
+        &:hover {
+            color: #fff;
+        }
+    }
+    // El glyph fa-window-minimize es un guión bajo pegado abajo; centrarlo.
+    .o-tuqui-minimize .fa-window-minimize {
+        vertical-align: middle;
+    }
+}
+
+// L1: iframe del SPA
+.o-tuqui-iframe {
+    flex: 1 1 auto;
+    width: 100%;
+    border: 0;
+    background: #fff;
+}
+
+.o-tuqui-body {
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: var(--tuqui-paper);
+}
+
+// --- Mensajes ---
+.o-tuqui-msg {
+    display: flex;
+    flex-direction: column;
+}
+.o-tuqui-msg-user {
+    align-items: flex-end;
+}
+.o-tuqui-msg-assistant,
+.o-tuqui-msg-system {
+    align-items: flex-start;
+}
+
+.o-tuqui-bubble {
+    max-width: 85%;
+    padding: 0.5rem 0.7rem;
+    border-radius: 0.9rem;
+    font-size: 0.9rem;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.o-tuqui-msg-user .o-tuqui-bubble {
+    background: var(--tuqui-salvia-600);
+    color: #fff;
+    border-bottom-right-radius: 0.25rem;
+}
+.o-tuqui-msg-assistant .o-tuqui-bubble {
+    background: #fff;
+    color: var(--tuqui-ink);
+    border: 1px solid var(--tuqui-salvia-300);
+    border-bottom-left-radius: 0.25rem;
+}
+.o-tuqui-msg-system .o-tuqui-bubble {
+    background: transparent;
+    color: var(--tuqui-salvia-700);
+    font-size: 0.78rem;
+    font-style: italic;
+    padding: 0.1rem 0.3rem;
+}
+
+// --- Tarjeta de propuesta ---
+.o-tuqui-proposal {
+    max-width: 92%;
+    background: #fff;
+    border: 1px solid var(--tuqui-salvia-300);
+    border-radius: 0.6rem;
+    padding: 0.5rem 0.6rem;
+    margin-top: 0.25rem;
+    font-size: 0.85rem;
+}
+.o-tuqui-proposal-head {
+    font-weight: 600;
+    color: var(--tuqui-salvia-700);
+    margin-bottom: 0.4rem;
+}
+.o-tuqui-field {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0;
+    margin: 0;
+    cursor: pointer;
+}
+.o-tuqui-field-name {
+    font-family: var(--font-mono, monospace);
+    font-weight: 600;
+    color: var(--tuqui-ink);
+}
+.o-tuqui-field-arrow {
+    color: var(--tuqui-salvia-300);
+}
+.o-tuqui-field-val {
+    font-family: var(--font-mono, monospace);
+    color: var(--tuqui-salvia-800);
+    word-break: break-all;
+}
+.o-tuqui-proposal-actions {
+    margin-top: 0.5rem;
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+}
+.o-tuqui-btn-primary {
+    background: var(--tuqui-salvia-600);
+    color: #fff;
+    border: none;
+    &:hover,
+    &:focus {
+        background: var(--tuqui-salvia-700);
+        color: #fff;
+    }
+}
+.o-tuqui-proposal-done {
+    margin-top: 0.4rem;
+    color: var(--tuqui-salvia-600);
+    font-weight: 600;
+}
+
+// --- Composer ---
+.o-tuqui-composer {
+    display: flex;
+    gap: 0.4rem;
+    align-items: flex-end;
+    padding: 0.6rem;
+    border-top: 1px solid var(--tuqui-salvia-300);
+    background: #fff;
+}
+.o-tuqui-input {
+    resize: none;
+    max-height: 120px;
+    font-size: 0.9rem;
+    border-color: var(--tuqui-salvia-300);
+    &:focus {
+        border-color: var(--tuqui-salvia-600);
+        box-shadow: 0 0 0 0.15rem rgba(63, 94, 78, 0.15);
+    }
+}
+.o-tuqui-send {
+    background: var(--tuqui-salvia-600);
+    color: #fff;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.65rem;
+    flex: 0 0 auto;
+    &:hover,
+    &:focus {
+        background: var(--tuqui-salvia-700);
+        color: #fff;
+    }
+}

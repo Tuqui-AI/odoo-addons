@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<templates xml:space="preserve">
+    <t t-name="tuqui_assistant.Panel">
+        <!-- La card se mantiene MONTADA mientras panelOpen (con el iframe dentro):
+             al minimizar se oculta por CSS (d-none), NO se desmonta — un remount
+             gastaría un 2º nonce SSO single-use → 401. La burbuja es un elemento
+             aparte (t-if), sin iframe. Ver service.minimize/restore. -->
+        <div t-if="state.panelOpen" class="o-tuqui-panel d-flex flex-column"
+             t-att-class="{ 'd-none': state.minimized }">
+            <!-- Header -->
+            <div class="o-tuqui-panel-header d-flex align-items-center justify-content-between">
+                <span class="o-tuqui-brand d-flex align-items-center">
+                    <img class="o-tuqui-logo me-2"
+                         src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
+                    <span class="o-tuqui-title">Tuqui</span>
+                </span>
+                <span class="o-tuqui-header-actions d-flex align-items-center">
+                    <button class="btn btn-sm o-tuqui-open-external" t-on-click="openInTuqui"
+                            t-att-title="openInTuquiLabel" t-att-aria-label="openInTuquiLabel">
+                        <i class="fa fa-external-link"/>
+                    </button>
+<button class="btn btn-sm o-tuqui-minimize" t-on-click="minimize"
+                            t-att-title="minimizeLabel" t-att-aria-label="minimizeLabel">
+                        <i class="fa fa-window-minimize"/>
+                    </button>
+                    <button class="btn btn-sm o-tuqui-close" t-on-click="close"
+                            t-att-title="closeLabel" t-att-aria-label="closeLabel">
+                        <i class="fa fa-times"/>
+                    </button>
+                </span>
+            </div>
+
+            <!-- L1: iframe del SPA de Tuqui (modo embed). Solo si el companion
+                 está conectado (slug + estado active) Y el plan incluye chat. -->
+            <t t-if="ui.connected and ui.slug and ui.chatEnabled">
+                <iframe class="o-tuqui-iframe flex-grow-1"
+                        t-ref="iframe"
+                        t-att-src="embedUrl"
+                        allow="microphone; clipboard-write; clipboard-read"
+                        title="Tuqui"/>
+            </t>
+
+            <!-- Conectado pero chat_enabled = false: plan no incluye Tuqui Chat. -->
+            <t t-elif="ui.connected and ui.slug">
+                <div class="o-tuqui-disconnected flex-grow-1 d-flex flex-column align-items-center justify-content-center text-center p-4">
+                    <img class="o-tuqui-logo mb-3" style="width: 48px; opacity: .8;"
+                         src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
+                    <p class="mb-1 fw-bold">Chat no disponible</p>
+                    <p class="small text-muted mb-0">
+                        El plan actual de este workspace no incluye Tuqui Chat.
+                    </p>
+                </div>
+            </t>
+
+            <!-- Sin companion conectado: prompt para conectar Tuqui. El chat
+                 vive atado a companion (ADR 0001), así que no hay fallback. -->
+            <t t-else="">
+                <div class="o-tuqui-disconnected flex-grow-1 d-flex flex-column align-items-center justify-content-center text-center p-4">
+                    <img class="o-tuqui-logo mb-3" style="width: 48px; opacity: .8;"
+                         src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
+                    <p class="mb-1 fw-bold">Tuqui no está conectado a este Odoo</p>
+                    <p class="small text-muted mb-0">
+                        Conectá Tuqui (companion) desde Ajustes para usar el asistente desde acá.
+                    </p>
+                </div>
+            </t>
+        </div>
+
+        <!-- Burbuja flotante cuando está minimizado: elemento SEPARADO (sin
+             iframe). Click → restore() vuelve a mostrar la card ya montada. -->
+        <button t-if="state.panelOpen and state.minimized"
+                class="o-tuqui-bubble-launcher btn"
+                t-on-click="restore"
+                t-att-title="restoreLabel" t-att-aria-label="restoreLabel">
+            <img class="o-tuqui-bubble-logo"
+                 src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
+        </button>
+    </t>
+</templates>

@@ -1,9 +1,7 @@
 """Tests for the Tuqui block in General Settings.
 
-The settings transient is the only admin surface of the module (no
-menus): it has to reflect the connection state, round-trip the read-only
-flag to the tuqui.oauth.client singleton, and proxy the lifecycle
-actions correctly.
+The settings transient reflects the connection state and proxies the
+lifecycle actions (activate, open workspace, rotate secret, disconnect).
 """
 
 from odoo.tests import TransactionCase, tagged
@@ -32,36 +30,6 @@ class TestTuquiResConfigSettings(TransactionCase):
         client.mark_active(workspace_id_external="acme")
         settings = self._settings()
         self.assertEqual(settings.tuqui_state, "active")
-
-    def test_read_only_roundtrip(self):
-        client = self.OAuth._get_or_create_singleton()[0]
-        # read_only now defaults ON; the round-trip toggles it off and back on.
-        self.assertTrue(client.read_only)
-
-        settings = self._settings()
-        settings.tuqui_read_only = False
-        settings.set_values()
-        self.assertFalse(client.read_only)
-
-        # And back on.
-        settings = self._settings()
-        settings.tuqui_read_only = True
-        settings.set_values()
-        self.assertTrue(client.read_only)
-
-    def test_get_values_reads_read_only_from_singleton(self):
-        client = self.OAuth._get_or_create_singleton()[0]
-        client.write({"read_only": True})
-        values = self.Settings.get_values()
-        self.assertTrue(values["tuqui_read_only"])
-
-    def test_set_values_without_singleton_is_noop(self):
-        """Toggling read-only before activation has nothing to write to."""
-        self.OAuth.search([]).unlink()
-        settings = self._settings()
-        settings.tuqui_read_only = True
-        settings.set_values()  # must not raise / must not create a client
-        self.assertFalse(self.OAuth.search([]))
 
     def test_activate_action_targets_start_route(self):
         settings = self._settings()

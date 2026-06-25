@@ -130,14 +130,18 @@ class TuquiOAuth(http.Controller):
             return _oauth_error("invalid_client", status=401)
         # A disconnected connection must not mint new tokens — otherwise the
         # "Disconnect" button is cosmetic (Tuqui just re-fetches a fresh token
-        # on its next 401 and carries on). We refuse only ``disconnected``, not
-        # ``!= active``: ``pending`` is a live, pre-activation state in the
-        # direct-paste flow (the module only flips to ``active`` via the redirect
-        # /exchange), and refusing it would break first activation.
-        if client.state == "disconnected":
+        # on its next 401 and carries on). Exception: activation_pending=True
+        # means /exchange just completed and this is the first token call of
+        # the handshake — allow it through so the activation can complete.
+        if client.state == "disconnected" and not client.activation_pending:
             _LOG.info("Tuqui OAuth: token refused, client disconnected (client_id=%s)", client_id)
             return _oauth_error("invalid_client", status=401, description="client_disconnected")
         access_token = _issue_access_token(env, client_id)
+        # First successful token after an exchange → complete the activation.
+        # This is the moment Odoo marks the connection live: Tuqui proved it
+        # wired its workspace correctly by successfully authenticating.
+        if client.activation_pending:
+            client.mark_active()
         client.touch_last_seen()
         return _json_response(
             {

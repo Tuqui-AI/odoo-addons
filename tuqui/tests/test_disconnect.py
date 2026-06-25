@@ -206,8 +206,8 @@ class TestTuquiDisconnect(HttpCase):
         self.client.action_disconnect()
         self._post_token(expect_status=401)
 
-        # Re-activate via the redirect /exchange, which marks the client active
-        # from any prior state.
+        # Re-activate: /exchange stages activation_pending=True, then /token
+        # completes it (mark_active is called on the first successful mint).
         nonce, _ = (
             self.env["tuqui.activation.nonce"]
             .sudo()

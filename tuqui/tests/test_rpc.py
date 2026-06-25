@@ -60,11 +60,7 @@ class TestTuquiRpcGateway(HttpCase):
 
     def setUp(self):
         super().setUp()
-        # Reset the connection to a known baseline: read-only off (the flag now
-        # defaults ON, so the member-path write tests must clear it explicitly).
         self.client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
-        if self.client.read_only:
-            self.client.write({"read_only": False})
 
     # ─── HTTP helpers ────────────────────────────────────────────────
 
@@ -186,50 +182,12 @@ class TestTuquiRpcGateway(HttpCase):
                 f"dunder {method} should be hardblocked",
             )
 
-    # ─── Read-only mode ──────────────────────────────────────────────
-
-    def test_read_only_mode_blocks_writes_and_executes_but_allows_reads(self):
-        """read_only=True: create/execute are refused; reads still pass —
-        including ``formatted_read_group``, which doesn't match the search/read
-        prefix and would be misclassified as ``execute`` without the explicit
-        entry in ``_READ_METHODS``."""
-        self.client.write({"read_only": True})
-
-        # write blocked
-        resp = self._rpc("res.partner", "create", args=[{"name": "blocked"}], expect_status=403)
-        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
-
-        # execute (arbitrary business method) blocked
-        resp = self._rpc("res.partner", "action_archive", args=[[1]], expect_status=403)
-        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
-
-        # plain read works
-        resp = self._rpc("res.partner", "search_read", args=[[]], kwargs={"limit": 1}, expect_status=200)
-        self.assertTrue(resp.json()["ok"])
-
-        # grouped read works too — formatted_read_group is a read, not an execute
-        resp = self._rpc(
-            "res.partner",
-            "formatted_read_group",
-            args=[[], ["is_company"], ["__count"]],
-            expect_status=200,
-        )
-        self.assertTrue(resp.json()["ok"])
-
-    def test_read_only_mode_still_hard_blocks_private_and_escape_hatches(self):
-        """The unconditional blocks take precedence over the read_only reason."""
-        self.client.write({"read_only": True})
-        resp = self._rpc("res.partner", "_compute_display_name", args=[[1]], expect_status=403)
-        self.assertEqual(resp.json()["error"]["code"], "private_method_blocked")
-        resp = self._rpc("res.partner", "sudo", args=[], expect_status=403)
-        self.assertEqual(resp.json()["error"]["code"], "method_blocked")
-
     def test_classify_covers_companion_transport_surface(self):
         """Contract guard: every typed method CompanionTransport posts to
         /tuqui/rpc must classify as intended. Mirror of
         tuqui_core/integrations/odoo/transports/companion.py — when its method
         surface changes, update this list and _READ_METHODS/_WRITE_METHODS
-        together. A read that slips to 'execute' is refused on read_only."""
+        together."""
         reads = ("search_read", "read", "read_group", "formatted_read_group", "search_count", "fields_get")
         writes = ("create", "write", "unlink", "copy")
         for method in reads:
@@ -319,10 +277,9 @@ class TestTuquiRpcGateway(HttpCase):
 
     def test_api_private_method_is_refused_on_member_path(self):
         """A public-named @api.private ORM method (init, mapped, …) must be
-        refused even with read_only OFF on the member path — parity with Odoo's
-        native get_public_method, which the gateway delegates to. Without the
-        guard these reach the ORM (init runs raw DDL outside ACL)."""
-        self.assertFalse(self.client.read_only)  # member path, writes/execute allowed
+        refused on the member path — parity with Odoo's native get_public_method,
+        which the gateway delegates to. Without the guard these reach the ORM
+        (init runs raw DDL outside ACL)."""
         for method in ("init", "mapped", "filtered", "new"):  # @api.private in 18 AND 19
             resp = self._rpc("res.partner", method, args=[[1]], expect_status=403)
             self.assertEqual(
@@ -348,10 +305,9 @@ class TestTuquiRpcGateway(HttpCase):
         log = self._latest_log(method="search_read", model_name="ir.config_parameter")
         self.assertFalse(log.acting_user_id, "connection-path calls have no acting member")
 
-    def test_connection_path_blocks_writes_even_when_flag_off(self):
+    def test_connection_path_blocks_writes_unconditionally(self):
         """The connection path is read-only UNCONDITIONALLY: a write/execute is
-        refused with connection_read_only even though read_only is False."""
-        self.assertFalse(self.client.read_only)
+        refused with connection_read_only regardless of any external flag."""
         # write
         resp = self._rpc("res.partner", "create", args=[{"name": "conn_blocked"}], connection=True, expect_status=403)
         self.assertEqual(resp.json()["error"]["code"], "connection_read_only")
