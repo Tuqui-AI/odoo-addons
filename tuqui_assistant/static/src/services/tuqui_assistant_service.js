@@ -40,9 +40,9 @@ function serializeRecordFields(record) {
     const data = record.data || {};
     const out = {};
     for (const name of Object.keys(data)) {
-        // Skip Studio-generated display-only HTML fields (x_dynamic_*): they are
-        // readonly banners/messages with no value for the AI context.
-        if (name.startsWith("x_dynamic_")) {
+        // Skip Studio-generated display-only HTML banner fields (x_dynamic_message*):
+        // readonly messages with no value for the AI context.
+        if (name.startsWith("x_dynamic_message")) {
             continue;
         }
         const type = fields[name]?.type;
