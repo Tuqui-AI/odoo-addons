@@ -145,7 +145,7 @@ export class TuquiPanel extends Component {
             // prefix differs. Validate the substitution before using it.
             const embedded = this.ui.storedPath.replace(/^\/w\/[^/]+/, `/embed/${slug}`);
             if (embedded.startsWith(`/embed/${slug}`)) {
-                console.debug("[tuqui] embedUrl: restoring stored path", { storedPath: this.ui.storedPath, url: `${base}${embedded}?embed=1` });
+                console.log("[tuqui] embedUrl: restoring stored path", { storedPath: this.ui.storedPath, url: `${base}${embedded}?embed=1` });
                 return `${base}${embedded}?embed=1`;
             }
             console.warn("[tuqui] embedUrl: storedPath did not convert to valid embed path, falling back", { storedPath: this.ui.storedPath, slug });
