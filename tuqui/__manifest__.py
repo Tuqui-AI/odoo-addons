@@ -1,11 +1,12 @@
 {
     "name": "Tuqui",
-    "version": "19.0.0.9.0",
+    "version": "19.0.0.11.0",
     "category": "Productivity",
     "summary": "Connect this Odoo to Tuqui in one click.",
     "author": "Tuqui-AI",
     "website": "https://tuqui.com",
     "license": "LGPL-3",
+    "images": ["static/description/portada.png"],
     "depends": [
         "base",
         "base_setup",

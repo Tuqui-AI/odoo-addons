@@ -12,10 +12,13 @@ disconnect real instead of cosmetic:
 * ``/tuqui/oauth/revoke`` (Tuqui-initiated teardown) goes through the same
   ``action_disconnect`` path, so both ends behave identically.
 * Re-activation via ``/tuqui/activation/exchange`` restores token issuance.
+* ``action_disconnect`` fires a best-effort, credential-free hint to Tuqui
+  AFTER the local teardown, and never lets that call break the teardown.
 """
 
 import json
 import secrets
+from unittest.mock import patch
 
 from odoo.addons.tuqui.controllers.oauth import _issue_access_token, verify_access_token
 from odoo.tests import HttpCase, tagged
@@ -47,6 +50,21 @@ class TestTuquiDisconnect(HttpCase):
         super().setUp()
         # Every test starts from a live, active connection.
         self.client.write({"state": "active"})
+        # action_disconnect now defers its Tuqui hint to cr.postcommit. HttpCase
+        # shares one cursor across the class, so a callback queued by a prior
+        # test (one that didn't run postcommit) would otherwise leak into this
+        # test's assertions. Start each test with an empty queue.
+        self.env.cr.postcommit.clear()
+        # action_disconnect fires a best-effort hint to Tuqui via requests.post.
+        # Stub it across the suite so no test reaches the real https://tuqui.com —
+        # the network behaviour is asserted explicitly in the dedicated tests
+        # below via their own patches (which then run cr.postcommit).
+        patcher = patch(
+            "odoo.addons.tuqui.models.tuqui_oauth_client.requests.post",
+            return_value=None,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     # ─── HTTP helpers ────────────────────────────────────────────────
 
@@ -148,6 +166,39 @@ class TestTuquiDisconnect(HttpCase):
         self.assertEqual(self._rpc_with_token(token).status_code, 401)
         self._post_token(expect_status=401)
 
+    @mute_logger("odoo.addons.tuqui.controllers.rpc")
+    def test_revoke_with_wrong_secret_does_not_disconnect(self):
+        """A leaked access token alone must not tear down the connection.
+
+        ``/oauth/revoke`` is authenticated by the ``client_secret``; a wrong
+        secret → 401 ``invalid_client`` and the teardown never runs: the
+        singleton stays ``active`` and the signing key is intact, so a token
+        minted before the failed revoke still verifies.
+        """
+        token = self._post_token(expect_status=200).json()["access_token"]
+        self.assertEqual(self._rpc_with_token(token).status_code, 200)
+
+        resp = self.url_open(
+            "/tuqui/oauth/revoke",
+            data={"client_id": self.client_id, "client_secret": "wrong-secret"},
+            headers=self._db_headers(),
+        )
+        self.assertEqual(resp.status_code, 401, resp.text)
+        self.assertEqual(resp.json()["error"], "invalid_client")
+
+        # Nothing was torn down: state intact and the signing key never rotated.
+        self.client.invalidate_recordset()
+        self.assertEqual(self.client.state, "active")
+        self.assertIsNotNone(
+            verify_access_token(self.env, token),
+            "a failed revoke must not rotate the signing key",
+        )
+        self.assertEqual(
+            self._rpc_with_token(token).status_code,
+            200,
+            "the pre-revoke token must still work after a failed revoke",
+        )
+
     # ─── reactivation restores access ────────────────────────────────
 
     @mute_logger("odoo.addons.tuqui.controllers.oauth")
@@ -175,3 +226,84 @@ class TestTuquiDisconnect(HttpCase):
 
         token = self._post_token(expect_status=200).json()["access_token"]
         self.assertEqual(self._rpc_with_token(token).status_code, 200)
+
+    # ─── disconnect hint to Tuqui (option A) ─────────────────────────
+
+    def test_disconnect_notifies_tuqui_after_teardown(self):
+        """The hint POSTs {client_id} to the right URL, deferred to a POST-COMMIT
+        callback: it must not fire during action_disconnect (that would let
+        Tuqui's re-probe write this row before our own flush commits ->
+        SerializationFailure) and, once it does fire, the teardown is durable so
+        the re-probe sees the disconnected (401) state."""
+        observed = {}
+
+        def fake_post(url, json=None, timeout=None):
+            # Capture the state the model is in at the moment of the call, so
+            # we can assert the teardown already ran (ordering matters).
+            self.client.invalidate_recordset()
+            observed["url"] = url
+            observed["json"] = json
+            observed["timeout"] = timeout
+            observed["state_at_call"] = self.client.state
+            observed["key_dead"] = verify_access_token(self.env, token) is None
+            return None
+
+        token = _issue_access_token(self.env, self.client_id)
+        self.assertIsNotNone(verify_access_token(self.env, token))
+
+        with patch(
+            "odoo.addons.tuqui.models.tuqui_oauth_client.requests.post",
+            side_effect=fake_post,
+        ) as mocked:
+            self.client.action_disconnect()
+            # Regression guard for the SerializationFailure fix: the hint is
+            # registered on cr.postcommit, so NOTHING is sent until the
+            # transaction commits. An inline POST here is what raced the flush.
+            mocked.assert_not_called()
+            self.env.cr.postcommit.run()
+
+        mocked.assert_called_once()
+        self.assertTrue(observed["url"].endswith("/api/onboarding/companion/disconnected"))
+        self.assertEqual(observed["json"], {"client_id": self.client_id})
+        self.assertEqual(observed["timeout"], 4)
+        # Teardown ran first: state flipped and signing key rotated before the POST.
+        self.assertEqual(observed["state_at_call"], "disconnected")
+        self.assertTrue(observed["key_dead"], "the signing key must rotate before Tuqui is notified")
+
+    @mute_logger("odoo.addons.tuqui.models.tuqui_oauth_client")
+    def test_disconnect_completes_when_notify_raises(self):
+        """A failing hint must not break the local teardown: state still flips
+        to disconnected, the signing key still rotates, and nothing raises."""
+        token = _issue_access_token(self.env, self.client_id)
+        self.assertIsNotNone(verify_access_token(self.env, token))
+
+        with patch(
+            "odoo.addons.tuqui.models.tuqui_oauth_client.requests.post",
+            side_effect=RuntimeError("tuqui unreachable"),
+        ) as mocked:
+            # action_disconnect only registers the post-commit hint — it must not
+            # raise. The hint itself (which blows up) runs on commit and swallows.
+            self.client.action_disconnect()
+            self.env.cr.postcommit.run()
+
+        mocked.assert_called_once()
+        self.client.invalidate_recordset()
+        self.assertEqual(self.client.state, "disconnected")
+        self.assertIsNone(
+            verify_access_token(self.env, token),
+            "the signing key must rotate even when the Tuqui hint fails",
+        )
+
+    def test_disconnect_skips_notify_when_never_activated(self):
+        """A client that never activated (pending, no workspace) has nothing
+        for Tuqui to re-probe — the hint is skipped entirely."""
+        self.client.write({"state": "pending", "workspace_id_external": False})
+
+        with patch(
+            "odoo.addons.tuqui.models.tuqui_oauth_client.requests.post",
+        ) as mocked:
+            self.client.action_disconnect()
+
+        mocked.assert_not_called()
+        self.client.invalidate_recordset()
+        self.assertEqual(self.client.state, "disconnected")

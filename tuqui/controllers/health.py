@@ -38,7 +38,6 @@ class TuquiHealth(http.Controller):
             "protocol_version": _PROTOCOL_VERSION,
             "odoo_version": release.version,
             "capabilities": _CAPABILITIES,
-            "db_name": http.request.db,
         }
         return Response(
             json.dumps(body),

@@ -1,347 +1,325 @@
-<div>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Corben:wght@400;700&family=Inter:wght@400;500;600&display=swap');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tuqui — Odoo MCP · Connect your Odoo to Claude &amp; ChatGPT, free</title>
+</head>
+<body style="font-family:'Inter','Helvetica Neue',Arial,sans-serif;color:#0A0A0A;background-color:#FFFFFF;margin:0;padding:0;">
 
-/* ── Brand v4 Salvia ────────────────────────────────── */
-.tq { font-family: 'Inter', 'Helvetica Neue', sans-serif; }
-.tq-hero { background-color: #1F3327; color: #fff; position: relative; overflow: hidden; }
-.tq-paper { background-color: #F7F6F3; }
-.tq-white { background-color: #fff; }
-.tq-dark  { background-color: #1F3327; }
+<!-- ═══════════════════════ HERO ═══════════════════════ -->
+<section style="background-color:#344E41;padding:40px 0 70px;">
+  <div style="max-width:1080px;margin:0 auto;padding:0 32px;">
 
-.tq h1, .tq h2, .tq-display {
-  font-family: 'Corben', Georgia, serif;
-  font-weight: 700;
-  line-height: 1.15;
-}
-.tq-hero-title {
-  font-family: 'New Kansas', Georgia, serif;
-  font-weight: 500;
-  font-size: 3.2em;
-  line-height: 1.15;
-  color: #fff;
-  margin: 0 0 20px;
-}
-.tq-section-title {
-  font-family: 'Inter', 'Helvetica Neue', sans-serif;
-  font-weight: 600;
-  font-size: 1.4em;
-  color: #0A0A0A;
-  margin: 0 0 16px;
-}
-.tq-section-title-inv {
-  font-family: 'Inter', 'Helvetica Neue', sans-serif;
-  font-weight: 600;
-  font-size: 1.4em;
-  color: #fff;
-  margin: 0 0 16px;
-}
-.tq-body   { font-family: 'Inter', 'Helvetica Neue', sans-serif; color: #0A0A0A; }
-.tq-muted  { color: #525251; font-family: 'Inter', 'Helvetica Neue', sans-serif; }
-.tq-lead   { color: #B8C9BF; font-family: 'Inter', 'Helvetica Neue', sans-serif; font-size: 1.05em; }
-.tq-link   { color: #3F5E4E; font-weight: 600; }
-.tq-pill   {
-  display: inline-block;
-  background: #3F5E4E;
-  color: #fff;
-  border-radius: 4px;
-  padding: 3px 12px;
-  font-size: 0.78em;
-  font-family: 'Inter', 'Helvetica Neue', sans-serif;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-.tq-card {
-  background: #fff;
-  border: 1px solid #B8C9BF;
-  border-radius: 10px;
-  padding: 22px 26px;
-  font-family: 'Inter', 'Helvetica Neue', sans-serif;
-}
-.tq-quote {
-  border-left: 3px solid #3F5E4E;
-  background: #fff;
-  padding: 11px 16px;
-  border-radius: 0 6px 6px 0;
-  font-family: 'Inter', 'Helvetica Neue', sans-serif;
-  color: #0A0A0A;
-  font-size: 0.97em;
-}
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:60px;">
+      <tr>
+        <td style="vertical-align:middle;">
+          <img src="icon.png" width="30" height="30" style="border-radius:8px;display:inline-block;vertical-align:middle;" alt="Tuqui" />
+          <span style="font-family:Georgia,serif;font-size:21px;font-weight:600;color:#fff;letter-spacing:-.01em;vertical-align:middle;margin-left:8px;">Tuqui.</span>
+          <span style="font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.55);padding:3px 8px;border:1px solid rgba(255,255,255,.25);border-radius:6px;vertical-align:middle;margin-left:6px;">Odoo MCP</span>
+        </td>
+        <td style="text-align:right;vertical-align:middle;">
+          <a href="#how" style="font-size:14px;color:rgba(255,255,255,.78);font-weight:500;text-decoration:none;margin-right:22px;">How it works</a>
+          <a href="#where" style="font-size:14px;color:rgba(255,255,255,.78);font-weight:500;text-decoration:none;margin-right:22px;">Where it works</a>
+          <a href="#security" style="font-size:14px;color:rgba(255,255,255,.78);font-weight:500;text-decoration:none;margin-right:22px;">Security</a>
+          <a href="https://tuqui.com" style="display:inline-block;background-color:#3F5E4E;color:#fff;border-radius:9px;padding:9px 18px;font-size:14px;font-weight:600;text-decoration:none;">tuqui.com →</a>
+        </td>
+      </tr>
+    </table>
 
-/* ── SVG background animation ───────────────────────── */
-.lp-bg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-.lp-path {
-  stroke-dasharray: 1000;
-  stroke-dashoffset: 1000px;
-  opacity: 0;
-}
-.lp-dot {
-  opacity: 0;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.lp-a    { animation: lp-a    14s ease-in-out infinite; }
-.lp-b    { animation: lp-b    14s ease-in-out infinite; }
-.lp-c    { animation: lp-c    14s ease-in-out infinite; }
-.lp-d    { animation: lp-d    14s ease-in-out infinite; }
-.lp-e    { animation: lp-e    14s ease-in-out infinite; }
-.lp-f    { animation: lp-f    14s ease-in-out infinite; }
-.lp-g    { animation: lp-g    14s ease-in-out infinite; }
-.lp-dot1 { animation: lp-dot1 14s ease-in-out infinite; }
-.lp-dot2 { animation: lp-dot2 14s ease-in-out infinite; }
-.lp-dot3 { animation: lp-dot3 14s ease-in-out infinite; }
-.lp-dot4 { animation: lp-dot4 14s ease-in-out infinite; }
-
-@keyframes lp-a {
-  0%  { opacity: 0; stroke-dashoffset: 1000px; }
-  2%  { opacity: .09; stroke-dashoffset: 1000px; }
-  25% { opacity: .09; stroke-dashoffset: 0; }
-  42% { opacity: .09; stroke-dashoffset: 0; }
-  52% { opacity: 0;   stroke-dashoffset: 0; }
-  53% { opacity: 0;   stroke-dashoffset: 1000px; }
-  100%{ opacity: 0;   stroke-dashoffset: 1000px; }
-}
-@keyframes lp-b {
-  0%  { opacity: 0;   stroke-dashoffset: 1000px; }
-  24% { opacity: 0;   stroke-dashoffset: 1000px; }
-  26% { opacity: .09; stroke-dashoffset: 1000px; }
-  50% { opacity: .09; stroke-dashoffset: 0; }
-  62% { opacity: .09; stroke-dashoffset: 0; }
-  72% { opacity: 0;   stroke-dashoffset: 0; }
-  73% { opacity: 0;   stroke-dashoffset: 1000px; }
-  100%{ opacity: 0;   stroke-dashoffset: 1000px; }
-}
-@keyframes lp-c {
-  0%  { opacity: 0;   stroke-dashoffset: 1000px; }
-  49% { opacity: 0;   stroke-dashoffset: 1000px; }
-  51% { opacity: .08; stroke-dashoffset: 1000px; }
-  75% { opacity: .08; stroke-dashoffset: 0; }
-  87% { opacity: .08; stroke-dashoffset: 0; }
-  97% { opacity: 0;   stroke-dashoffset: 0; }
-  98% { opacity: 0;   stroke-dashoffset: 1000px; }
-  100%{ opacity: 0;   stroke-dashoffset: 1000px; }
-}
-@keyframes lp-d {
-  0%  { opacity: 0;   stroke-dashoffset: 1000px; }
-  49% { opacity: 0;   stroke-dashoffset: 1000px; }
-  51% { opacity: .08; stroke-dashoffset: 1000px; }
-  68% { opacity: .08; stroke-dashoffset: 0; }
-  79% { opacity: .08; stroke-dashoffset: 0; }
-  88% { opacity: 0;   stroke-dashoffset: 0; }
-  89% { opacity: 0;   stroke-dashoffset: 1000px; }
-  100%{ opacity: 0;   stroke-dashoffset: 1000px; }
-}
-@keyframes lp-e {
-  0%  { opacity: 0;   stroke-dashoffset: 1000px; }
-  67% { opacity: 0;   stroke-dashoffset: 1000px; }
-  69% { opacity: .08; stroke-dashoffset: 1000px; }
-  88% { opacity: .08; stroke-dashoffset: 0; }
-  97% { opacity: .08; stroke-dashoffset: 0; }
-  100%{ opacity: 0;   stroke-dashoffset: 0; }
-}
-@keyframes lp-f {
-  0%  { opacity: 0;   stroke-dashoffset: 1000px; }
-  3%  { opacity: .09; stroke-dashoffset: 1000px; }
-  25% { opacity: .09; stroke-dashoffset: 0; }
-  37% { opacity: .09; stroke-dashoffset: 0; }
-  47% { opacity: 0;   stroke-dashoffset: 0; }
-  48% { opacity: 0;   stroke-dashoffset: 1000px; }
-  100%{ opacity: 0;   stroke-dashoffset: 1000px; }
-}
-@keyframes lp-g {
-  0%,23%{ opacity: 0;   stroke-dashoffset: 1000px; }
-  25%   { opacity: .09; stroke-dashoffset: 1000px; }
-  45%   { opacity: .09; stroke-dashoffset: 0; }
-  57%   { opacity: .09; stroke-dashoffset: 0; }
-  67%   { opacity: 0;   stroke-dashoffset: 0; }
-  68%   { opacity: 0;   stroke-dashoffset: 1000px; }
-  100%  { opacity: 0;   stroke-dashoffset: 1000px; }
-}
-@keyframes lp-dot1 {
-  0%,24%{ opacity: 0;   transform: scale(0); }
-  26%   { opacity: .18; transform: scale(1.5); }
-  28%   { opacity: .12; transform: scale(1); }
-  50%   { opacity: .12; transform: scale(1); }
-  58%   { opacity: 0;   transform: scale(0); }
-  100%  { opacity: 0;   transform: scale(0); }
-}
-@keyframes lp-dot2 {
-  0%,49%{ opacity: 0;   transform: scale(0); }
-  51%   { opacity: .18; transform: scale(1.5); }
-  53%   { opacity: .12; transform: scale(1); }
-  74%   { opacity: .12; transform: scale(1); }
-  83%   { opacity: 0;   transform: scale(0); }
-  100%  { opacity: 0;   transform: scale(0); }
-}
-@keyframes lp-dot3 {
-  0%,67%{ opacity: 0;   transform: scale(0); }
-  69%   { opacity: .18; transform: scale(1.5); }
-  71%   { opacity: .12; transform: scale(1); }
-  86%   { opacity: .12; transform: scale(1); }
-  94%   { opacity: 0;   transform: scale(0); }
-  100%  { opacity: 0;   transform: scale(0); }
-}
-@keyframes lp-dot4 {
-  0%,24%{ opacity: 0;   transform: scale(0); }
-  26%   { opacity: .18; transform: scale(1.5); }
-  28%   { opacity: .12; transform: scale(1); }
-  45%   { opacity: .12; transform: scale(1); }
-  55%   { opacity: 0;   transform: scale(0); }
-  100%  { opacity: 0;   transform: scale(0); }
-}
-</style>
-
-<!-- Hero -->
-<section class="oe_container tq-hero">
-  <div style="padding: 60px 24px 56px; position: relative; z-index: 1; text-align: center;">
-
-    <img src="icon.png" alt="Tuqui" style="width: 64px; height: 64px; border-radius: 14px; margin-bottom: 14px; display: block; margin-left: auto; margin-right: auto;" />
-
-    <p style="font-family: 'New Kansas', Georgia, serif; font-weight: 500; font-size: 1.15em; color: #fff; margin: 0 0 18px; letter-spacing: -0.01em;">
-      Tuqui<span style="color: #3F5E4E;">.</span>
-    </p>
-
-    <p class="tq-hero-title" style="margin: 0 auto 20px;">
-      El primer asistente que conoce<br><span style="color: #B8C9BF;">todo tu negocio.</span>
-    </p>
-
-    <p class="tq-lead" style="max-width: 500px; margin: 0 auto 24px; font-size: 1.05em;">
-      Tuqui conecta tu Odoo con <strong style="color:#fff;">Claude</strong>,
-      <strong style="color:#fff;">ChatGPT</strong> y cualquier asistente de IA
-      vía <strong style="color:#fff;">Odoo MCP</strong>.
-      Preguntá en lenguaje natural, respondé con datos reales.
-    </p>
-
-    <span class="tq-pill">Odoo MCP · Claude · ChatGPT · AI</span>
-  </div>
-
-  <!-- animated SVG lines (same as tuqui.com) -->
-  <svg aria-hidden="true" class="lp-bg" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" fill="none">
-    <path class="lp-path lp-a" d="M -60,860 C 80,730 200,650 360,530"    stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <path class="lp-path lp-b" d="M 360,530 C 520,410 690,365 850,395"    stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <path class="lp-path lp-c" d="M 850,395 C 990,420 1110,335 1270,215"  stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <circle class="lp-dot lp-dot1" cx="360"  cy="530" r="7" fill="white"/>
-    <circle class="lp-dot lp-dot2" cx="850"  cy="395" r="7" fill="white"/>
-    <path class="lp-path lp-d" d="M 1490,810 C 1370,680 1240,600 1085,538" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <path class="lp-path lp-e" d="M 1085,538 C 930,475 785,525 655,648"   stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <circle class="lp-dot lp-dot3" cx="1085" cy="538" r="7" fill="white"/>
-    <path class="lp-path lp-f" d="M 60,80 C 200,140 380,200 560,270"      stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <path class="lp-path lp-g" d="M 560,270 C 740,340 920,365 1100,340"   stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <circle class="lp-dot lp-dot4" cx="560"  cy="270" r="7" fill="white"/>
-  </svg>
-</section>
-
-<!-- What is Tuqui -->
-<section class="oe_container tq-paper">
-  <div class="oe_row oe_spaced tq-body" style="padding: 40px 24px;">
-    <h2 class="tq-section-title">¿Qué es Tuqui?</h2>
-    <div class="oe_span12">
-      <p>
-        Tuqui es un <strong>servidor MCP para Odoo</strong> — expone tus datos de negocio
-        (ventas, facturas, stock, CRM, empleados) como herramientas que los asistentes de IA
-        pueden leer en tiempo real. Una vez activado, tu Odoo se convierte en la fuente de
-        verdad que Claude, ChatGPT o cualquier cliente MCP puede consultar.
+    <div style="text-align:center;">
+      <div style="margin-bottom:22px;">
+        <span style="display:inline-block;background-color:rgba(254,169,18,.16);border:1px solid rgba(254,169,18,.4);color:#FEA912;border-radius:20px;padding:6px 15px;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;">★ Free · Data-only · No code</span>
+      </div>
+      <h1 style="font-family:Georgia,serif;font-weight:500;font-size:44px;letter-spacing:-.01em;line-height:1.05;color:#fff;margin:0 auto 20px;max-width:800px;">
+        Connect your Odoo over MCP.<br/><em style="font-style:italic;color:#FEA912;">Free.</em>
+      </h1>
+      <p style="font-size:17px;line-height:1.6;color:rgba(255,255,255,.7);max-width:580px;margin:0 auto 16px;">
+        The free module that enables your Odoo's <strong style="color:#fff;font-weight:600;">OAuth</strong> connection so Claude, ChatGPT, Cursor or any MCP client can access your data.
       </p>
-      <p class="tq-muted" style="margin-top: 12px;">
-        Sin exportaciones. Sin copiar y pegar. Sin prompts con datos desactualizados.
-        La IA lee tu Odoo en vivo y responde en lenguaje natural.
+      <p style="font-size:14px;line-height:1.6;color:rgba(255,255,255,.5);max-width:540px;margin:0 auto 38px;">
+        <strong style="color:rgba(255,255,255,.7);">Data-only</strong> — installs no Python code and changes nothing in your database. Works on Odoo Online, Odoo.sh and On-Premise.
       </p>
+      <a href="https://tuqui.com" style="display:inline-block;background-color:#fff;color:#3F5E4E;border-radius:11px;padding:14px 28px;font-size:14px;font-weight:600;text-decoration:none;margin-bottom:52px;">Connect your Odoo at tuqui.com →</a>
+
+      <div style="border-top:1px solid rgba(255,255,255,.14);padding-top:26px;max-width:680px;margin:0 auto;">
+        <p style="font-size:12.5px;color:rgba(255,255,255,.45);margin-bottom:18px;text-transform:uppercase;letter-spacing:.1em;font-weight:600;">Works with</p>
+        <p style="text-align:center;margin:0;">
+          <span style="display:inline-block;vertical-align:middle;margin:6px 14px;font-size:13.5px;font-weight:500;color:rgba(255,255,255,.78);">
+            <img src="claude-40.png" width="22" height="22" style="border-radius:6px;vertical-align:middle;display:inline-block;" alt="Claude" />
+            Claude
+          </span>
+          <span style="display:inline-block;vertical-align:middle;margin:6px 14px;font-size:13.5px;font-weight:500;color:rgba(255,255,255,.78);">
+            <img src="chatgpt-40.png" width="22" height="22" style="border-radius:6px;vertical-align:middle;display:inline-block;" alt="ChatGPT" />
+            ChatGPT
+          </span>
+          <span style="display:inline-block;vertical-align:middle;margin:6px 14px;font-size:13.5px;font-weight:500;color:rgba(255,255,255,.78);">
+            <img src="cursor-40.png" width="22" height="22" style="border-radius:6px;vertical-align:middle;display:inline-block;" alt="Cursor" />
+            Cursor
+          </span>
+          <span style="display:inline-block;vertical-align:middle;margin:6px 14px;font-size:13.5px;font-weight:500;color:rgba(255,255,255,.78);">
+            <img src="mcp-40.png" width="22" height="22" style="border-radius:6px;vertical-align:middle;display:inline-block;" alt="Any MCP client" />
+            Any MCP client
+          </span>
+        </p>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- Works with -->
-<section class="oe_container tq-white">
-  <div class="oe_row oe_spaced tq-body" style="padding: 40px 24px;">
-    <h2 class="tq-section-title">Compatible con tu asistente de IA</h2>
-    <div class="oe_span12" style="display: flex; flex-wrap: wrap; gap: 16px; justify-content: center;">
 
-      <div class="tq-card" style="text-align: center; min-width: 160px;">
-        <div aria-hidden="true" style="font-size: 1.8em; margin-bottom: 8px;">🤖</div>
-        <strong style="color: #0A0A0A; display: block;">Claude</strong>
-        <span class="tq-muted" style="font-size: 0.88em;">Anthropic · claude.ai</span>
-      </div>
-
-      <div class="tq-card" style="text-align: center; min-width: 160px;">
-        <div aria-hidden="true" style="font-size: 1.8em; margin-bottom: 8px;">💬</div>
-        <strong style="color: #0A0A0A; display: block;">ChatGPT</strong>
-        <span class="tq-muted" style="font-size: 0.88em;">OpenAI · chatgpt.com</span>
-      </div>
-
-      <div class="tq-card" style="text-align: center; min-width: 160px;">
-        <div aria-hidden="true" style="font-size: 1.8em; margin-bottom: 8px;">⚡</div>
-        <strong style="color: #0A0A0A; display: block;">Any MCP client</strong>
-        <span class="tq-muted" style="font-size: 0.88em;">Estándar abierto MCP</span>
-      </div>
-
-    </div>
-  </div>
-</section>
-
-<!-- What you can ask -->
-<section class="oe_container tq-paper">
-  <div class="oe_row oe_spaced tq-body" style="padding: 40px 24px;">
-    <h2 class="tq-section-title">Preguntá lo que necesitás</h2>
-    <p class="tq-muted" style="margin-bottom: 20px;">
-      Con Tuqui activado, tu asistente responde preguntas reales sobre tu negocio:
+<!-- ═══════════════════════ WHAT THIS MODULE DOES ═══════════════════════ -->
+<section style="background-color:#F7F6F3;padding:76px 0;">
+  <div style="max-width:760px;margin:0 auto;padding:0 32px;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#3F5E4E;text-align:center;margin-bottom:10px;">What this module does</div>
+    <h2 style="font-family:Georgia,serif;font-weight:500;font-size:44px;letter-spacing:-.01em;line-height:1.1;color:#0A0A0A;text-align:center;margin:0 0 18px;">The <em style="font-style:italic;color:#FEA912;">OAuth</em> bridge between your Odoo and AI</h2>
+    <p style="font-size:15.5px;line-height:1.65;color:#525251;text-align:center;max-width:56ch;margin:0 auto 34px;">
+      <strong>tuqui_mcp</strong> registers the parameters your Odoo needs to authorize Tuqui's access over MCP. It is <strong>data-only</strong>: no Python code, no model changes. Install it, finish the connection at tuqui.com, and your Odoo is ready to talk to any AI assistant.
     </p>
-    <div class="oe_span12" style="display: grid; gap: 10px; max-width: 620px; margin: 0 auto;">
-      <div class="tq-quote">"¿Cuáles son mis 10 clientes con mayor facturación este trimestre?"</div>
-      <div class="tq-quote">"¿Qué facturas están vencidas y desde hace cuántos días?"</div>
-      <div class="tq-quote">"Mostrá las órdenes de venta abiertas agrupadas por vendedor."</div>
-      <div class="tq-quote">"¿Cuánto stock queda del producto X?"</div>
-      <div class="tq-quote">"¿Qué leads del CRM llevan más de 30 días sin actividad?"</div>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td width="33%" style="padding:9px;vertical-align:top;">
+          <div style="background-color:#fff;border-radius:18px;border:.5px solid rgba(63,94,78,.16);padding:24px;text-align:center;">
+            <div style="font-size:26px;margin-bottom:10px;">🆓</div>
+            <p style="font-size:14px;font-weight:600;margin:0 0 6px;">100% free</p>
+            <p style="font-size:12.5px;color:#525251;line-height:1.55;margin:0;">The module has no cost. Just create your account at tuqui.com to activate the connection.</p>
+          </div>
+        </td>
+        <td width="33%" style="padding:9px;vertical-align:top;">
+          <div style="background-color:#fff;border-radius:18px;border:.5px solid rgba(63,94,78,.16);padding:24px;text-align:center;">
+            <div style="font-size:26px;margin-bottom:10px;">📦</div>
+            <p style="font-size:14px;font-weight:600;margin:0 0 6px;">Data-only, no code</p>
+            <p style="font-size:12.5px;color:#525251;line-height:1.55;margin:0;">No Python, no dependencies. Installable on Odoo Online, Odoo.sh and On-Premise.</p>
+          </div>
+        </td>
+        <td width="34%" style="padding:9px;vertical-align:top;">
+          <div style="background-color:#fff;border-radius:18px;border:.5px solid rgba(63,94,78,.16);padding:24px;text-align:center;">
+            <div style="font-size:26px;margin-bottom:10px;">🔑</div>
+            <p style="font-size:14px;font-weight:600;margin:0 0 6px;">OAuth connection</p>
+            <p style="font-size:12.5px;color:#525251;line-height:1.55;margin:0;">Standard OAuth 2.0 authorization. You control access and revoke it whenever you want.</p>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════ HOW IT WORKS ═══════════════════════ -->
+<section id="how" style="background-color:#fff;padding:92px 0;">
+  <div style="max-width:1080px;margin:0 auto;padding:0 32px;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#3F5E4E;text-align:center;margin-bottom:10px;">How it works</div>
+    <h2 style="font-family:Georgia,serif;font-weight:500;font-size:44px;letter-spacing:-.01em;line-height:1.1;color:#0A0A0A;text-align:center;margin:0 0 14px;">Set it up in <em style="font-style:italic;color:#FEA912;">3 steps</em></h2>
+    <p style="font-size:15.5px;line-height:1.65;color:#525251;text-align:center;max-width:56ch;margin:0 auto 48px;">Under 10 minutes. Nothing installed on your server, no technical setup.</p>
+    <div style="max-width:960px;margin:0 auto;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="33%" style="padding:9px;vertical-align:top;">
+            <div style="background-color:#fff;border-radius:18px;border:.5px solid rgba(63,94,78,.16);padding:24px;">
+              <div style="font-family:Georgia,serif;font-size:54px;font-weight:500;line-height:1;color:rgba(10,10,10,.1);margin-bottom:12px;">01</div>
+              <h3 style="font-family:Georgia,serif;font-size:20px;font-weight:500;margin:0 0 10px;line-height:1.3;">Install this module</h3>
+              <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">From Odoo Apps. It automatically registers Tuqui's connection parameters in your system.</p>
+            </div>
+          </td>
+          <td width="33%" style="padding:9px;vertical-align:top;">
+            <div style="background-color:#fff;border-radius:18px;border:.5px solid rgba(63,94,78,.16);padding:24px;">
+              <div style="font-family:Georgia,serif;font-size:54px;font-weight:500;line-height:1;color:rgba(10,10,10,.1);margin-bottom:12px;">02</div>
+              <h3 style="font-family:Georgia,serif;font-size:20px;font-weight:500;margin:0 0 10px;line-height:1.3;">Authorize via OAuth</h3>
+              <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">Create your workspace at tuqui.com and authorize access to your Odoo in a couple of clicks.</p>
+            </div>
+          </td>
+          <td width="34%" style="padding:9px;vertical-align:top;">
+            <div style="background-color:#fff;border-radius:18px;border:.5px solid rgba(63,94,78,.16);padding:24px;">
+              <div style="font-family:Georgia,serif;font-size:54px;font-weight:500;line-height:1;color:rgba(10,10,10,.1);margin-bottom:12px;">03</div>
+              <h3 style="font-family:Georgia,serif;font-size:20px;font-weight:500;margin:0 0 10px;line-height:1.3;">Ask from your AI</h3>
+              <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">From Claude, ChatGPT, Cursor or any MCP client, query your business in plain language.</p>
+            </div>
+          </td>
+        </tr>
+      </table>
     </div>
   </div>
 </section>
 
-<!-- How it works -->
-<section class="oe_container tq-white">
-  <div class="oe_row oe_spaced tq-body" style="padding: 40px 24px;">
-    <h2 class="tq-section-title">Cómo funciona</h2>
-    <div class="oe_span12">
-      <ol style="color: #0A0A0A; line-height: 2.1; padding-left: 20px; max-width: 560px; font-family: 'Inter', sans-serif;">
-        <li><strong>Instalá el módulo <code>tuqui</code></strong> — el companion que corre el servidor MCP dentro de tu Odoo.</li>
-        <li><strong>Activá desde Ajustes → Tuqui</strong> — un click genera tus credenciales OAuth 2.0 y tu endpoint MCP.</li>
-        <li><strong>Conectá tu asistente de IA</strong> — agregá el endpoint a Claude, ChatGPT o cualquier cliente compatible.</li>
-        <li><strong>Empezá a preguntar</strong> — la IA lee tu Odoo en vivo y responde en lenguaje natural.</li>
-      </ol>
+
+<!-- ═══════════════════════ WHERE IT WORKS ═══════════════════════ -->
+<section id="where" style="background-color:#F7F6F3;padding:92px 0;">
+  <div style="max-width:1080px;margin:0 auto;padding:0 32px;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#3F5E4E;text-align:center;margin-bottom:10px;">Where it works</div>
+    <h2 style="font-family:Georgia,serif;font-weight:500;font-size:44px;letter-spacing:-.01em;line-height:1.1;color:#0A0A0A;text-align:center;margin:0 0 14px;">Right where your chat is already open</h2>
+    <p style="font-size:15.5px;line-height:1.65;color:#525251;text-align:center;max-width:56ch;margin:0 auto 48px;">No new tool to learn. You add the MCP connector, and that's it.</p>
+    <div style="max-width:760px;margin:0 auto;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="50%" style="padding:8px;vertical-align:top;">
+            <div style="border-radius:16px;border:.5px solid rgba(63,94,78,.16);background-color:#fff;padding:22px;">
+              <table cellpadding="0" cellspacing="0" style="margin-bottom:12px;">
+                <tr>
+                  <td style="padding-right:12px;vertical-align:middle;">
+                    <img src="claude-40.png" width="40" height="40" style="border-radius:9px;display:block;" alt="Claude" />
+                  </td>
+                  <td style="vertical-align:middle;">
+                    <h4 style="font-size:15px;font-weight:600;margin:0 0 3px;">Claude</h4>
+                    <span style="display:inline-block;background-color:rgba(63,94,78,.1);border-radius:20px;padding:2px 9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#3F5E4E;">Available</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">Add it as a connector from your Claude.ai account. A couple of clicks.</p>
+            </div>
+          </td>
+          <td width="50%" style="padding:8px;vertical-align:top;">
+            <div style="border-radius:16px;border:.5px solid rgba(63,94,78,.16);background-color:#fff;padding:22px;">
+              <table cellpadding="0" cellspacing="0" style="margin-bottom:12px;">
+                <tr>
+                  <td style="padding-right:12px;vertical-align:middle;">
+                    <img src="chatgpt-40.png" width="40" height="40" style="border-radius:9px;display:block;" alt="ChatGPT" />
+                  </td>
+                  <td style="vertical-align:middle;">
+                    <h4 style="font-size:15px;font-weight:600;margin:0 0 3px;">ChatGPT</h4>
+                    <span style="display:inline-block;background-color:rgba(63,94,78,.1);border-radius:20px;padding:2px 9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#3F5E4E;">Available</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">Use it as a custom GPT or connector from your OpenAI account.</p>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td width="50%" style="padding:8px;vertical-align:top;">
+            <div style="border-radius:16px;border:.5px solid rgba(63,94,78,.16);background-color:#fff;padding:22px;">
+              <table cellpadding="0" cellspacing="0" style="margin-bottom:12px;">
+                <tr>
+                  <td style="padding-right:12px;vertical-align:middle;">
+                    <img src="cursor-40.png" width="40" height="40" style="border-radius:9px;display:block;" alt="Cursor" />
+                  </td>
+                  <td style="vertical-align:middle;">
+                    <h4 style="font-size:15px;font-weight:600;margin:0 0 3px;">Cursor</h4>
+                    <span style="display:inline-block;background-color:rgba(63,94,78,.1);border-radius:20px;padding:2px 9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#3F5E4E;">Available</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">Add the MCP server to your Cursor config and query your Odoo from the editor.</p>
+            </div>
+          </td>
+          <td width="50%" style="padding:8px;vertical-align:top;">
+            <div style="border-radius:16px;border:.5px solid rgba(63,94,78,.16);background-color:#fff;padding:22px;">
+              <table cellpadding="0" cellspacing="0" style="margin-bottom:12px;">
+                <tr>
+                  <td style="padding-right:12px;vertical-align:middle;">
+                    <img src="mcp-40.png" width="40" height="40" style="border-radius:9px;display:block;" alt="Any MCP client" />
+                  </td>
+                  <td style="vertical-align:middle;">
+                    <h4 style="font-size:15px;font-weight:600;margin:0 0 3px;">Any MCP client</h4>
+                    <span style="display:inline-block;background-color:rgba(63,94,78,.1);border-radius:20px;padding:2px 9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#3F5E4E;">Open standard</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">Claude Desktop and any app that implements Anthropic's MCP protocol.</p>
+            </div>
+          </td>
+        </tr>
+      </table>
     </div>
   </div>
 </section>
 
-<!-- Security -->
-<section class="oe_container tq-dark">
-  <div class="oe_row oe_spaced" style="padding: 40px 24px;">
-    <h2 class="tq-section-title-inv">Seguro por diseño</h2>
-    <div class="oe_span12">
-      <ul style="color: #B8C9BF; line-height: 2.1; padding-left: 20px; font-family: 'Inter', sans-serif;">
-        <li><strong style="color:#fff;">Solo lectura por defecto.</strong> La IA nunca puede escribir en tu Odoo. Cada llamada pasa por el ACL estándar de Odoo.</li>
-        <li><strong style="color:#fff;">OAuth 2.0 con PKCE.</strong> Autenticación estándar de la industria. Las credenciales se pueden rotar o revocar cuando quieras.</li>
-        <li><strong style="color:#fff;">Tus datos se quedan en tu Odoo.</strong> Tuqui nunca almacena ni cachea tu información de negocio en servidores externos.</li>
-        <li><strong style="color:#fff;">Log de acceso.</strong> Cada consulta queda registrada con usuario, modelo, método y resultado.</li>
-      </ul>
-    </div>
+
+<!-- ═══════════════════════ ASK ANYTHING ═══════════════════════ -->
+<section style="background-color:#fff;padding:92px 0;">
+  <div style="max-width:1080px;margin:0 auto;padding:0 32px;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#3F5E4E;text-align:center;margin-bottom:10px;">Once connected</div>
+    <h2 style="font-family:Georgia,serif;font-weight:500;font-size:44px;letter-spacing:-.01em;line-height:1.1;color:#0A0A0A;text-align:center;margin:0 0 14px;">Ask <em style="font-style:italic;color:#FEA912;">anything</em></h2>
+    <p style="font-size:15.5px;line-height:1.65;color:#525251;text-align:center;max-width:56ch;margin:0 auto 48px;">Tuqui answers with real data from your Odoo. It doesn't return loose numbers — it understands your operation.</p>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td width="33%" style="padding:9px;vertical-align:top;">
+          <div style="background-color:#fff;border-radius:18px;border:.5px solid rgba(63,94,78,.16);padding:24px;">
+            <div style="text-align:right;margin-bottom:8px;">
+              <span style="display:inline-block;max-width:90%;background-color:#EFEDEA;color:#0A0A0A;border-radius:12px 12px 2px 12px;padding:9px 13px;font-size:12.5px;line-height:1.5;text-align:left;">How much did we sell today?</span>
+            </div>
+            <div style="text-align:left;">
+              <span style="display:inline-block;max-width:92%;background-color:rgba(63,94,78,.1);color:#344E41;border-radius:2px 12px 12px 12px;padding:9px 13px;font-size:12.5px;line-height:1.5;text-align:left;">$340K. But <strong style="font-weight:700;">40% went out below list price</strong>. Want to see which reps?</span>
+            </div>
+          </div>
+        </td>
+        <td width="33%" style="padding:9px;vertical-align:top;">
+          <div style="background-color:#fff;border-radius:18px;border:.5px solid rgba(63,94,78,.16);padding:24px;">
+            <div style="text-align:right;margin-bottom:8px;">
+              <span style="display:inline-block;max-width:90%;background-color:#EFEDEA;color:#0A0A0A;border-radius:12px 12px 2px 12px;padding:9px 13px;font-size:12.5px;line-height:1.5;text-align:left;">Which products are below minimum stock?</span>
+            </div>
+            <div style="text-align:left;">
+              <span style="display:inline-block;max-width:92%;background-color:rgba(63,94,78,.1);color:#344E41;border-radius:2px 12px 12px 12px;padding:9px 13px;font-size:12.5px;line-height:1.5;text-align:left;"><strong style="font-weight:700;">12 products</strong> below minimum. 3 are top-sellers — restock those first.</span>
+            </div>
+          </div>
+        </td>
+        <td width="34%" style="padding:9px;vertical-align:top;">
+          <div style="background-color:#fff;border-radius:18px;border:.5px solid rgba(63,94,78,.16);padding:24px;">
+            <div style="text-align:right;margin-bottom:8px;">
+              <span style="display:inline-block;max-width:90%;background-color:#EFEDEA;color:#0A0A0A;border-radius:12px 12px 2px 12px;padding:9px 13px;font-size:12.5px;line-height:1.5;text-align:left;">Show me overdue invoices.</span>
+            </div>
+            <div style="text-align:left;">
+              <span style="display:inline-block;max-width:92%;background-color:rgba(63,94,78,.1);color:#344E41;border-radius:2px 12px 12px 12px;padding:9px 13px;font-size:12.5px;line-height:1.5;text-align:left;"><strong style="font-weight:700;">$1.8M across 9 invoices</strong> overdue 30+ days. Half is from a single customer.</span>
+            </div>
+          </div>
+        </td>
+      </tr>
+    </table>
   </div>
 </section>
 
-<!-- Get started -->
-<section class="oe_container tq-paper">
-  <div class="oe_row oe_spaced tq-body" style="text-align: center; padding: 48px 24px;">
-    <h2 class="tq-section-title">¿Listo para conectar tu Odoo con IA?</h2>
-    <p style="color: #525251; font-family: 'Inter', sans-serif; font-size: 1.02em; margin-bottom: 8px;">
-      Instalá el módulo <strong>tuqui</strong> y visitá
-      <a href="https://tuqui.com" class="tq-link">tuqui.com</a>
-      para activar y obtener tu endpoint MCP.
+
+<!-- ═══════════════════════ SECURITY ═══════════════════════ -->
+<section id="security" style="background-color:#F7F6F3;padding:80px 0;">
+  <div style="max-width:760px;margin:0 auto;padding:0 32px;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#3F5E4E;text-align:center;margin-bottom:10px;">Security</div>
+    <h2 style="font-family:Georgia,serif;font-weight:500;font-size:44px;letter-spacing:-.01em;line-height:1.1;color:#0A0A0A;text-align:center;margin:0 0 40px;">Secure by <em style="font-style:italic;color:#FEA912;">design</em></h2>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td width="50%" style="padding:8px;vertical-align:top;">
+          <div style="border-left-width:3px;border-left-style:solid;border-left-color:#3F5E4E;padding-left:16px;">
+            <p style="font-size:14px;font-weight:600;margin:0 0 5px;">You control access</p>
+            <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">You authorize over OAuth and revoke access whenever you want, from your own Odoo.</p>
+          </div>
+        </td>
+        <td width="50%" style="padding:8px;vertical-align:top;">
+          <div style="border-left-width:3px;border-left-style:solid;border-left-color:#3F5E4E;padding-left:16px;">
+            <p style="font-size:14px;font-weight:600;margin:0 0 5px;">OAuth 2.0 with PKCE</p>
+            <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">Industry-standard authentication. No shared passwords.</p>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td width="50%" style="padding:8px;padding-top:24px;vertical-align:top;">
+          <div style="border-left-width:3px;border-left-style:solid;border-left-color:#3F5E4E;padding-left:16px;">
+            <p style="font-size:14px;font-weight:600;margin:0 0 5px;">Data-only, no code</p>
+            <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">The module adds no Python logic and modifies no models. Zero new attack surface.</p>
+          </div>
+        </td>
+        <td width="50%" style="padding:8px;padding-top:24px;vertical-align:top;">
+          <div style="border-left-width:3px;border-left-style:solid;border-left-color:#3F5E4E;padding-left:16px;">
+            <p style="font-size:14px;font-weight:600;margin:0 0 5px;">Standard MCP protocol</p>
+            <p style="font-size:13px;color:#525251;line-height:1.6;margin:0;">Compatible with any client that implements Anthropic's MCP standard.</p>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════ FINAL CTA ═══════════════════════ -->
+<section style="background-color:#344E41;padding:84px 0;">
+  <div style="max-width:1080px;margin:0 auto;padding:0 32px;text-align:center;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.42);margin-bottom:10px;">Get started</div>
+    <h2 style="font-family:Georgia,serif;font-weight:500;font-size:50px;letter-spacing:-.01em;line-height:1.08;color:#fff;margin:8px 0 14px;">
+      Connect your Odoo over MCP<br/>in <em style="font-style:italic;color:#FEA912;">under 10 minutes.</em>
+    </h2>
+    <p style="font-size:15px;color:rgba(255,255,255,.6);max-width:500px;margin:0 auto 36px;line-height:1.65;">
+      The module is free and data-only. Your only next step is creating your account at tuqui.com.
     </p>
+    <a href="https://tuqui.com" style="display:inline-block;background-color:#fff;color:#3F5E4E;border-radius:11px;padding:14px 28px;font-size:14px;font-weight:600;text-decoration:none;">Get started free at tuqui.com →</a>
+    <p style="margin-top:20px;font-size:12px;color:rgba(255,255,255,.35);">No credit card · Works on Odoo Online · Free</p>
   </div>
 </section>
-</div>
+
+</body>
+</html>

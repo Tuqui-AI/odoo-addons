@@ -10,9 +10,9 @@ class ResConfigSettings(models.TransientModel):
     """Tuqui block under Settings > General Settings > Integrations.
 
     The whole admin surface of the module lives here: connection state +
-    activation, security policy, and the entry points to the rules table
-    and the access log. There are no Tuqui menus — the module is
-    connection infrastructure, not an app the user navigates.
+    activation, and the entry point to the access log. There are no Tuqui
+    menus — the module is connection infrastructure, not an app the user
+    navigates.
     """
 
     _inherit = "res.config.settings"
@@ -69,10 +69,6 @@ class ResConfigSettings(models.TransientModel):
     def action_tuqui_open_workspace(self):
         client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         return client.action_open_tuqui()
-
-    def action_tuqui_rotate_secret(self):
-        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
-        return client.action_rotate_secret()
 
     def action_tuqui_disconnect(self):
         client = self.env["tuqui.oauth.client"].sudo()._get_singleton()

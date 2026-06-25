@@ -22,7 +22,7 @@ class TuquiActivation(http.Controller):
        button returns an ``act_url`` action that opens this endpoint in
        the same tab.
     2. This route (auth='user', group_system required) ensures a fresh
-       activation nonce holding the plaintext secret for up to 2 minutes
+       activation nonce holding the plaintext secret for up to 10 minutes
        (reusing a still-valid unconsumed nonce instead of rotating the
        secret on every click), and 302s to the configured Tuqui frontend
        URL with ``?nonce=...`` and ``?companion_url=...`` in the query
@@ -111,6 +111,14 @@ class TuquiActivation(http.Controller):
         if instance_name:
             params["instance_name"] = instance_name
 
+        # The activating admin's email. Tuqui pre-fills its login form with it
+        # when the admin isn't logged into Tuqui yet (activation from Odoo while
+        # logged out) so they don't retype it. It's the admin's own email, sent
+        # over the same no-referrer redirect as the nonce; omitted if unset.
+        user_email = env.user.email
+        if user_email:
+            params["email"] = user_email
+
         # Capture the Settings page URL from the Referer header so Tuqui can
         # redirect the admin back after a successful activation — the settings
         # page then reloads and shows the connected state without a manual F5.
@@ -158,7 +166,7 @@ class TuquiActivation(http.Controller):
     def exchange(self, **_kwargs):
         """Redeem a single-use nonce for the activation credentials.
 
-        Auth is the nonce itself — single-use, 2-minute TTL, sent only
+        Auth is the nonce itself — single-use, 10-minute TTL, sent only
         via the redirect from /start to the Tuqui frontend (HTTPS to a
         trusted origin). The exchange marks the row consumed in the same
         UPDATE that nullifies the plaintext secret, so a leaked nonce

@@ -38,13 +38,9 @@
                             <button name="action_tuqui_open_access_log" type="object"
                                     string="View access log" icon="fa-list-ul"
                                     class="btn-link p-0"/>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2 mt-3">
-                            <button name="action_tuqui_rotate_secret" type="object"
-                                    string="Rotate secret" class="btn-secondary btn-sm"
-                                    confirm="Rotating the secret will invalidate Tuqui's current session. You will need to paste the new secret into Tuqui. Continue?"/>
                             <button name="action_tuqui_disconnect" type="object"
-                                    string="Disconnect" class="btn-link btn-sm text-danger"
+                                    string="Disconnect" icon="fa-chain-broken"
+                                    class="btn-link p-0"
                                     confirm="Disconnect this Odoo from Tuqui? Tuqui will lose access until you re-activate."/>
                         </div>
                     </div>
