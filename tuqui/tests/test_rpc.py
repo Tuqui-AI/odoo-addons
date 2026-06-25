@@ -360,13 +360,12 @@ class TestTuquiRpcGateway(HttpCase):
         self.assertEqual(resp.json()["error"]["code"], "access_denied")
 
     @mute_logger("odoo.addons.tuqui.controllers.rpc")
-    def test_internal_error_does_not_leak_details(self):
-        """A 500 must surface a generic message — no SQL, no ValueError repr.
+    def test_internal_error_exposes_exception_message(self):
+        """A 500 must surface the real exception message so the LLM can diagnose it.
 
-        The controller is expected to call ``_LOG.exception(...)`` server-side
-        before returning the generic response; muting the logger here keeps
-        runbot's red-on-any-ERROR signal honest (this isn't a real failure,
-        it's the test verifying the failure path).
+        The endpoint is OAuth-protected (not public), so exposing str(exc) is
+        safe and necessary — returning a generic message leaves the LLM with no
+        information to recover from ORM errors like missing fields or bad args.
         """
         # Grouping by a non-stored field raises ValueError inside the ORM.
         # We use ``formatted_read_group`` (the Odoo 19 replacement) rather than
@@ -386,8 +385,8 @@ class TestTuquiRpcGateway(HttpCase):
         body = resp.json()
         self.assertEqual(body["error"]["code"], "internal_error")
         msg = body["error"]["message"]
-        for leak in ("Cannot convert", "SQL", "company_type", "ValueError", "Traceback"):
-            self.assertNotIn(leak, msg, f"500 leaked {leak!r}: {msg!r}")
+        self.assertNotEqual(msg, "An internal error occurred.", "500 returned generic message instead of str(exc)")
+        self.assertIn("company_type", msg, f"Expected ORM error detail in message, got: {msg!r}")
 
     # ─── Access log ──────────────────────────────────────────────────
 
