@@ -1,6 +1,7 @@
 """Tests for the activation handoff: nonce model, /exchange endpoint, gc cron."""
 
 import json
+import secrets
 import urllib.parse
 
 from odoo import fields
@@ -74,16 +75,16 @@ class TestTuquiActivationExchange(HttpCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        # Ensure there's a singleton OAuth client to flip pending→active.
+        # Ensure there's a singleton OAuth client to stage activation against.
         cls.env["tuqui.oauth.client"].sudo()._get_or_create_singleton()
-        cls.env["tuqui.oauth.client"].sudo()._get_singleton().write({"state": "pending"})
+        cls.env["tuqui.oauth.client"].sudo()._get_singleton().write({"state": "pending", "activation_pending": False})
 
     def setUp(self):
         super().setUp()
         # Each test starts from a clean singleton — HttpCase rolls back only at
         # class teardown, so writes would otherwise leak between tests.
         self.env["tuqui.oauth.client"].sudo()._get_singleton().write(
-            {"state": "pending", "workspace_id_external": False}
+            {"state": "pending", "workspace_id_external": False, "activation_pending": False}
         )
 
     def _db_headers(self):
@@ -125,14 +126,16 @@ class TestTuquiActivationExchange(HttpCase):
         self.assertIn("companion_url", body)
         self.assertIn("module_version", body)
 
-        # Side effects: nonce row is consumed + plaintext nulled, OAuth client is active.
+        # Side effects: nonce consumed + plaintext nulled; activation staged
+        # (activation_pending=True, state unchanged until first /token call).
         row = self.env["tuqui.activation.nonce"].sudo().search([("nonce", "=", nonce)], limit=1)
         row.invalidate_recordset()
         self.assertTrue(row.consumed_at)
         self.assertFalse(row.client_secret_plaintext)
         oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         oauth_client.invalidate_recordset()
-        self.assertEqual(oauth_client.state, "active")
+        self.assertTrue(oauth_client.activation_pending)
+        self.assertEqual(oauth_client.state, "pending")
 
     def test_exchange_with_workspace_slug_stores_it(self):
         """When Tuqui sends workspace_slug the field is persisted and
@@ -153,7 +156,8 @@ class TestTuquiActivationExchange(HttpCase):
         oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         oauth_client.invalidate_recordset()
         self.assertEqual(oauth_client.workspace_id_external, "my-workspace")
-        self.assertEqual(oauth_client.state, "active")
+        self.assertTrue(oauth_client.activation_pending)
+        self.assertEqual(oauth_client.state, "pending")
 
         # action_open_tuqui must build <base>/w/my-workspace, not the bare base.
         action = oauth_client.action_open_tuqui()
@@ -180,7 +184,8 @@ class TestTuquiActivationExchange(HttpCase):
         oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         oauth_client.invalidate_recordset()
         self.assertFalse(oauth_client.workspace_id_external)
-        self.assertEqual(oauth_client.state, "active")
+        self.assertTrue(oauth_client.activation_pending)
+        self.assertEqual(oauth_client.state, "pending")
 
     def test_exchange_rejects_replayed_nonce(self):
         client_id = self.env["tuqui.oauth.client"].sudo()._get_singleton().client_id
@@ -227,21 +232,40 @@ class TestTuquiActivationExchange(HttpCase):
     def test_reactivation_cycle(self):
         """Full lifecycle: activate → disconnect → re-activate.
 
-        Re-activation reaches /exchange with state='disconnected'. The client
-        must flip back to 'active' — a transition guarded on 'pending' would
-        leave Odoo wrongly showing "not connected" while Tuqui works. Regression
-        guard for the from-state-coupled transitions in start()/exchange().
+        Activation is a two-step handshake: /exchange stages the credentials
+        (activation_pending=True) and the first /token mint completes it
+        (state → 'active'). Re-activation from 'disconnected' follows the same
+        path — /exchange sets activation_pending which lets /token through the
+        disconnected guard and then flips state to 'active'.
         """
         client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         client_id = client.client_id
 
         def _activate(secret):
+            # Mirror the real /start flow: write the secret hash before issuing
+            # the nonce so /token can verify the same plaintext Tuqui would receive.
+            salt = secrets.token_hex(8)
+            client.write(
+                {
+                    "client_secret_hash": client._hash_secret(secret, salt),
+                    "client_secret_salt": salt,
+                }
+            )
             nonce, _ = (
                 self.env["tuqui.activation.nonce"]
                 .sudo()
                 ._issue(client_id=client_id, client_secret_plaintext=secret, acting_user_login="admin")
             )
             self._post_exchange({"nonce": nonce}, expect_status=200)
+            client.invalidate_recordset()
+            self.assertTrue(client.activation_pending, "exchange must set activation_pending")
+            # First token mint: proves Tuqui wired successfully → state flips to active.
+            resp = self.url_open(
+                "/tuqui/oauth/token",
+                data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": secret},
+                headers=self._db_headers(),
+            )
+            self.assertEqual(resp.status_code, 200, f"first token after exchange must succeed: {resp.text}")
             client.invalidate_recordset()
 
         # 1. First activation: pending → active.
@@ -253,9 +277,9 @@ class TestTuquiActivationExchange(HttpCase):
         client.invalidate_recordset()
         self.assertEqual(client.state, "disconnected")
 
-        # 3. Re-activation: disconnected → active (the bug this guards against).
+        # 3. Re-activation: disconnected → active via exchange + token.
         _activate("secret-2")
-        self.assertEqual(client.state, "active", "exchange must re-activate from 'disconnected', not only 'pending'")
+        self.assertEqual(client.state, "active", "first token after re-exchange must flip disconnected → active")
 
     # The 'active' branch raises UserError, which the http framework logs at
     # WARNING (odoo.http) — expected here, muted so it doesn't redden runbot.

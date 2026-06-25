@@ -47,6 +47,15 @@ class TuquiOAuthClient(models.Model):
         readonly=True,
         help="Identifier returned by Tuqui after the first successful handshake.",
     )
+    activation_pending = fields.Boolean(
+        default=False,
+        readonly=True,
+        help=(
+            "Set by /exchange after credentials are handed to Tuqui. "
+            "Cleared when the first /token succeeds — that call is the proof "
+            "that Tuqui's own workspace wiring completed and state flips to 'active'."
+        ),
+    )
     access_count_7d = fields.Integer(
         string="Accesses (last 7 days)",
         compute="_compute_access_count_7d",
@@ -153,7 +162,7 @@ class TuquiOAuthClient(models.Model):
         from ..controllers.oauth import rotate_signing_key
 
         rotate_signing_key(self.env)
-        self.write({"state": "disconnected"})
+        self.write({"state": "disconnected", "activation_pending": False})
 
         # Hint Tuqui to re-probe — but only AFTER this transaction COMMITS, via a
         # post-commit callback. Firing it inline (mid-transaction) is a trap: our
@@ -241,7 +250,7 @@ class TuquiOAuthClient(models.Model):
 
     def mark_active(self, workspace_id_external=None):
         self.ensure_one()
-        vals = {"state": "active", "activated_at": fields.Datetime.now()}
+        vals = {"state": "active", "activated_at": fields.Datetime.now(), "activation_pending": False}
         if workspace_id_external:
             vals["workspace_id_external"] = workspace_id_external
         self.write(vals)

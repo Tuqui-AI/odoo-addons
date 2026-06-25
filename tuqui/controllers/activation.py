@@ -172,11 +172,11 @@ class TuquiActivation(http.Controller):
         UPDATE that nullifies the plaintext secret, so a leaked nonce
         post-consumption can't replay.
 
-        On success the OAuth client transitions ``pending → active`` —
-        Tuqui having received the credentials is the moment activation
-        is "real" from this module's perspective. If Tuqui's downstream
-        wiring fails, the admin sees ``state=active`` but no traffic
-        in ``last_seen_at`` and can disconnect to retry.
+        On success the activation is staged: ``workspace_id_external`` is stored
+        and ``activation_pending`` is set on the OAuth client. State flips to
+        ``active`` only on the first successful ``POST /tuqui/oauth/token`` —
+        the proof that Tuqui completed its own workspace wiring and can
+        actually use the credentials.
 
         Response shape::
 
@@ -201,7 +201,7 @@ class TuquiActivation(http.Controller):
             return _json_error("bad_request", "Missing 'nonce'", status=400)
 
         # workspace_slug is optional — older Tuqui versions that don't send it
-        # are tolerated; mark_active() falls back gracefully when it's absent.
+        # are tolerated; we store it when present and leave it untouched when not.
         workspace_slug = body.get("workspace_slug")
         if not isinstance(workspace_slug, str) or not workspace_slug:
             workspace_slug = None
@@ -224,13 +224,17 @@ class TuquiActivation(http.Controller):
 
         row._consume()
 
-        # Tuqui now holds valid creds → the connection is active, whatever the
-        # prior state. Re-activation after a disconnect reaches here with
-        # state='disconnected'; guarding on 'pending' would leave Odoo wrongly
-        # showing "not connected" while Tuqui works fine. mark_active is idempotent.
+        # Stage the activation: store the workspace identifier (when present)
+        # and set activation_pending so /token knows to flip state to 'active'
+        # on the first successful mint. We don't mark active here — that flip
+        # happens only when Tuqui proves it can use the credentials, which is
+        # the first successful POST /tuqui/oauth/token call.
         oauth_client = env["tuqui.oauth.client"].sudo()._get_singleton()
         if oauth_client:
-            oauth_client.mark_active(workspace_id_external=workspace_slug)
+            vals = {"activation_pending": True}
+            if workspace_slug:
+                vals["workspace_id_external"] = workspace_slug
+            oauth_client.write(vals)
 
         companion_url = request.httprequest.host_url.rstrip("/")
         payload = {
