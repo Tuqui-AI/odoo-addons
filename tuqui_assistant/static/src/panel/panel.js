@@ -319,9 +319,8 @@ export class TuquiPanel extends Component {
                     const path = data.payload?.path;
                     if (typeof path === "string" && path.startsWith("/") && !path.startsWith("//")) {
                         this._lastSpaPath = path;
-                        const key = _storageKey();
-                        if (key) {
-                            localStorage.setItem(key, path);
+                        if (this.ui.slug) {
+                            localStorage.setItem(`tuqui_embed_path_${this.ui.slug}`, path);
                         }
                     }
                 }
