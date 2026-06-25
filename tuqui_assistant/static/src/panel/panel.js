@@ -27,6 +27,7 @@ import { _t } from "@web/core/l10n/translation";
  *  Odoo → SPA: { source: "tuqui-odoo", type: "auth",     payload: { client_id, nonce } }
  *              { source: "tuqui-odoo", type: "context",  payload: PageContext }
  *              { source: "tuqui-odoo", type: "new-chat" }
+ *              { source: "tuqui-odoo", type: "resume",   payload: { path } }
  *  SPA → Odoo: { source: "tuqui-spa",  type: "ready" }
  *              { source: "tuqui-spa",  type: "apply",    payload: { changes, rationale } }
  *              { source: "tuqui-spa",  type: "chatter",  payload: { mode, body, subject } }
@@ -139,17 +140,10 @@ export class TuquiPanel extends Component {
         }
         const base = this.ui.baseUrl.replace(/\/+$/, "");
         const slug = encodeURIComponent(this.ui.slug);
-        if (this.ui.storedPath) {
-            // Convert standalone path /w/:slug/... → embed /embed/:slug/...
-            // The SPA uses the same route structure in both modes; only the
-            // prefix differs. Validate the substitution before using it.
-            const embedded = this.ui.storedPath.replace(/^\/w\/[^/]+/, `/embed/${slug}`);
-            if (embedded.startsWith(`/embed/${slug}`)) {
-                console.log("[tuqui] embedUrl: restoring stored path", { storedPath: this.ui.storedPath, url: `${base}${embedded}?embed=1` });
-                return `${base}${embedded}?embed=1`;
-            }
-            console.warn("[tuqui] embedUrl: storedPath did not convert to valid embed path, falling back", { storedPath: this.ui.storedPath, slug });
-        }
+        // Always load the root embed URL. Deep-linking to a conversation path
+        // causes the SPA to try fetching it before authentication (the nonce
+        // arrives only after "ready"), so it renders a 404. The stored path is
+        // sent as a "resume" postMessage right after the auth message instead.
         return `${base}/embed/${slug}?embed=1`;
     }
 
@@ -217,6 +211,16 @@ export class TuquiPanel extends Component {
                 },
                 this._spaOrigin
             );
+            // After auth, tell the SPA to resume at the last conversation.
+            // We always load the root embed URL (not a deep-link) because the SPA
+            // tries to fetch the conversation before the nonce arrives → 404. The
+            // SPA handles "resume" after completing authentication.
+            if (this.ui.storedPath) {
+                win.postMessage(
+                    { source: "tuqui-odoo", type: "resume", payload: { path: this.ui.storedPath } },
+                    this._spaOrigin
+                );
+            }
         } catch {
             // different origin / iframe not yet navigated: retried on the next "ready"
             this._authPosted = false;
