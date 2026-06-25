@@ -49,18 +49,6 @@
                         </div>
                     </div>
 
-                    <!-- Security: optional read-only lock (only meaningful once connected) -->
-                    <div invisible="tuqui_state != 'active'" class="mt16">
-                        <span class="o_form_label fw-bold d-block mb-1">Security</span>
-                        <div class="d-flex align-items-center">
-                            <field name="tuqui_read_only" widget="boolean_toggle" class="oe_inline"/>
-                            <label for="tuqui_read_only" string="Read-only mode" class="ms-2 mb-0"/>
-                        </div>
-                        <div class="text-muted small mt-1">
-                            When on, Tuqui can read but never create, update, delete or run methods.
-                            Reads still follow each user's own Odoo permissions.
-                        </div>
-                    </div>
                 </setting>
             </xpath>
         </field>

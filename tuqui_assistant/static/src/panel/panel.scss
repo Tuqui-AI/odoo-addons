@@ -39,13 +39,6 @@
     z-index: $zindex-sticky;
 }
 
-// Card expandida (Fase 2): toggle de tamaño, sin resize libre. Cap por viewport
-// para no desbordar en pantallas chicas (el media query mobile la lleva a full).
-.o-tuqui-panel.o-tuqui--expanded {
-    width: Min(720px, 92vw);
-    height: Min(92vh, 1000px);
-}
-
 // Burbuja flotante (panel minimizado): botón redondo abajo-derecha. Mismo
 // z-index que la card → tampoco tapa modales.
 .o-tuqui-bubble-launcher {
@@ -103,33 +96,11 @@
         gap: 0.15rem;
     }
     .o-tuqui-open-external,
-    .o-tuqui-pin,
-    .o-tuqui-expand,
     .o-tuqui-minimize,
     .o-tuqui-close {
         color: rgba(255, 255, 255, 0.85);
         &:hover {
             color: #fff;
-        }
-    }
-    // Pin "Seguir contexto": inactivo apagado/diagonal; activo en mostaza + recto.
-    .o-tuqui-pin {
-        color: rgba(255, 255, 255, 0.55);
-        .fa-thumb-tack {
-            transform: rotate(40deg);
-            transition: transform 0.12s ease;
-        }
-        &:hover {
-            color: rgba(255, 255, 255, 0.85);
-        }
-        &.o-tuqui-pin--active {
-            color: var(--tuqui-mostaza);
-            &:hover {
-                color: var(--tuqui-mostaza);
-            }
-            .fa-thumb-tack {
-                transform: rotate(0deg);
-            }
         }
     }
     // El glyph fa-window-minimize es un guión bajo pegado abajo; centrarlo.

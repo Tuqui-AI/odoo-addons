@@ -90,17 +90,14 @@ export class TuquiPanel extends Component {
         onWillUnmount(() => window.removeEventListener("message", this._onMessage));
 
         // Cuando cambia el contexto (record abierto / cambios sin guardar),
-        // re-empujarlo al iframe si ya está listo. Gateado por `followContext`
-        // (Fase 3a): si el pin está OFF, navegar a otro registro NO empuja
-        // contexto nuevo → la conversación congela el suyo. Se sigue dependiendo
-        // de `state.followContext` para que reactivar el pin re-dispare el push.
+        // re-empujarlo al iframe si ya está listo.
         useEffect(
             () => {
-                if (this.ui.connected && this.ui.embedReady && this.state.followContext) {
+                if (this.ui.connected && this.ui.embedReady) {
                     this._postContext();
                 }
             },
-            () => [this._contextKey(), this.state.followContext]
+            () => [this._contextKey()]
         );
 
         // Systray "chat nuevo" (item CTO #4): el systray incrementa
@@ -304,12 +301,6 @@ export class TuquiPanel extends Component {
     get openInTuquiLabel() {
         return _t("Abrir en Tuqui");
     }
-    get followContextLabel() {
-        return _t("Seguir el contexto de Odoo");
-    }
-    get expandLabel() {
-        return this.state.expanded ? _t("Contraer") : _t("Expandir");
-    }
     get minimizeLabel() {
         return _t("Minimizar");
     }
@@ -332,18 +323,6 @@ export class TuquiPanel extends Component {
 
     restore() {
         this.tuquiAssistant.restore();
-    }
-
-    // Expandir / colapsar la card (Fase 2). La clase la aplica el template vía
-    // t-att-class sobre state.expanded.
-    toggleExpand() {
-        this.tuquiAssistant.toggleExpand();
-    }
-
-    // Pin "Seguir contexto" (Fase 3a): togglea si los cambios de registro en Odoo
-    // se empujan al iframe. El gate efectivo vive en el useEffect del _contextKey.
-    toggleFollowContext() {
-        this.tuquiAssistant.toggleFollowContext();
     }
 
     // URL de la web app COMPLETA del workspace en una pestaña nueva. Abre la

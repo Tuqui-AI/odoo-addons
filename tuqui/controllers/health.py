@@ -11,7 +11,6 @@ _PROTOCOL_VERSION = "2.0"
 # new ORM methods, without shipping a new module version.
 _CAPABILITIES = [
     "rpc.execute_kw",
-    "policy.read_only",
     "access_log",
 ]
 

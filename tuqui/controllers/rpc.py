@@ -45,13 +45,12 @@ def _is_absolutely_blocked(method: str) -> bool:
 # this gateway — see tuqui_core/integrations/odoo/transports/companion.py and
 # the contract test ``test_classify_covers_companion_transport_surface``. Keep
 # all three in sync. Asymmetry to remember when the transport gains a method:
-#   * a READ it sends but not recognized here → ``execute`` → wrongly refused on
-#     a read_only connection (that was the formatted_read_group bug).
-#   * a WRITE not listed → also ``execute`` → still blocked under read_only
-#     (safe); only its audit row gets mislabelled.
-# This classifier is the coarse read_only edge gate + audit label, NOT the
-# authorization boundary: writes are really gated by the backend whitelist
-# (workspace_write_models) and the acting user's Odoo ACL.
+#   * a READ not recognized here → ``execute`` → mislabelled in the audit log
+#     (that was the formatted_read_group bug; explicit entry in _READ_METHODS fixes it).
+#   * a WRITE not listed → also ``execute`` → only its audit row gets mislabelled.
+# This classifier is the audit label, NOT the authorization boundary: writes
+# are really gated by the backend whitelist (workspace_write_models) and the
+# acting user's Odoo ACL.
 _WRITE_METHODS = frozenset({"create", "write", "unlink", "copy", "name_create"})
 # Reads that don't begin with the search/read prefix must be listed explicitly
 # (e.g. ``formatted_read_group``, the Odoo 19 grouped read).
@@ -82,7 +81,7 @@ def _classify(method: str) -> str:
 # ─── Policy gate ─────────────────────────────────────────────────────
 
 
-def _evaluate_policy(read_only: bool, method: str, op_type: str, *, is_connection: bool):
+def _evaluate_policy(method: str, op_type: str, *, is_connection: bool):
     """Return ``(allowed, denied_reason)``.
 
     ``allowed=True`` means the call may proceed to the ORM (where the acting
@@ -94,11 +93,8 @@ def _evaluate_policy(read_only: bool, method: str, op_type: str, *, is_connectio
     2. Private (``_``-prefixed) methods — internal ORM surface, never exposed.
     3. Connection path (``is_connection=True``): runs as SUPERUSER with no
        record rules, so it is locked to reads UNCONDITIONALLY — anything that
-       can mutate is refused with ``connection_read_only`` regardless of the
-       ``read_only`` flag. Keeps the blast radius of a stolen token to
-       read-only even on workspace-level/system traffic.
-    4. Member path: when the connection is flagged ``read_only``, anything that
-       can mutate (``write`` / ``execute``) is refused; reads pass.
+       can mutate is refused with ``connection_read_only``. Keeps the blast
+       radius of a stolen token to read-only on workspace-level/system traffic.
     """
     if _is_absolutely_blocked(method):
         return False, "method_blocked"
@@ -110,8 +106,6 @@ def _evaluate_policy(read_only: bool, method: str, op_type: str, *, is_connectio
         if op_type != "read":
             return False, "connection_read_only"
         return True, None
-    if read_only and op_type in ("write", "execute"):
-        return False, "read_only_mode"
     return True, None
 
 
@@ -295,7 +289,7 @@ def _log(
 
 # Policy-deny reasons that should surface as HTTP 403. Anything else
 # from the gate (currently nothing) would surface as 400.
-_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "read_only_mode", "connection_read_only"})
+_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "connection_read_only"})
 
 
 class TuquiRpc(http.Controller):
@@ -321,14 +315,12 @@ class TuquiRpc(http.Controller):
       Odoo's ACL is the per-call privilege check — identical to the native
       per-user path. The uid is vetted first: superuser, share/portal users
       and unknown/inactive ids are refused (``forbidden_acting_user``).
-      Writes here stay governed by the connection's ``read_only`` flag.
 
     * CONNECTION PATH — request has NO acting uid (workspace-level / system
       traffic). The call runs as SUPERUSER (``sudo()``). Because sudo bypasses
       record rules, this path is locked to reads UNCONDITIONALLY: any write /
-      execute / private / blocked op is refused (``connection_read_only``),
-      independent of the ``read_only`` flag. A stolen token can therefore only
-      ever read on this path.
+      execute / private / blocked op is refused (``connection_read_only``).
+      A stolen token can therefore only ever read on this path.
 
     Defense in depth, applied to both paths:
 
@@ -416,9 +408,7 @@ class TuquiRpc(http.Controller):
                 )
 
         # ─── Policy gate ───────────────────────────────────────────────────
-        client = env["tuqui.oauth.client"].sudo()._get_singleton()
-        read_only = bool(client.read_only) if client else False
-        allowed, denied_reason = _evaluate_policy(read_only, method, operation_type, is_connection=is_connection)
+        allowed, denied_reason = _evaluate_policy(method, operation_type, is_connection=is_connection)
         if not allowed:
             _log(
                 env,
