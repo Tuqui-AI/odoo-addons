@@ -46,16 +46,23 @@ export class TuquiPanel extends Component {
         this.notification = useService("notification");
         this.state = useState(this.tuquiAssistant.state); // { panelOpen, context }
         this.ui = useState({
-            // Resuelto del companion (oauth client): si está conectado, la base
-            // de Tuqui (tuqui.base_url) y el slug del workspace activado. Ver
-            // ADR 0001 §2.2 — la URL del embed ya no es un param hardcodeado.
+            // Resolved from the companion (oauth client): whether connected, the
+            // Tuqui base URL (tuqui.base_url), and the activated workspace slug.
+            // ADR 0001 §2.2 — the embed URL is no longer a hardcoded param.
             connected: false,
             baseUrl: null,
             slug: null,
             chatEnabled: false,
             embedReady: false,
+            // Last SPA path (e.g. /w/:slug/chat/:id), persisted in localStorage so
+            // the conversation resumes on page reload or panel reopen. Updated when
+            // the SPA posts "location"; used in embedUrl to load the right
+            // conversation in the iframe.
+            storedPath: null,
         });
         this.iframeRef = useRef("iframe");
+
+        const _storageKey = () => this.ui.slug ? `tuqui_embed_path_${this.ui.slug}` : null;
 
         const loadBootstrap = async () => {
             const boot = await this.tuquiAssistant.getEmbedBootstrap();
@@ -63,34 +70,43 @@ export class TuquiPanel extends Component {
             this.ui.baseUrl = boot?.base_url || null;
             this.ui.slug = boot?.slug || null;
             this.ui.chatEnabled = Boolean(boot?.chat_enabled);
+            // Restore the last conversation from localStorage (keyed by slug to
+            // avoid cross-workspace contamination). Used in embedUrl so the iframe
+            // loads where the user left off instead of starting a new chat.
+            if (this.ui.slug) {
+                this.ui.storedPath = localStorage.getItem(_storageKey()) || null;
+            }
         };
         onWillStart(loadBootstrap);
-        // Re-chequear al abrir el panel: si un admin desconectó companion mientras
-        // estaba cerrado, refleja el estado nuevo (y el corte duro vive además en
-        // issue_for_current_user, que exige state=='active').
+        // Re-check on panel open/close:
+        //   - Open: re-verify connection (admin may have disconnected) + reset auth.
+        //   - Close: sync storedPath from localStorage so the next open loads the
+        //     right conversation. Done on CLOSE (not open) because the iframe is
+        //     already unmounted (t-if), so storedPath can change without causing a
+        //     src reload. The SPA only posts "location" while mounted → localStorage
+        //     is stable at close time.
         useEffect(
             () => {
                 if (this.state.panelOpen) {
                     this.ui.embedReady = false;
                     this._authPosted = false;
-                    // El iframe remonta en `/embed/:slug` (chat nuevo) al reabrir
-                    // → la ruta vieja queda stale. La olvidamos hasta que el SPA
-                    // re-postee `location` (lo hace al montar EmbedShell), para
-                    // que "Abrir en Tuqui" no abra una conversación anterior.
                     this._lastSpaPath = null;
                     void loadBootstrap();
+                } else if (this.ui.slug) {
+                    // Panel closed → iframe unmounted → safe to update.
+                    this.ui.storedPath = localStorage.getItem(_storageKey()) || null;
                 }
             },
             () => [this.state.panelOpen]
         );
 
-        // Puente postMessage con el iframe del SPA.
+        // postMessage bridge with the SPA iframe.
         this._onMessage = this._handleMessage.bind(this);
         onMounted(() => window.addEventListener("message", this._onMessage));
         onWillUnmount(() => window.removeEventListener("message", this._onMessage));
 
-        // Cuando cambia el contexto (record abierto / cambios sin guardar),
-        // re-empujarlo al iframe si ya está listo.
+        // When the context changes (open record / unsaved edits), re-push it
+        // to the iframe if it is already ready.
         useEffect(
             () => {
                 if (this.ui.connected && this.ui.embedReady) {
@@ -100,12 +116,11 @@ export class TuquiPanel extends Component {
             () => [this._contextKey()]
         );
 
-        // Systray "chat nuevo" (item CTO #4): el systray incrementa
-        // newChatRequest cuando el panel YA estaba abierto. Le posteamos
-        // `new-chat` al SPA para que navegue internamente a un chat nuevo (sin
-        // remontar el iframe → sin gastar un 2º nonce SSO). Gateado por
-        // embedReady: si el iframe todavía no avisó "ready", el SPA no tiene
-        // listener montado; igual el caso "recién abierto" arranca en chat nuevo.
+        // Systray "new chat" (CTO item #4): systray increments newChatRequest
+        // when the panel is already open. Post `new-chat` to the SPA so it
+        // navigates internally (no iframe remount → no second SSO nonce spent).
+        // Gated by embedReady: if the iframe hasn't posted "ready" yet, the SPA
+        // has no listener; the "just opened" case starts a new chat anyway.
         useEffect(
             () => {
                 if (this.state.newChatRequest > 0 && this.ui.connected && this.ui.embedReady) {
@@ -123,7 +138,17 @@ export class TuquiPanel extends Component {
             return "";
         }
         const base = this.ui.baseUrl.replace(/\/+$/, "");
-        return `${base}/embed/${encodeURIComponent(this.ui.slug)}?embed=1`;
+        const slug = encodeURIComponent(this.ui.slug);
+        if (this.ui.storedPath) {
+            // Convert standalone path /w/:slug/... → embed /embed/:slug/...
+            // The SPA uses the same route structure in both modes; only the
+            // prefix differs. Validate the substitution before using it.
+            const embedded = this.ui.storedPath.replace(/^\/w\/[^/]+/, `/embed/${slug}`);
+            if (embedded.startsWith(`/embed/${slug}`)) {
+                return `${base}${embedded}?embed=1`;
+            }
+        }
+        return `${base}/embed/${slug}?embed=1`;
     }
 
     get _spaOrigin() {
@@ -142,7 +167,10 @@ export class TuquiPanel extends Component {
         }
         switch (c.kind) {
             case "record":
-                return `record:${c.model}:${c.resId}`;
+                // Include dirty: when the user edits a field (many2one, etc.) the
+                // form becomes dirty, state.context updates, and the panel re-pushes
+                // fresh field values to the SPA.
+                return `record:${c.model}:${c.resId}:${c.dirty}`;
             case "selection":
                 return `sel:${c.model}:${c.count}:${(c.resIds || []).length}`;
             case "list":
@@ -152,18 +180,18 @@ export class TuquiPanel extends Component {
     }
 
     async _postAuth() {
-        // SSO embebido: mintea un nonce atado al usuario Odoo y se lo pasa al
-        // iframe; el SPA lo canjea por un token de sesión (sin login). Ver
-        // ADR 0001 / spec §2.2. Sin companion activado, getSsoAuth() → null.
+        // Embedded SSO: mint a nonce bound to the Odoo user and pass it to the
+        // iframe; the SPA redeems it for a session token (no login prompt). See
+        // ADR 0001 / spec §2.2. If the companion is not active, getSsoAuth() → null.
         //
-        // UNA sola vez por apertura del panel: el SPA postea "ready" varias veces
-        // (gate + ChatPage + re-renders) y un nonce de más se gasta dos veces →
-        // 401 en el exchange → apiFetch desloguea. El flag se resetea al abrir.
+        // Only once per panel open: the SPA posts "ready" multiple times (gate +
+        // ChatPage + re-renders) and an extra nonce gets spent twice → 401 on
+        // exchange → apiFetch logs the user out. The flag is reset on every open.
         //
-        // El lock se fija ANTES del await: dos "ready" concurrentes pasarían el
-        // check juntos si el flag se pusiera después, cada uno minting su propio
-        // nonce. Solo el primero avanza; los siguientes ven el flag ya activo.
-        // Se resetea a false en todos los caminos de error para permitir reintento.
+        // The lock is set BEFORE the await: two concurrent "ready" events would
+        // both pass the check if the flag were set after, each minting its own nonce.
+        // Only the first advances; subsequent ones see the flag already set.
+        // Reset to false on all error paths to allow a retry.
         if (this._authPosted) {
             return;
         }
@@ -188,7 +216,7 @@ export class TuquiPanel extends Component {
                 this._spaOrigin
             );
         } catch {
-            // origin distinto / iframe aún no navegado: se reintenta al próximo "ready"
+            // different origin / iframe not yet navigated: retried on the next "ready"
             this._authPosted = false;
         }
     }
@@ -208,20 +236,20 @@ export class TuquiPanel extends Component {
                 this._spaOrigin
             );
         } catch (e) {
-            // origin distinto / iframe aún no navegado: se reintenta al próximo
-            // "ready". Lo logueamos (warn, no silencioso): un DataCloneError acá
-            // —payload con un Proxy reactivo no clonable— hizo que el contexto de
-            // lista/kanban NUNCA llegara al SPA sin dejar rastro. getContextPayload
-            // ahora devuelve JSON plano, pero si vuelve a fallar, que se vea.
+            // different origin / iframe not yet navigated: retried on next "ready".
+            // Logged (warn, not silent): a DataCloneError here — payload containing a
+            // non-cloneable reactive Proxy — once caused list/kanban context to
+            // silently never reach the SPA. getContextPayload now returns plain JSON,
+            // but if it breaks again it should surface.
             console.warn("[tuqui_assistant] Could not post context to iframe:", e);
         }
     }
 
     _postNewChat() {
-        // Le pide al SPA (ya montado e hidratado) que arranque un chat nuevo como
-        // navegación INTERNA (no cambia el src del iframe → no gasta un 2º nonce
-        // SSO). El SPA lo maneja en useEmbedBridge (onNewChat). Mismo origin
-        // concreto que el resto de los posts (nunca "*").
+        // Ask the SPA (already mounted and hydrated) to open a new chat as an
+        // INTERNAL navigation (no src change → no second SSO nonce spent). Handled
+        // in the SPA via useEmbedBridge (onNewChat). Concrete origin like all other
+        // posts (never "*").
         const win = this.iframeRef.el?.contentWindow;
         if (!win) {
             return;
@@ -229,7 +257,7 @@ export class TuquiPanel extends Component {
         try {
             win.postMessage({ source: "tuqui-odoo", type: "new-chat" }, this._spaOrigin);
         } catch {
-            // origin distinto / iframe aún no navegado: el próximo click reintenta.
+            // different origin / iframe not yet navigated: next click retries.
         }
     }
 
@@ -238,20 +266,20 @@ export class TuquiPanel extends Component {
         if (!data || data.source !== "tuqui-spa") {
             return;
         }
-        // Seguridad (defensa en profundidad). Un atacante puede falsificar
-        // `{source:"tuqui-spa"}` desde otra ventana/origin, así que NO alcanza
-        // con mirar el source: exigimos las dos condiciones, sin atajos.
+        // Security (defence in depth). An attacker can spoof `{source:"tuqui-spa"}`
+        // from another window/origin, so checking source alone is NOT enough — both
+        // conditions must hold, no shortcuts.
         //
-        // 1) El mensaje TIENE que venir de NUESTRO iframe. Si el iframe no está
-        //    montado (sin companion conectado, panel cerrado), `iframeRef.el` es
-        //    null → rechazamos en vez de aceptar a ciegas (antes el check se
-        //    salteaba cuando no había iframe).
+        // 1) The message MUST come from OUR iframe. If the iframe is not mounted
+        //    (no companion connected, panel closed), `iframeRef.el` is null →
+        //    reject rather than accept blindly (the check used to be skipped when
+        //    there was no iframe).
         const frame = this.iframeRef.el;
         if (!frame || ev.source !== frame.contentWindow) {
             return;
         }
-        // 2) El origin TIENE que ser el del SPA y ser concreto. Si `_spaOrigin`
-        //    es null (baseUrl inválida / sin resolver), descartamos.
+        // 2) The origin MUST match the SPA's and be concrete. If `_spaOrigin`
+        //    is null (invalid / unresolved baseUrl), discard.
         const spaOrigin = this._spaOrigin;
         if (!spaOrigin || ev.origin !== spaOrigin) {
             return;
@@ -259,35 +287,42 @@ export class TuquiPanel extends Component {
         switch (data.type) {
             case "ready":
                 this.ui.embedReady = true;
-                this._postAuth(); // SSO: nonce + client_id al iframe (antes del contexto)
+                this._postAuth(); // SSO: send nonce + client_id to iframe (before context)
                 this._postContext();
                 break;
             case "apply":
                 this.tuquiAssistant.applyProposal(data.payload?.changes || {});
                 break;
             case "chatter":
-                // Propuesta de contenido para el chatter: abre el compositor
-                // estándar de Odoo pre-cargado (el usuario revisa y envía). NUNCA
-                // se publica en silencio — el dispatch humano es estructural.
+                // Chatter content proposal: opens the standard Odoo composer
+                // pre-filled (user reviews and sends). NEVER posted silently —
+                // human dispatch is structural.
                 this.tuquiAssistant.proposeChatter(data.payload || {});
                 break;
             case "navigate":
-                // Navegación de Odoo desde el chat: abre un formulario NUEVO
-                // (crear) o una lista/pivot/gráfico filtrado, vía act_window
-                // estándar (chequea permisos). NO escribe nada.
+                // Odoo navigation from chat: opens a NEW form (create) or a
+                // filtered list/pivot/graph via standard act_window (checks
+                // permissions). Does NOT write anything.
                 this.tuquiAssistant.navigate(data.payload || {});
                 break;
             case "location":
-                // El SPA nos dice su ruta standalone-equivalente actual
-                // (`/w/:slug/...`) en cada cambio de ruta del embed. La guardamos
-                // para que "Abrir en Tuqui" abra la conversación/vista que el
-                // usuario está mirando, no /settings/home. Validamos que sea un
-                // path relativo seguro (empieza con "/" pero no "//") antes de
-                // confiar en él para construir una URL absoluta.
+                // The SPA reports its current standalone-equivalent path
+                // (`/w/:slug/...`) on every embed route change. Stored so "Open in
+                // Tuqui" opens the conversation/view the user is on, not /settings/home.
+                // Validated as a safe relative path (starts with "/" but not "//")
+                // before trusting it for URL construction.
+                // Also persisted to localStorage (keyed by slug) to resume the
+                // conversation on page reload or reopen. storedPath is NOT updated
+                // here (only on panel-close) to avoid a reactive change causing a
+                // src reload while the iframe is mounted.
                 {
                     const path = data.payload?.path;
                     if (typeof path === "string" && path.startsWith("/") && !path.startsWith("//")) {
                         this._lastSpaPath = path;
+                        const key = _storageKey();
+                        if (key) {
+                            localStorage.setItem(key, path);
+                        }
                     }
                 }
                 break;
@@ -296,8 +331,8 @@ export class TuquiPanel extends Component {
 
     // --- común ---
 
-    // Etiquetas de los botones icon-only del header (title + aria-label, para que
-    // los lectores de pantalla los anuncien). Wrapped en _t() → traducibles.
+    // Labels for icon-only header buttons (title + aria-label for screen readers).
+    // Wrapped in _t() so they are translatable.
     get openInTuquiLabel() {
         return _t("Open in Tuqui");
     }
@@ -315,8 +350,8 @@ export class TuquiPanel extends Component {
         this.tuquiAssistant.togglePanel();
     }
 
-    // Minimizar a burbuja: oculta la card por CSS (NO desmonta el iframe → no
-    // gasta un 2º nonce SSO). Restaurar vuelve a mostrarla.
+    // Minimize to bubble: hides the card via CSS (does NOT unmount the iframe →
+    // no second SSO nonce spent). Restore shows it again.
     minimize() {
         this.tuquiAssistant.minimize();
     }
@@ -325,12 +360,12 @@ export class TuquiPanel extends Component {
         this.tuquiAssistant.restore();
     }
 
-    // URL de la web app COMPLETA del workspace en una pestaña nueva. Abre la
-    // VISTA ACTUAL del usuario en el embed (conversación / proyectos / agentes),
-    // no el dashboard: el SPA nos postea su ruta standalone-equivalente
-    // (`_lastSpaPath`, p.ej. `/w/:slug/chat/:id`) en cada cambio de ruta. Si
-    // todavía no llegó ningún `location` (recién montado), caemos al canónico
-    // `/w/:slug` (→ /chat → home del workspace). "" si falta base/slug.
+    // Full workspace web app URL to open in a new tab. Opens the user's CURRENT
+    // view in the embed (conversation / projects / agents), not the dashboard: the
+    // SPA posts its standalone-equivalent path (`_lastSpaPath`, e.g.
+    // `/w/:slug/chat/:id`) on every route change. Falls back to `/w/:slug`
+    // (→ /chat → workspace home) if no `location` has arrived yet (just mounted).
+    // Returns "" when base or slug is missing (companion not connected).
     get _tuquiAppUrl() {
         const base = (this.ui.baseUrl || "").replace(/\/+$/, "");
         if (!base || !this.ui.slug) {
@@ -340,8 +375,8 @@ export class TuquiPanel extends Component {
         return `${base}${path}`;
     }
 
-    // "Abrir en Tuqui" (item CTO #1): abre la web app del workspace en la VISTA
-    // ACTUAL, en una pestaña nueva. Guard si falta slug/base (companion no conectado).
+    // "Open in Tuqui" (CTO item #1): opens the workspace web app at the CURRENT
+    // view, in a new tab. No-op when base or slug is missing (companion not connected).
     openInTuqui() {
         const url = this._tuquiAppUrl;
         if (!url) {

@@ -298,49 +298,64 @@ function sanitizeChatterBody(html) {
 }
 
 export const tuquiAssistantService = {
-    // `action` es para abrir el compositor estándar (doAction) desde proposeChatter.
+    // `action` is needed to open the standard composer (doAction) from proposeChatter.
     dependencies: ["notification", "orm", "action"],
     start(env, { notification, orm, action }) {
         const state = reactive({
             panelOpen: false,
             minimized: false,
             context: null,
-            // Contador-nonce que el systray incrementa para pedirle al panel
-            // (ya abierto) que arranque un chat NUEVO sin remontar el iframe
-            // (un remount gastaría un 2º nonce SSO → 401). El panel observa los
-            // cambios y postea `new-chat` al SPA. Ver openFreshChat / systray.
+            // Nonce-counter that the systray increments to ask an already-open panel
+            // to start a NEW chat without remounting the iframe (a remount would spend
+            // a second SSO nonce → 401). The panel observes changes and posts
+            // `new-chat` to the SPA. See openFreshChat / systray.
             newChatRequest: 0,
         });
 
-        // Record OWL del form activo (solo en modo "record"). No reactivo a
-        // propósito: es un objeto del modelo, no UI state. `_owner` es quien
-        // publicó el contexto actual (el controller), para limpiar sin pisarse.
+        // Active form's OWL record (record mode only). Intentionally non-reactive:
+        // it is a model object, not UI state. `_owner` is whoever published the
+        // current context (the controller), so clearContext doesn't stomp others.
         let activeRecord = null;
         let _owner = null;
+        // Stack to restore parent context when a dialog closes. When a DIFFERENT
+        // controller calls setRecordContext (e.g. mail.compose.message opened in a
+        // dialog over a form), the current context is pushed here so clearContext
+        // from the dialog restores it instead of clearing it.
+        let _contextStack = [];
+
+        function _makeRecordContext(record) {
+            return {
+                kind: "record",
+                model: record.resModel,
+                resId: record.resId,
+                displayName: record.data?.display_name || record.data?.name || "",
+                dirty: Boolean(record.dirty),
+            };
+        }
 
         function setRecordContext(owner, record) {
+            // If there is already a DIFFERENT owner (e.g. a dialog opening over a
+            // form), push the current context to the stack for later restoration.
+            // During normal navigation the previous controller already called
+            // clearContext before the new one mounted, so _owner is null here.
+            if (_owner && _owner !== owner) {
+                _contextStack.push({ owner: _owner, record: activeRecord, context: state.context });
+            }
             _owner = owner;
             activeRecord = record || null;
-            state.context = record
-                ? {
-                      kind: "record",
-                      model: record.resModel,
-                      resId: record.resId,
-                      displayName: record.data?.display_name || record.data?.name || "",
-                  }
-                : null;
+            state.context = record ? _makeRecordContext(record) : null;
         }
 
         /**
-         * Contexto de una vista lista/kanban. `payload`:
+         * Context for a list/kanban view. `payload`:
          *   { model, resIds, isDomainSelected, count, domain, filters }
          */
         function setSearchContext(owner, payload) {
             _owner = owner;
-            activeRecord = null; // no hay form record donde aplicar
+            activeRecord = null; // no form record in list/kanban context
             const resIds = payload.resIds || [];
             if (payload.isDomainSelected) {
-                // "Seleccionar los N que matchean el dominio": todo el filtro.
+                // "Select all N matching the domain": full filter, no explicit id list.
                 state.context = {
                     kind: "selection",
                     model: payload.model,
@@ -367,7 +382,30 @@ export const tuquiAssistantService = {
         }
 
         function clearContext(owner) {
-            if (!owner || _owner === owner) {
+            if (!owner) {
+                // No owner (legacy / manual call): clear everything.
+                _owner = null;
+                activeRecord = null;
+                state.context = null;
+                _contextStack = [];
+                return;
+            }
+            // Remove from stack if this owner unmounted while a dialog was on top —
+            // otherwise closing the dialog would restore a dead context.
+            if (_contextStack.length) {
+                _contextStack = _contextStack.filter((e) => e.owner !== owner);
+            }
+            if (_owner !== owner) {
+                return; // not the current owner, nothing to do
+            }
+            // Restore parent context if any (e.g. the form below a dialog).
+            const parent = _contextStack.pop();
+            if (parent) {
+                _owner = parent.owner;
+                activeRecord = parent.record;
+                // Re-build from the live record so dirty reflects current state.
+                state.context = parent.record ? _makeRecordContext(parent.record) : parent.context;
+            } else {
                 _owner = null;
                 activeRecord = null;
                 state.context = null;
@@ -376,20 +414,20 @@ export const tuquiAssistantService = {
 
         function togglePanel() {
             state.panelOpen = !state.panelOpen;
-            // Al cerrar/reabrir desde el systray, arrancá con la card visible: el
-            // estado minimizado es per-apertura y no debe sobrevivir un toggle.
+            // On close/reopen from the systray, start with the card visible: minimized
+            // state is per-open and must not survive a toggle.
             state.minimized = false;
         }
 
-        // Click del systray (item CTO #4): SIEMPRE abre el panel en un chat NUEVO
-        // (cerrar queda en los botones minimizar/cerrar de la card, ya no togglea).
-        //   - Panel cerrado → abrirlo monta el iframe en `/embed/:slug`, que YA es
-        //     un chat nuevo: alcanza con mostrar la card (no se postea nada; el
-        //     iframe aún no está montado/hidratado).
-        //   - Panel ya abierto (o minimizado: el iframe sigue montado) → NO se
-        //     remonta el iframe (gastaría un 2º nonce SSO → 401): se restaura la
-        //     card y se incrementa newChatRequest para que el panel le postee
-        //     `new-chat` al SPA (navegación interna a un chat nuevo).
+        // Systray click (CTO item #4): ALWAYS opens the panel on a NEW chat
+        // (closing is handled by the card's minimize/close buttons, no longer toggles).
+        //   - Panel closed → opening mounts the iframe at `/embed/:slug`, which IS
+        //     already a new chat: showing the card is enough (nothing posted; the
+        //     iframe is not yet mounted/hydrated).
+        //   - Panel already open (or minimized: iframe still mounted) → do NOT remount
+        //     the iframe (would spend a second SSO nonce → 401): restore the card and
+        //     increment newChatRequest so the panel posts `new-chat` to the SPA
+        //     (internal navigation to a new chat).
         function openFreshChat() {
             const wasOpen = state.panelOpen;
             state.panelOpen = true;
@@ -399,9 +437,9 @@ export const tuquiAssistantService = {
             }
         }
 
-        // Minimizar a burbuja / restaurar la card. NO cierra el panel: el iframe
-        // sigue montado (la card se oculta por CSS, no se desmonta) — un remount
-        // gastaría un 2º nonce SSO single-use → 401. Ver panel.xml.
+        // Minimize to bubble / restore the card. Does NOT close the panel: the iframe
+        // stays mounted (the card is hidden via CSS, not unmounted) — a remount would
+        // spend a second single-use SSO nonce → 401. See panel.xml.
         function minimize() {
             state.minimized = true;
         }

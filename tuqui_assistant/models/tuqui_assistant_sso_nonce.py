@@ -92,15 +92,22 @@ class TuquiAssistantSsoNonce(models.Model):
                 client_id = oauth_client.client_id
                 url = f"{base_url}/api/companion/bootstrap?client_id={client_id}"
                 resp = requests.get(url, timeout=3)
-                resp.raise_for_status()
-                chat_enabled = resp.json().get("chat_enabled", False)
+                if resp.status_code == 401:
+                    # Tuqui rejected our credentials — the connection is stale on
+                    # their side (e.g. workspace deleted or reassigned). Auto-disconnect
+                    # so Settings reflects reality without requiring a manual action.
+                    oauth_client.action_disconnect()
+                    connected = False
+                else:
+                    resp.raise_for_status()
+                    chat_enabled = resp.json().get("chat_enabled", False)
             except Exception:
-                chat_enabled = True  # fail-open: no bloquear si Tuqui no responde
+                chat_enabled = True  # fail-open: network error, Tuqui temporarily down
 
         return {
             "connected": connected,
             "base_url": base_url,
-            "slug": oauth_client.workspace_id_external if oauth_client else False,
+            "slug": oauth_client.workspace_id_external if (oauth_client and connected) else False,
             "chat_enabled": chat_enabled,
         }
 
