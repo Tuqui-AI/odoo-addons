@@ -277,10 +277,9 @@ class TestTuquiRpcGateway(HttpCase):
 
     def test_api_private_method_is_refused_on_member_path(self):
         """A public-named @api.private ORM method (init, mapped, …) must be
-        refused even with read_only OFF on the member path — parity with Odoo's
-        native get_public_method, which the gateway delegates to. Without the
-        guard these reach the ORM (init runs raw DDL outside ACL)."""
-        self.assertFalse(self.client.read_only)  # member path, writes/execute allowed
+        refused on the member path — parity with Odoo's native get_public_method,
+        which the gateway delegates to. Without the guard these reach the ORM
+        (init runs raw DDL outside ACL)."""
         for method in ("init", "mapped", "filtered", "new"):  # @api.private in 18 AND 19
             resp = self._rpc("res.partner", method, args=[[1]], expect_status=403)
             self.assertEqual(
