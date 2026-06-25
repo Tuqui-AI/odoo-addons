@@ -607,6 +607,11 @@ export const tuquiAssistantService = {
                     if (Array.isArray(rest) ? rest.length : rest != null) {
                         updatePayload[name] = rest;
                     }
+                } else if (type === "many2one" && typeof value === "number" && value > 0) {
+                    // Wrap bare integer IDs for many2one fields so OWL resolves the
+                    // display_name. Passing a raw integer leaves the field visually
+                    // empty even though the ID is set.
+                    updatePayload[name] = { id: value };
                 } else {
                     updatePayload[name] = value;
                 }
