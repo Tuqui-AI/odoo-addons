@@ -306,9 +306,21 @@ export const tuquiAssistantService = {
     // `action` is needed to open the standard composer (doAction) from proposeChatter.
     dependencies: ["notification", "orm", "action"],
     start(env, { notification, orm, action }) {
+        // Persist panel UI state across Ctrl+R, per-tab (sessionStorage is tab-scoped).
+        // panelOpen / minimized / expanded survive reload; context and newChatRequest
+        // are ephemeral (rebuilt from the current Odoo view on mount).
+        const _SESSION_KEY = "tuqui_panel_state";
+        let _savedState = {};
+        try {
+            _savedState = JSON.parse(sessionStorage.getItem(_SESSION_KEY) || "{}");
+        } catch {
+            _savedState = {};
+        }
+
         const state = reactive({
-            panelOpen: false,
-            minimized: false,
+            panelOpen: Boolean(_savedState.panelOpen),
+            minimized: Boolean(_savedState.minimized),
+            expanded: Boolean(_savedState.expanded),
             context: null,
             // Nonce-counter that the systray increments to ask an already-open panel
             // to start a NEW chat without remounting the iframe (a remount would spend
@@ -316,6 +328,21 @@ export const tuquiAssistantService = {
             // `new-chat` to the SPA. See openFreshChat / systray.
             newChatRequest: 0,
         });
+
+        function _saveState() {
+            try {
+                sessionStorage.setItem(
+                    _SESSION_KEY,
+                    JSON.stringify({
+                        panelOpen: state.panelOpen,
+                        minimized: state.minimized,
+                        expanded: state.expanded,
+                    })
+                );
+            } catch {
+                // Private browsing or quota exceeded — silently skip.
+            }
+        }
 
         // Active form's OWL record (record mode only). Intentionally non-reactive:
         // it is a model object, not UI state. `_owner` is whoever published the
@@ -422,6 +449,7 @@ export const tuquiAssistantService = {
             // On close/reopen from the systray, start with the card visible: minimized
             // state is per-open and must not survive a toggle.
             state.minimized = false;
+            _saveState();
         }
 
         // Systray click (CTO item #4): ALWAYS opens the panel on a NEW chat
@@ -440,6 +468,7 @@ export const tuquiAssistantService = {
             if (wasOpen) {
                 state.newChatRequest += 1;
             }
+            _saveState();
         }
 
         // Minimize to bubble / restore the card. Does NOT close the panel: the iframe
@@ -447,9 +476,19 @@ export const tuquiAssistantService = {
         // spend a second single-use SSO nonce → 401. See panel.xml.
         function minimize() {
             state.minimized = true;
+            _saveState();
         }
         function restore() {
             state.minimized = false;
+            _saveState();
+        }
+        function expand() {
+            state.expanded = true;
+            _saveState();
+        }
+        function contract() {
+            state.expanded = false;
+            _saveState();
         }
 
         /**
@@ -862,6 +901,8 @@ export const tuquiAssistantService = {
             openFreshChat,
             minimize,
             restore,
+            expand,
+            contract,
             applyProposal,
             proposeChatter,
             navigate,
