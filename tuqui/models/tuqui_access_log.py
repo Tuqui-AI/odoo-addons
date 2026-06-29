@@ -109,12 +109,12 @@ class TuquiAccessLog(models.Model):
         duration_ms=0,
         result_count=0,
     ):
-        """Append one audit row and prune older rows beyond the configured cap.
+        """Append one audit row.
 
         Keyword-only on purpose: the field list grew enough that positional
         calls would silently shift on schema changes.
         """
-        rec = self.sudo().create(
+        return self.sudo().create(
             {
                 "method": method,
                 "model_name": model_name or False,
@@ -128,23 +128,27 @@ class TuquiAccessLog(models.Model):
                 "result_count": int(result_count or 0),
             }
         )
-        self._prune()
-        return rec
 
     @api.model
     def _max_rows(self):
+        """Return the configured row cap, falling back to _DEFAULT_MAX_ROWS.
+
+        Enforces a hard floor of 100 so a misconfigured value can't truncate
+        the table to a useless size.
+        """
         raw = self.env["ir.config_parameter"].sudo().get_param("tuqui.access_log.max_rows", _DEFAULT_MAX_ROWS)
         try:
             return max(int(raw), 100)
         except (TypeError, ValueError):
             return _DEFAULT_MAX_ROWS
 
-    @api.model
-    def _prune(self):
+    @api.autovacuum
+    def _gc_old_logs(self):
+        """Delete the oldest rows that exceed the configured cap."""
         max_rows = self._max_rows()
         total = self.sudo().search_count([])
         excess = total - max_rows
         if excess <= 0:
             return
         oldest = self.sudo().search([], order="id asc", limit=excess)
-        oldest.sudo().unlink()
+        oldest.unlink()
