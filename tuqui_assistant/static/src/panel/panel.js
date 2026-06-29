@@ -93,9 +93,16 @@ export class TuquiPanel extends Component {
                     this._authPosted = false;
                     this._lastSpaPath = null;
                     void loadBootstrap();
-                } else if (this.ui.slug) {
-                    // Panel closed → iframe unmounted → safe to update.
-                    this.ui.storedPath = localStorage.getItem(_storageKey()) || null;
+                } else {
+                    // Panel closed → iframe unmounted → safe to update stored path.
+                    if (this.ui.slug) {
+                        this.ui.storedPath = localStorage.getItem(_storageKey()) || null;
+                    }
+                    // Reset expanded state; the useEffect on state.expanded removes
+                    // the html class automatically.
+                    if (this.state.expanded) {
+                        this.tuquiAssistant.contract();
+                    }
                 }
             },
             () => [this.state.panelOpen]
@@ -104,7 +111,10 @@ export class TuquiPanel extends Component {
         // postMessage bridge with the SPA iframe.
         this._onMessage = this._handleMessage.bind(this);
         onMounted(() => window.addEventListener("message", this._onMessage));
-        onWillUnmount(() => window.removeEventListener("message", this._onMessage));
+        onWillUnmount(() => {
+            window.removeEventListener("message", this._onMessage);
+            document.documentElement.classList.remove("o-tuqui-expanded");
+        });
 
         // When the context changes (open record / unsaved edits), re-push it
         // to the iframe if it is already ready.
@@ -129,6 +139,31 @@ export class TuquiPanel extends Component {
                 }
             },
             () => [this.state.newChatRequest]
+        );
+
+        // Manage the split-screen class on <html> via a useEffect so it fires
+        // AFTER OWL has updated the DOM (panel already has o-tuqui-expanded class
+        // and its expanded layout). If classList.add were called in expand() directly,
+        // it would run before OWL's render → body padding kicks in while the panel
+        // is still in its small position → layout doesn't reflow correctly on the
+        // first expand (Ctrl+R was needed to fix it).
+        //
+        // After applying the class, dispatch a "resize" event inside rAF so Odoo's
+        // JS-layout components (form columns, chatter, list view) re-measure within
+        // the updated body width. Without this, those components keep the widths they
+        // computed at page load and don't react to the body padding-right change.
+        // rAF ensures the CSS has painted (body is visually narrowed) before the
+        // resize handlers run.
+        useEffect(
+            () => {
+                if (this.state.expanded) {
+                    document.documentElement.classList.add("o-tuqui-expanded");
+                } else {
+                    document.documentElement.classList.remove("o-tuqui-expanded");
+                }
+                requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+            },
+            () => [this.state.expanded]
         );
     }
 
@@ -347,6 +382,12 @@ export class TuquiPanel extends Component {
     get closeLabel() {
         return _t("Close");
     }
+    get expandLabel() {
+        return _t("Expand");
+    }
+    get contractLabel() {
+        return _t("Contract");
+    }
     get restoreLabel() {
         return _t("Open Tuqui");
     }
@@ -363,6 +404,14 @@ export class TuquiPanel extends Component {
 
     restore() {
         this.tuquiAssistant.restore();
+    }
+
+    expand() {
+        this.tuquiAssistant.expand();
+    }
+
+    contract() {
+        this.tuquiAssistant.contract();
     }
 
     // Full workspace web app URL to open in a new tab. Opens the user's CURRENT
