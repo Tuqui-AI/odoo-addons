@@ -31,13 +31,16 @@ class TuquiHealth(http.Controller):
     @http.route("/tuqui/health", type="http", auth="none", methods=["GET"], csrf=False)
     def health(self, **_kwargs):
         env = http.request.env
+        caps = list(_CAPABILITIES)
+        if env["tuqui.oauth.client"].sudo()._is_read_only():
+            caps.append("policy.read_only")
         body = {
             "ok": True,
             "module": "tuqui",
             "module_version": _module_version(env),
             "protocol_version": _PROTOCOL_VERSION,
             "odoo_version": release.version,
-            "capabilities": _CAPABILITIES,
+            "capabilities": caps,
         }
         return Response(
             json.dumps(body),

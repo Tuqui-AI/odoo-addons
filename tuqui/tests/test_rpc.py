@@ -61,6 +61,9 @@ class TestTuquiRpcGateway(HttpCase):
     def setUp(self):
         super().setUp()
         self.client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        # Tests start with read_only=False (pre-existing behaviour). The
+        # test_member_read_only_* cases flip it explicitly inside each test.
+        self.client.write({"read_only": False})
 
     # ─── HTTP helpers ────────────────────────────────────────────────
 
@@ -438,3 +441,44 @@ class TestTuquiRpcGateway(HttpCase):
         count = resp.json()["data"]
         log = self._latest_log(method="search_count")
         self.assertEqual(log.result_count, count)
+
+    # ─── Member read_only ─────────────────────────────────────────────────
+
+    def test_member_read_only_blocks_writes_and_executes(self):
+        """read_only=True: write and execute ops on the member path return 403 read_only_mode."""
+        self.client.write({"read_only": True})
+        resp = self._rpc("res.partner", "create", args=[{"name": "ro_blocked"}], expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
+        resp = self._rpc("res.partner", "action_archive", args=[[1]], expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
+
+    def test_member_read_only_allows_reads(self):
+        """read_only=True: read ops on the member path still work."""
+        self.client.write({"read_only": True})
+        resp = self._rpc(
+            "res.partner",
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["name"], "limit": 2},
+            expect_status=200,
+        )
+        self.assertTrue(resp.json()["ok"])
+
+    def test_member_read_only_false_allows_writes(self):
+        """read_only=False: write ops work normally on the member path."""
+        self.client.write({"read_only": False})
+        resp = self._rpc("res.partner", "create", args=[{"name": "ro_allowed"}], expect_status=200)
+        self.assertIsInstance(resp.json()["data"], int)
+
+    def test_connection_path_always_read_only_regardless_of_member_flag(self):
+        """connection_read_only is unconditional: connection path refuses writes
+        even when read_only=False on the client."""
+        self.client.write({"read_only": False})
+        resp = self._rpc(
+            "res.partner",
+            "create",
+            args=[{"name": "conn_still_blocked"}],
+            connection=True,
+            expect_status=403,
+        )
+        self.assertEqual(resp.json()["error"]["code"], "connection_read_only")

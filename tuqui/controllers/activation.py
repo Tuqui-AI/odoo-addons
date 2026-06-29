@@ -100,7 +100,7 @@ class TuquiActivation(http.Controller):
             )
 
         frontend_url = env["tuqui.oauth.client"].sudo()._get_activation_frontend_url().rstrip("/")
-        companion_url = request.httprequest.host_url.rstrip("/")
+        companion_url = env["tuqui.oauth.client"].sudo()._get_companion_url()
 
         # The Tuqui frontend reads nonce + companion_url from the query
         # string and POSTs back to /tuqui/activation/exchange with the
@@ -236,7 +236,7 @@ class TuquiActivation(http.Controller):
                 vals["workspace_id_external"] = workspace_slug
             oauth_client.write(vals)
 
-        companion_url = request.httprequest.host_url.rstrip("/")
+        companion_url = env["tuqui.oauth.client"].sudo()._get_companion_url()
         payload = {
             "client_id": client_id,
             "client_secret": client_secret,

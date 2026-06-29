@@ -7,6 +7,7 @@ Addons mantenidos por Tuqui-AI para extender / acompañar la conexión entre Odo
 | Módulo | Versiones | Qué es |
 |---|---|---|
 | `tuqui` | `18.0`, `19.0` | Módulo de activación / `CompanionTransport` para que un cliente con Odoo conecte Tuqui en un click. |
+| `tuqui_assistant` | `19.0` | Panel embebido del asistente Tuqui en el backend de Odoo (chat contextual + propose-then-apply sobre el formulario activo). |
 | `tuqui_mcp` | `16.0`, `17.0`, `18.0`, `19.0` | Módulo data-only para Odoo Apps. Registra los parámetros de conexión con Tuqui. Compatible con Odoo Online. |
 
 > Lista vigente. Cuando aparezca un módulo nuevo, agregar fila acá.

@@ -61,6 +61,16 @@ class TuquiOAuthClient(models.Model):
         compute="_compute_access_count_7d",
         help="Total RPC calls logged in tuqui.access.log during the last 7 days.",
     )
+    read_only = fields.Boolean(
+        string="Read-only mode",
+        default=True,
+        help=(
+            "When enabled, Tuqui can only read data from this Odoo; "
+            "write and execute operations on the member path are blocked. "
+            "Safe-by-default. Disable to allow the AI agent to create, "
+            "update or delete records."
+        ),
+    )
     _client_id_unique = models.Constraint(
         "unique(client_id)",
         "Tuqui client_id must be unique.",
@@ -72,6 +82,11 @@ class TuquiOAuthClient(models.Model):
     def _get_singleton(self):
         rec = self.search([], limit=1)
         return rec or self.env["tuqui.oauth.client"]
+
+    @api.model
+    def _is_read_only(self) -> bool:
+        client = self._get_singleton()
+        return bool(client.read_only) if client else False
 
     @api.model
     def _get_or_create_singleton(self):
@@ -228,6 +243,26 @@ class TuquiOAuthClient(models.Model):
         """
         return f"{self._get_tuqui_base_url()}/activate"
 
+    @api.model
+    def _get_companion_url(self) -> str:
+        """Canonical public URL of this Odoo instance.
+
+        Reads ``web.base.url`` (Technical > Parameters) so the URL is correct
+        behind a TLS-terminating proxy. The proxy terminates HTTPS and forwards
+        to Odoo over HTTP, so ``request.httprequest.host_url`` reflects only
+        the proxy→Odoo hop (``http://``). ``web.base.url`` holds the
+        externally-visible HTTPS URL.
+
+        Falls back to ``request.httprequest.host_url`` for local/dev setups
+        where the parameter may be absent or blank.
+        """
+        base_url = self.env["ir.config_parameter"].sudo().get_param("web.base.url", "")
+        if base_url:
+            return base_url.rstrip("/")
+        from odoo.http import request as http_request
+
+        return http_request.httprequest.host_url.rstrip("/")
+
     def action_open_tuqui(self):
         """Open the connected Tuqui workspace in a new tab.
 
@@ -263,7 +298,7 @@ class TuquiOAuthClient(models.Model):
 
     def _compute_access_count_7d(self):
         # The domain doesn't depend on the record, so count once and fan out
-        # (same shape as res_config_settings._compute_tuqui_status).
+        # (same shape as res_config_settings.get_values' status read).
         since = fields.Datetime.now() - timedelta(days=7)
         count = self.env["tuqui.access.log"].sudo().search_count([("create_date", ">=", since)])
         for rec in self:
