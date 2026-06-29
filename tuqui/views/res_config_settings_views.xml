@@ -21,7 +21,6 @@
 
                     <!-- Connected: status + links + lifecycle actions -->
                     <div invisible="tuqui_state != 'active'">
-                        <field name="tuqui_access_count_7d" invisible="1"/>
                         <div class="d-flex align-items-center flex-wrap gap-2">
                             <span class="badge text-bg-success">Connected</span>
                             <span class="text-muted">·</span>
@@ -45,6 +44,23 @@
                         </div>
                     </div>
 
+                    <!-- Security: optional read-only lock (only meaningful once connected) -->
+                    <div invisible="tuqui_state != 'active'" class="mt16">
+                        <span class="o_form_label fw-bold d-block mb-1">Security</span>
+                        <div class="d-flex align-items-center">
+                            <field name="tuqui_read_only" widget="boolean_toggle" class="oe_inline"/>
+                            <label for="tuqui_read_only" string="Read-only mode" class="ms-2 mb-0"/>
+                        </div>
+                        <div class="text-muted small mt-1" invisible="not tuqui_read_only">
+                            Tuqui can read but never create, update, delete or run methods.
+                            Reads still follow each user's own Odoo permissions.
+                        </div>
+                        <div class="text-muted small mt-1" invisible="tuqui_read_only">
+                            Tuqui can create, update and delete in Odoo — but only on the models
+                            you enable in the write whitelist in Tuqui's settings.
+                            Reads still follow each user's own Odoo permissions.
+                        </div>
+                    </div>
                 </setting>
             </xpath>
         </field>

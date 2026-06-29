@@ -1,4 +1,4 @@
-from odoo import _, fields, models
+from odoo import _, api, fields, models
 
 # Settings shows the connection state read-only; transitions happen through the
 # actions below. Reuse the canonical selection from the client model so the two
@@ -17,36 +17,65 @@ class ResConfigSettings(models.TransientModel):
 
     _inherit = "res.config.settings"
 
+    # Read-only display values derived from the tuqui.oauth.client singleton.
+    # Populated in get_values() (not via compute): res.config.settings loads the
+    # form through an onchange, which only recomputes computed fields whose
+    # @api.depends are triggered. These depend on another model, with no field
+    # path on this record to depend on, so a no-dependency compute never fires on
+    # load and the fields render blank. get_values() is the lifecycle hook
+    # res.config.settings guarantees to run on every form load.
     tuqui_state = fields.Selection(
         _STATE_SELECTION,
-        compute="_compute_tuqui_status",
         string="Tuqui Connection State",
     )
     tuqui_last_seen_at = fields.Datetime(
-        compute="_compute_tuqui_status",
         string="Tuqui Last Activity",
     )
     tuqui_access_count_7d = fields.Integer(
-        compute="_compute_tuqui_status",
         string="Tuqui Accesses (7 days)",
     )
     tuqui_access_summary = fields.Char(
-        compute="_compute_tuqui_status",
         string="Tuqui Activity Summary",
     )
+    tuqui_read_only = fields.Boolean(
+        string="Tuqui Read-only Mode",
+        help=(
+            "When enabled, Tuqui can read but never create, update, delete "
+            "or run methods on this database. Reads still follow each user's "
+            "own Odoo permissions. Private methods and ORM escape hatches are "
+            "always blocked regardless of this flag. Note: read-only is "
+            "enforced by classifying the method name (not at the cursor "
+            "level), so a mutating method whose name starts with read/search "
+            "could be classified as a read."
+        ),
+    )
 
-    def _compute_tuqui_status(self):
+    @api.model
+    def get_values(self):
+        res = super().get_values()
         client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         count = client.access_count_7d if client else 0
         # Pre-rendered so the view shows a clean sentence instead of an inline
         # <field> that breaks the line mid-phrase. Pluralized by hand — Odoo's
         # backend i18n has no plural form helper.
         summary = _("%s access in the last 7 days", count) if count == 1 else _("%s accesses in the last 7 days", count)
-        for rec in self:
-            rec.tuqui_state = client.state if client else "pending"
-            rec.tuqui_last_seen_at = client.last_seen_at if client else False
-            rec.tuqui_access_count_7d = count
-            rec.tuqui_access_summary = summary
+        res.update(
+            tuqui_state=client.state if client else "pending",
+            tuqui_last_seen_at=client.last_seen_at if client else False,
+            tuqui_access_count_7d=count,
+            tuqui_access_summary=summary,
+            tuqui_read_only=bool(client.read_only) if client else False,
+        )
+        return res
+
+    def set_values(self):
+        super().set_values()
+        # read_only lives on the OAuth singleton, which only exists once the
+        # database is activated — there's nothing to gate before then, so a
+        # missing singleton just means the toggle has no effect yet.
+        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        if client and client.read_only != self.tuqui_read_only:
+            client.write({"read_only": self.tuqui_read_only})
 
     # ---------- Actions (thin proxies to the singletons) ----------
 

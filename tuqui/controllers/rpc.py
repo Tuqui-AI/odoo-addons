@@ -85,7 +85,7 @@ def _classify(method: str) -> str:
 # ─── Policy gate ─────────────────────────────────────────────────────
 
 
-def _evaluate_policy(method: str, op_type: str, *, is_connection: bool):
+def _evaluate_policy(read_only: bool, method: str, op_type: str, *, is_connection: bool):
     """Return ``(allowed, denied_reason)``.
 
     ``allowed=True`` means the call may proceed to the ORM (where the acting
@@ -99,6 +99,8 @@ def _evaluate_policy(method: str, op_type: str, *, is_connection: bool):
        record rules, so it is locked to reads UNCONDITIONALLY — anything that
        can mutate is refused with ``connection_read_only``. Keeps the blast
        radius of a stolen token to read-only on workspace-level/system traffic.
+    4. Member path: when the connection is flagged ``read_only``, anything that
+       can mutate is refused with ``read_only_mode``.
     """
     if _is_absolutely_blocked(method):
         return False, "method_blocked"
@@ -110,6 +112,8 @@ def _evaluate_policy(method: str, op_type: str, *, is_connection: bool):
         if op_type != "read":
             return False, "connection_read_only"
         return True, None
+    if read_only and op_type in ("write", "execute"):
+        return False, "read_only_mode"
     return True, None
 
 
@@ -337,7 +341,7 @@ def _bind_logger(env, *, method, model_name, operation_type, acting_user):
 
 # Policy-deny reasons that should surface as HTTP 403. Anything else
 # from the gate (currently nothing) would surface as 400.
-_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "connection_read_only"})
+_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "connection_read_only", "read_only_mode"})
 
 
 class TuquiRpc(http.Controller):
@@ -365,10 +369,11 @@ class TuquiRpc(http.Controller):
       and unknown/inactive ids are refused (``forbidden_acting_user``).
 
     * CONNECTION PATH — request has NO acting uid (workspace-level / system
-      traffic). The call runs as SUPERUSER (``sudo()``). Because sudo bypasses
-      record rules, this path is locked to reads UNCONDITIONALLY: any write /
-      execute / private / blocked op is refused (``connection_read_only``).
-      A stolen token can therefore only ever read on this path.
+      traffic). The call runs as SUPERUSER (``with_user(SUPERUSER_ID)``).
+      Because the superuser bypasses record rules, this path is locked to reads
+      UNCONDITIONALLY: any write / execute / private / blocked op is refused
+      (``connection_read_only``). A stolen token can therefore only ever read
+      on this path.
 
     Defense in depth, applied to both paths:
 
@@ -395,6 +400,11 @@ class TuquiRpc(http.Controller):
             return _error("unauthorized", "Missing bearer token", status=401)
         if not verify_access_token(env, token):
             return _error("unauthorized", "Invalid or expired token", status=401)
+
+        # ─── Path detection (header only, no body needed) ─────────────────
+        acting_uid = request.httprequest.headers.get("X-Tuqui-Acting-Uid") or ""
+        is_connection = not acting_uid
+        read_only = False if is_connection else env["tuqui.oauth.client"].sudo()._is_read_only()
 
         # ─── Body ──────────────────────────────────────────────────────────
         try:
@@ -426,11 +436,10 @@ class TuquiRpc(http.Controller):
         operation_type = _classify(method)
 
         # ─── Acting user ───────────────────────────────────────────────────
+        # acting_uid / is_connection already resolved above (path detection).
         # Presence of the acting-uid header picks the path:
         #   * MEMBER PATH (uid present) → resolve + vet the member, run with_user.
         #   * CONNECTION PATH (no uid)  → run as superuser, locked to reads.
-        acting_uid = request.httprequest.headers.get("X-Tuqui-Acting-Uid") or ""
-        is_connection = not acting_uid
         if is_connection:
             acting_user = None
         else:
@@ -467,7 +476,7 @@ class TuquiRpc(http.Controller):
         )
 
         # ─── Policy gate ───────────────────────────────────────────────────
-        allowed, denied_reason = _evaluate_policy(method, operation_type, is_connection=is_connection)
+        allowed, denied_reason = _evaluate_policy(read_only, method, operation_type, is_connection=is_connection)
         if not allowed:
             emit(policy_allowed=False, policy_denied_reason=denied_reason, success=False)
             status = 403 if denied_reason in _POLICY_DENY_403 else 400
@@ -481,7 +490,7 @@ class TuquiRpc(http.Controller):
         # Member path runs under the member's ACL; connection path runs as
         # SUPERUSER (already gated read-only above).
         if is_connection:
-            recordset = env[model_name].sudo()
+            recordset = env[model_name].with_user(SUPERUSER_ID)
         else:
             recordset = env[model_name].with_user(acting_user)
         if context:
