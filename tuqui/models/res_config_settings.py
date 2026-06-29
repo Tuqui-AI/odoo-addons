@@ -17,21 +17,24 @@ class ResConfigSettings(models.TransientModel):
 
     _inherit = "res.config.settings"
 
+    # Read-only display values derived from the tuqui.oauth.client singleton.
+    # Populated in get_values() (not via compute): res.config.settings loads the
+    # form through an onchange, which only recomputes computed fields whose
+    # @api.depends are triggered. These depend on another model, with no field
+    # path on this record to depend on, so a no-dependency compute never fires on
+    # load and the fields render blank. get_values() is the lifecycle hook
+    # res.config.settings guarantees to run on every form load.
     tuqui_state = fields.Selection(
         _STATE_SELECTION,
-        compute="_compute_tuqui_status",
         string="Tuqui Connection State",
     )
     tuqui_last_seen_at = fields.Datetime(
-        compute="_compute_tuqui_status",
         string="Tuqui Last Activity",
     )
     tuqui_access_count_7d = fields.Integer(
-        compute="_compute_tuqui_status",
         string="Tuqui Accesses (7 days)",
     )
     tuqui_access_summary = fields.Char(
-        compute="_compute_tuqui_status",
         string="Tuqui Activity Summary",
     )
     tuqui_read_only = fields.Boolean(
@@ -47,24 +50,22 @@ class ResConfigSettings(models.TransientModel):
         ),
     )
 
-    def _compute_tuqui_status(self):
+    @api.model
+    def get_values(self):
+        res = super().get_values()
         client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         count = client.access_count_7d if client else 0
         # Pre-rendered so the view shows a clean sentence instead of an inline
         # <field> that breaks the line mid-phrase. Pluralized by hand — Odoo's
         # backend i18n has no plural form helper.
         summary = _("%s access in the last 7 days", count) if count == 1 else _("%s accesses in the last 7 days", count)
-        for rec in self:
-            rec.tuqui_state = client.state if client else "pending"
-            rec.tuqui_last_seen_at = client.last_seen_at if client else False
-            rec.tuqui_access_count_7d = count
-            rec.tuqui_access_summary = summary
-
-    @api.model
-    def get_values(self):
-        res = super().get_values()
-        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
-        res.update(tuqui_read_only=bool(client.read_only) if client else False)
+        res.update(
+            tuqui_state=client.state if client else "pending",
+            tuqui_last_seen_at=client.last_seen_at if client else False,
+            tuqui_access_count_7d=count,
+            tuqui_access_summary=summary,
+            tuqui_read_only=bool(client.read_only) if client else False,
+        )
         return res
 
     def set_values(self):
