@@ -8,6 +8,7 @@ from datetime import timedelta
 
 import requests
 from odoo import api, fields, models
+from odoo.http import request as http_request
 
 _logger = logging.getLogger(__name__)
 
@@ -230,6 +231,24 @@ class TuquiOAuthClient(models.Model):
         Derived from the base URL — one config, not two.
         """
         return f"{self._get_tuqui_base_url()}/activate"
+
+    @api.model
+    def _get_companion_url(self) -> str:
+        """Canonical public URL of this Odoo instance.
+
+        Reads ``web.base.url`` (Technical > Parameters) so the URL is correct
+        behind a TLS-terminating proxy. The proxy terminates HTTPS and forwards
+        to Odoo over HTTP, so ``request.httprequest.host_url`` reflects only
+        the proxy→Odoo hop (``http://``). ``web.base.url`` holds the
+        externally-visible HTTPS URL.
+
+        Falls back to ``request.httprequest.host_url`` for local/dev setups
+        where the parameter may be absent or blank.
+        """
+        base_url = self.env["ir.config_parameter"].sudo().get_param("web.base.url", "")
+        if base_url:
+            return base_url.rstrip("/")
+        return http_request.httprequest.host_url.rstrip("/")
 
     def action_open_tuqui(self):
         """Open the connected Tuqui workspace in a new tab.

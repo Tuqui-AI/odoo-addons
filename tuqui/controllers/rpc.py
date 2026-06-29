@@ -495,7 +495,7 @@ class TuquiRpc(http.Controller):
         # Member path runs under the member's ACL; connection path runs as
         # SUPERUSER (already gated read-only above).
         if is_connection:
-            recordset = env[model_name].sudo()
+            recordset = env[model_name].with_user(SUPERUSER_ID)
         else:
             recordset = env[model_name].with_user(acting_user)
         if context:
