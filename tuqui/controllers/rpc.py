@@ -3,6 +3,7 @@ import logging
 import time
 from collections.abc import Mapping
 
+import psycopg2
 from odoo import SUPERUSER_ID, http
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.http import Response, request
@@ -13,6 +14,23 @@ from odoo.tools.json import json_default as odoo_json_default
 from .oauth import verify_access_token
 
 _LOG = logging.getLogger(__name__)
+
+# Cost guard for /tuqui/rpc. Every Tuqui caller — the Tuqui chat, MCP / Tuqui
+# Connect, and the insights cron — runs its query SYNCHRONOUSLY inside a shared
+# provider worker. Without a ceiling a pathological domain can pin a worker for
+# minutes and OOM the pod (#70305). Cap the per-request SQL runtime at the DB
+# level. Overridable via the ``tuqui.rpc.statement_timeout_ms`` config
+# parameter; 0 disables the guard entirely.
+_DEFAULT_STATEMENT_TIMEOUT_MS = 90_000
+
+
+def _statement_timeout_ms(env) -> int:
+    """Return the configured per-request SQL timeout in ms (0 = disabled)."""
+    raw = env["ir.config_parameter"].sudo().get_param("tuqui.rpc.statement_timeout_ms", _DEFAULT_STATEMENT_TIMEOUT_MS)
+    try:
+        return max(int(raw), 0)
+    except (TypeError, ValueError):
+        return _DEFAULT_STATEMENT_TIMEOUT_MS
 
 
 # ─── Absolute blocks ─────────────────────────────────────────────────
@@ -497,7 +515,15 @@ class TuquiRpc(http.Controller):
             recordset = recordset.with_context(**context)
 
         started = time.monotonic()
+        timeout_ms = _statement_timeout_ms(env)
         try:
+            if timeout_ms:
+                # SET LOCAL caps the SQL runtime for THIS request's transaction
+                # only (reset on commit/rollback). Applied right before dispatch
+                # so auth/policy queries above are unaffected. This is the guard
+                # that stops a heavy query from pinning a worker into an OOM
+                # (#70305) — for every caller: chat, MCP / Tuqui Connect, insights.
+                env.cr.execute("SET LOCAL statement_timeout = %s", (timeout_ms,))
             result = _dispatch(recordset, method, args, kwargs)
         except AccessError as exc:
             duration_ms = int((time.monotonic() - started) * 1000)
@@ -507,6 +533,21 @@ class TuquiRpc(http.Controller):
             duration_ms = int((time.monotonic() - started) * 1000)
             emit(policy_allowed=True, success=False, error_code="validation_error", duration_ms=duration_ms)
             return _error("validation_error", str(exc), status=400)
+        except psycopg2.errors.QueryCanceled:
+            # The query blew past the cost guard; Postgres aborted it. Roll back
+            # so the audit-log INSERT below runs on a clean cursor, then free the
+            # worker instead of letting the query pin it (#70305). The explicit
+            # error also tells the caller how to self-correct.
+            env.cr.rollback()
+            duration_ms = int((time.monotonic() - started) * 1000)
+            emit(policy_allowed=True, success=False, error_code="query_timeout", duration_ms=duration_ms)
+            return _error(
+                "query_timeout",
+                f"La consulta superó el límite de {timeout_ms // 1000}s y fue cancelada. "
+                "Acotá el dominio (por ejemplo un rango de fechas), pedí menos campos, "
+                "o usá un agregado (read_group) en lugar de traer todos los registros.",
+                status=400,
+            )
         except Exception as exc:  # noqa: BLE001
             _LOG.exception("tuqui.rpc: unhandled error in %s.%s", model_name, method)
             duration_ms = int((time.monotonic() - started) * 1000)
