@@ -2,7 +2,11 @@ import json
 import secrets
 import time
 
-from odoo.addons.tuqui.controllers.rpc import _classify
+from odoo.addons.tuqui.controllers.rpc import (
+    _DEFAULT_STATEMENT_TIMEOUT_MS,
+    _classify,
+    _statement_timeout_ms,
+)
 from odoo.tests import HttpCase, tagged
 from odoo.tools import mute_logger
 
@@ -482,3 +486,40 @@ class TestTuquiRpcGateway(HttpCase):
             expect_status=403,
         )
         self.assertEqual(resp.json()["error"]["code"], "connection_read_only")
+
+    # ─── Cost guard: statement_timeout (#70305) ──────────────────────────
+
+    def test_statement_timeout_ms_reads_config(self):
+        """The cap is configurable; a bad/0 value falls back or disables cleanly."""
+        icp = self.env["ir.config_parameter"].sudo()
+        icp.set_param("tuqui.rpc.statement_timeout_ms", "")  # unset-like → default
+        self.assertEqual(_statement_timeout_ms(self.env), _DEFAULT_STATEMENT_TIMEOUT_MS)
+        icp.set_param("tuqui.rpc.statement_timeout_ms", "5000")
+        self.assertEqual(_statement_timeout_ms(self.env), 5000)
+        icp.set_param("tuqui.rpc.statement_timeout_ms", "0")  # 0 disables the guard
+        self.assertEqual(_statement_timeout_ms(self.env), 0)
+        icp.set_param("tuqui.rpc.statement_timeout_ms", "not-a-number")
+        self.assertEqual(_statement_timeout_ms(self.env), _DEFAULT_STATEMENT_TIMEOUT_MS)
+
+    def test_normal_read_succeeds_under_default_cap(self):
+        """The default 90s cap must not break a normal, fast query."""
+        self.env["ir.config_parameter"].sudo().set_param(
+            "tuqui.rpc.statement_timeout_ms", str(_DEFAULT_STATEMENT_TIMEOUT_MS)
+        )
+        resp = self._rpc(model="res.partner", method="search_count", args=[[]], expect_status=200)
+        self.assertTrue(resp.json()["ok"], resp.text)
+
+    def test_query_over_cap_returns_query_timeout(self):
+        """A query that blows past the cap is cancelled and reported as a clean
+        query_timeout (HTTP 400), not an unhandled 500 — and the worker is freed.
+        Uses a 1ms cap over a large table so the statement is guaranteed to be cut.
+        """
+        self.env["ir.config_parameter"].sudo().set_param("tuqui.rpc.statement_timeout_ms", "1")
+        resp = self._rpc(
+            model="ir.model.fields",
+            method="search_read",
+            args=[[]],
+            kwargs={"fields": ["name", "model", "field_description", "help"]},
+        )
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(resp.json()["error"]["code"], "query_timeout")
