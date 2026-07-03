@@ -502,17 +502,23 @@ class TestTuquiRpcGateway(HttpCase):
         self.assertEqual(_statement_timeout_ms(self.env), _DEFAULT_STATEMENT_TIMEOUT_MS)
 
     def test_normal_read_succeeds_under_default_cap(self):
-        """The default 90s cap must not break a normal, fast query."""
+        """The default cap must not break a normal, fast query."""
         self.env["ir.config_parameter"].sudo().set_param(
             "tuqui.rpc.statement_timeout_ms", str(_DEFAULT_STATEMENT_TIMEOUT_MS)
         )
         resp = self._rpc(model="res.partner", method="search_count", args=[[]], expect_status=200)
         self.assertTrue(resp.json()["ok"], resp.text)
 
+    @mute_logger("odoo.sql_db")
     def test_query_over_cap_returns_query_timeout(self):
         """A query that blows past the cap is cancelled and reported as a clean
         query_timeout (HTTP 400), not an unhandled 500 — and the worker is freed.
         Uses a 1ms cap over a large table so the statement is guaranteed to be cut.
+
+        ``@mute_logger`` suppresses the expected ``odoo.sql_db`` ERROR log that
+        psycopg2 emits when Postgres cancels the statement — without it runbot
+        counts that ERROR as a build failure even though the assertions pass
+        (confirmed against build 91093 of this PR).
         """
         self.env["ir.config_parameter"].sudo().set_param("tuqui.rpc.statement_timeout_ms", "1")
         resp = self._rpc(
