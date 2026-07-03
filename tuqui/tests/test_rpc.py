@@ -2,7 +2,11 @@ import json
 import secrets
 import time
 
-from odoo.addons.tuqui.controllers.rpc import _classify
+from odoo.addons.tuqui.controllers.rpc import (
+    _DEFAULT_STATEMENT_TIMEOUT_MS,
+    _classify,
+    _statement_timeout_ms,
+)
 from odoo.tests import HttpCase, tagged
 from odoo.tools import mute_logger
 
@@ -488,3 +492,44 @@ class TestTuquiRpcGateway(HttpCase):
         count = resp.json()["data"]
         log = self._latest_log(method="search_count")
         self.assertEqual(log.result_count, count)
+
+    # ─── Cost guard: statement_timeout (#70305) ──────────────────────────
+
+    def test_statement_timeout_ms_uses_client_value(self):
+        """The client's own declared budget is used as-is — no ceiling to clamp
+        against. CompanionTransport always sends one; a single query is already
+        bounded by the client's own hardcoded ceiling (odoo_execute.py's 600s)."""
+        self.assertEqual(_statement_timeout_ms(30_000), 30_000)
+        self.assertEqual(_statement_timeout_ms(600_000), 600_000)
+
+    def test_statement_timeout_ms_falls_back_to_default_when_missing_or_invalid(self):
+        """A missing/garbage/zero/negative client_timeout_ms falls back to
+        _DEFAULT_STATEMENT_TIMEOUT_MS instead of leaving the query unbounded."""
+        self.assertEqual(_statement_timeout_ms(None), _DEFAULT_STATEMENT_TIMEOUT_MS)
+        self.assertEqual(_statement_timeout_ms("not-a-number"), _DEFAULT_STATEMENT_TIMEOUT_MS)
+        self.assertEqual(_statement_timeout_ms(0), _DEFAULT_STATEMENT_TIMEOUT_MS)
+        self.assertEqual(_statement_timeout_ms(-5), _DEFAULT_STATEMENT_TIMEOUT_MS)
+
+    def test_normal_read_succeeds_under_default_cap(self):
+        """A normal, fast query must succeed under the fallback default (no
+        client_timeout_ms sent — the request-building helper doesn't add one
+        unless asked to via body_override)."""
+        resp = self._rpc(model="res.partner", method="search_count", args=[[]], expect_status=200)
+        self.assertTrue(resp.json()["ok"], resp.text)
+
+    @mute_logger("odoo.sql_db")
+    def test_query_over_client_budget_returns_query_timeout(self):
+        """client_timeout_ms=1 over a large table forces the cutoff → 400
+        query_timeout, worker freed. @mute_logger: without it, runbot counts
+        the expected psycopg2 ERROR log as a build failure."""
+        resp = self._rpc(
+            body_override={
+                "model": "ir.model.fields",
+                "method": "search_read",
+                "args": [[]],
+                "kwargs": {"fields": ["name", "model", "field_description", "help"]},
+                "client_timeout_ms": 1,
+            }
+        )
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertEqual(resp.json()["error"]["code"], "query_timeout")

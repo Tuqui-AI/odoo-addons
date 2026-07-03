@@ -3,6 +3,7 @@ import logging
 import time
 from collections.abc import Mapping
 
+import psycopg2
 from odoo import SUPERUSER_ID, http
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.http import Response, request
@@ -13,6 +14,24 @@ from odoo.tools.json import json_default as odoo_json_default
 from .oauth import verify_access_token
 
 _LOG = logging.getLogger(__name__)
+
+# Cost guard for /tuqui/rpc. Every Tuqui caller — the Tuqui chat, MCP / Tuqui
+# Connect, and the insights cron — runs its query SYNCHRONOUSLY inside a shared
+# provider worker. Without this, a pathological domain could pin a worker for
+# minutes and OOM the pod (#70305). Cap the per-request SQL runtime at the DB
+# level, using the budget the client itself declares for this call
+# (CompanionTransport always sends one — see _statement_timeout_ms).
+_DEFAULT_STATEMENT_TIMEOUT_MS = 120_000
+
+
+def _statement_timeout_ms(client_timeout_ms=None) -> int:
+    """Return the per-request SQL timeout in ms (falls back to
+    _DEFAULT_STATEMENT_TIMEOUT_MS if client_timeout_ms is missing/invalid)."""
+    try:
+        client_ms = int(client_timeout_ms)
+    except (TypeError, ValueError):
+        client_ms = 0
+    return client_ms if client_ms > 0 else _DEFAULT_STATEMENT_TIMEOUT_MS
 
 
 # ─── Absolute blocks ─────────────────────────────────────────────────
@@ -419,6 +438,8 @@ class TuquiRpc(http.Controller):
         args = body.get("args") or []
         kwargs = body.get("kwargs") or {}
         context = body.get("context") or {}
+        # Client-declared budget for THIS call (ms) — see _statement_timeout_ms.
+        client_timeout_ms = body.get("client_timeout_ms")
 
         if not isinstance(model_name, str) or not model_name:
             return _error("bad_request", "Param 'model' is required", status=400)
@@ -502,7 +523,15 @@ class TuquiRpc(http.Controller):
             recordset = recordset.with_context(**context)
 
         started = time.monotonic()
+        timeout_ms = _statement_timeout_ms(client_timeout_ms)
         try:
+            if timeout_ms:
+                # SET LOCAL caps the SQL runtime for THIS request's transaction
+                # only (reset on commit/rollback). Applied right before dispatch
+                # so auth/policy queries above are unaffected. This is the guard
+                # that stops a heavy query from pinning a worker into an OOM
+                # (#70305) — for every caller: chat, MCP / Tuqui Connect, insights.
+                env.cr.execute("SET LOCAL statement_timeout = %s", (timeout_ms,))
             result = _dispatch(recordset, method, args, kwargs)
         except AccessError as exc:
             duration_ms = int((time.monotonic() - started) * 1000)
@@ -512,6 +541,21 @@ class TuquiRpc(http.Controller):
             duration_ms = int((time.monotonic() - started) * 1000)
             emit(policy_allowed=True, success=False, error_code="validation_error", duration_ms=duration_ms)
             return _error("validation_error", str(exc), status=400)
+        except psycopg2.errors.QueryCanceled:
+            # The query blew past the cost guard; Postgres aborted it. Roll back
+            # so the audit-log INSERT below runs on a clean cursor, then free the
+            # worker instead of letting the query pin it (#70305). The explicit
+            # error also tells the caller how to self-correct.
+            env.cr.rollback()
+            duration_ms = int((time.monotonic() - started) * 1000)
+            emit(policy_allowed=True, success=False, error_code="query_timeout", duration_ms=duration_ms)
+            return _error(
+                "query_timeout",
+                f"The query exceeded the {timeout_ms // 1000}s limit and was cancelled. "
+                "Narrow the domain (e.g. a date range), request fewer fields, "
+                "or use an aggregate (read_group) instead of fetching every record.",
+                status=400,
+            )
         except Exception:  # noqa: BLE001
             # Server-side: full traceback. Client-side: generic copy.
             # Never leak SQL, paths, repr(exc), or anything from the
