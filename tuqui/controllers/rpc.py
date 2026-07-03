@@ -543,9 +543,9 @@ class TuquiRpc(http.Controller):
             emit(policy_allowed=True, success=False, error_code="query_timeout", duration_ms=duration_ms)
             return _error(
                 "query_timeout",
-                f"La consulta superó el límite de {timeout_ms // 1000}s y fue cancelada. "
-                "Acotá el dominio (por ejemplo un rango de fechas), pedí menos campos, "
-                "o usá un agregado (read_group) en lugar de traer todos los registros.",
+                f"The query exceeded the {timeout_ms // 1000}s limit and was cancelled. "
+                "Narrow the domain (e.g. a date range), request fewer fields, "
+                "or use an aggregate (read_group) instead of fetching every record.",
                 status=400,
             )
         except Exception as exc:  # noqa: BLE001
