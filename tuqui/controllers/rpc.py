@@ -19,18 +19,45 @@ _LOG = logging.getLogger(__name__)
 # Connect, and the insights cron — runs its query SYNCHRONOUSLY inside a shared
 # provider worker. Without a ceiling a pathological domain can pin a worker for
 # minutes and OOM the pod (#70305). Cap the per-request SQL runtime at the DB
-# level. Overridable via the ``tuqui.rpc.statement_timeout_ms`` config
-# parameter; 0 disables the guard entirely.
+# level. ``tuqui.rpc.statement_timeout_ms`` is the CEILING (0 disables the
+# guard entirely) — see ``_statement_timeout_ms`` for how a per-call client
+# budget interacts with it.
 _DEFAULT_STATEMENT_TIMEOUT_MS = 120_000
 
 
-def _statement_timeout_ms(env) -> int:
-    """Return the configured per-request SQL timeout in ms (0 = disabled)."""
+def _statement_timeout_ms(env, client_timeout_ms=None) -> int:
+    """Return the per-request SQL timeout in ms to apply (0 = disabled).
+
+    ``tuqui.rpc.statement_timeout_ms`` is a ceiling, not a fixed value. The
+    client (``CompanionTransport``) declares in the request body how long
+    *it* is willing to wait for this specific call (``client_timeout_ms``) —
+    when present and sane, we cap the SQL at that instead of always using the
+    ceiling. Most callers ask for 30s (the transport default): capping the
+    SQL there too means Postgres frees the worker around the same time the
+    client already gave up, instead of leaving it pinned running a query
+    nobody is listening for anymore (#70305). A caller with a longer
+    explicit budget (e.g. ``odoo_execute`` up to 600s) gets more room, up to
+    the ceiling.
+
+    The ceiling always wins on the high end — a raw HTTP caller with a valid
+    token could claim any ``client_timeout_ms``, so we never let it exceed
+    what the admin configured.
+    """
     raw = env["ir.config_parameter"].sudo().get_param("tuqui.rpc.statement_timeout_ms", _DEFAULT_STATEMENT_TIMEOUT_MS)
     try:
-        return max(int(raw), 0)
+        ceiling_ms = max(int(raw), 0)
     except (TypeError, ValueError):
-        return _DEFAULT_STATEMENT_TIMEOUT_MS
+        ceiling_ms = _DEFAULT_STATEMENT_TIMEOUT_MS
+    if not ceiling_ms:
+        return 0
+
+    try:
+        client_ms = int(client_timeout_ms)
+    except (TypeError, ValueError):
+        return ceiling_ms
+    if client_ms <= 0:
+        return ceiling_ms
+    return min(client_ms, ceiling_ms)
 
 
 # ─── Absolute blocks ─────────────────────────────────────────────────
@@ -435,6 +462,8 @@ class TuquiRpc(http.Controller):
         args = body.get("args") or []
         kwargs = body.get("kwargs") or {}
         context = body.get("context") or {}
+        # Client-declared budget for THIS call (ms) — see _statement_timeout_ms.
+        client_timeout_ms = body.get("client_timeout_ms")
 
         if not isinstance(model_name, str) or not model_name:
             return _error("bad_request", "Param 'model' is required", status=400)
@@ -515,7 +544,7 @@ class TuquiRpc(http.Controller):
             recordset = recordset.with_context(**context)
 
         started = time.monotonic()
-        timeout_ms = _statement_timeout_ms(env)
+        timeout_ms = _statement_timeout_ms(env, client_timeout_ms)
         try:
             if timeout_ms:
                 # SET LOCAL caps the SQL runtime for THIS request's transaction
