@@ -21,7 +21,7 @@ _LOG = logging.getLogger(__name__)
 # minutes and OOM the pod (#70305). Cap the per-request SQL runtime at the DB
 # level. Overridable via the ``tuqui.rpc.statement_timeout_ms`` config
 # parameter; 0 disables the guard entirely.
-_DEFAULT_STATEMENT_TIMEOUT_MS = 90_000
+_DEFAULT_STATEMENT_TIMEOUT_MS = 120_000
 
 
 def _statement_timeout_ms(env) -> int:
