@@ -489,82 +489,40 @@ class TestTuquiRpcGateway(HttpCase):
 
     # ─── Cost guard: statement_timeout (#70305) ──────────────────────────
 
-    def test_statement_timeout_ms_reads_config(self):
-        """The ceiling is configurable; a bad/0 value falls back or disables cleanly."""
-        icp = self.env["ir.config_parameter"].sudo()
-        icp.set_param("tuqui.rpc.statement_timeout_ms", "")  # unset-like → default
-        self.assertEqual(_statement_timeout_ms(self.env), _DEFAULT_STATEMENT_TIMEOUT_MS)
-        icp.set_param("tuqui.rpc.statement_timeout_ms", "5000")
-        self.assertEqual(_statement_timeout_ms(self.env), 5000)
-        icp.set_param("tuqui.rpc.statement_timeout_ms", "0")  # 0 disables the guard
-        self.assertEqual(_statement_timeout_ms(self.env), 0)
-        icp.set_param("tuqui.rpc.statement_timeout_ms", "not-a-number")
-        self.assertEqual(_statement_timeout_ms(self.env), _DEFAULT_STATEMENT_TIMEOUT_MS)
+    def test_statement_timeout_ms_uses_client_value(self):
+        """The client's own declared budget is used as-is — no ceiling to clamp
+        against. CompanionTransport always sends one; a single query is already
+        bounded by the client's own hardcoded ceiling (odoo_execute.py's 600s)."""
+        self.assertEqual(_statement_timeout_ms(30_000), 30_000)
+        self.assertEqual(_statement_timeout_ms(600_000), 600_000)
 
-    def test_statement_timeout_ms_honors_smaller_client_budget(self):
-        """A client_timeout_ms below the ceiling is used as-is (#70305): most
-        callers ask for 30s, so the SQL should be capped there too instead of
-        always running up to the admin ceiling for nobody."""
-        self.env["ir.config_parameter"].sudo().set_param(
-            "tuqui.rpc.statement_timeout_ms", str(_DEFAULT_STATEMENT_TIMEOUT_MS)
-        )
-        self.assertEqual(_statement_timeout_ms(self.env, client_timeout_ms=30_000), 30_000)
-
-    def test_statement_timeout_ms_clamps_larger_client_budget_to_ceiling(self):
-        """A client_timeout_ms above the ceiling never wins — the admin ceiling
-        is the hard cap regardless of what a caller (even a raw HTTP one with a
-        valid token) claims."""
-        self.env["ir.config_parameter"].sudo().set_param("tuqui.rpc.statement_timeout_ms", "120000")
-        self.assertEqual(_statement_timeout_ms(self.env, client_timeout_ms=600_000), 120_000)
-
-    def test_statement_timeout_ms_ignores_invalid_or_nonpositive_client_budget(self):
-        """A missing/garbage/zero/negative client_timeout_ms falls back to the
-        ceiling — same behavior as no client budget declared at all."""
-        icp = self.env["ir.config_parameter"].sudo()
-        icp.set_param("tuqui.rpc.statement_timeout_ms", str(_DEFAULT_STATEMENT_TIMEOUT_MS))
-        self.assertEqual(_statement_timeout_ms(self.env, client_timeout_ms=None), _DEFAULT_STATEMENT_TIMEOUT_MS)
-        self.assertEqual(
-            _statement_timeout_ms(self.env, client_timeout_ms="not-a-number"), _DEFAULT_STATEMENT_TIMEOUT_MS
-        )
-        self.assertEqual(_statement_timeout_ms(self.env, client_timeout_ms=0), _DEFAULT_STATEMENT_TIMEOUT_MS)
-        self.assertEqual(_statement_timeout_ms(self.env, client_timeout_ms=-5), _DEFAULT_STATEMENT_TIMEOUT_MS)
+    def test_statement_timeout_ms_falls_back_to_default_when_missing_or_invalid(self):
+        """A missing/garbage/zero/negative client_timeout_ms falls back to
+        _DEFAULT_STATEMENT_TIMEOUT_MS instead of leaving the query unbounded."""
+        self.assertEqual(_statement_timeout_ms(None), _DEFAULT_STATEMENT_TIMEOUT_MS)
+        self.assertEqual(_statement_timeout_ms("not-a-number"), _DEFAULT_STATEMENT_TIMEOUT_MS)
+        self.assertEqual(_statement_timeout_ms(0), _DEFAULT_STATEMENT_TIMEOUT_MS)
+        self.assertEqual(_statement_timeout_ms(-5), _DEFAULT_STATEMENT_TIMEOUT_MS)
 
     def test_normal_read_succeeds_under_default_cap(self):
-        """The default cap must not break a normal, fast query."""
-        self.env["ir.config_parameter"].sudo().set_param(
-            "tuqui.rpc.statement_timeout_ms", str(_DEFAULT_STATEMENT_TIMEOUT_MS)
-        )
+        """A normal, fast query must succeed under the fallback default (no
+        client_timeout_ms sent — the request-building helper doesn't add one
+        unless asked to via body_override)."""
         resp = self._rpc(model="res.partner", method="search_count", args=[[]], expect_status=200)
         self.assertTrue(resp.json()["ok"], resp.text)
 
     @mute_logger("odoo.sql_db")
-    def test_query_over_cap_returns_query_timeout(self):
-        """A query that blows past the cap is cancelled and reported as a clean
-        query_timeout (HTTP 400), not an unhandled 500 — and the worker is freed.
-        Uses a 1ms cap over a large table so the statement is guaranteed to be cut.
+    def test_query_over_client_budget_returns_query_timeout(self):
+        """A query that blows past the caller's own declared budget is
+        cancelled and reported as a clean query_timeout (HTTP 400), not an
+        unhandled 500 — and the worker is freed. Sends client_timeout_ms=1
+        (as CompanionTransport would for a very tight budget) over a large
+        table so the statement is guaranteed to be cut.
 
         ``@mute_logger`` suppresses the expected ``odoo.sql_db`` ERROR log that
         psycopg2 emits when Postgres cancels the statement — without it runbot
         counts that ERROR as a build failure even though the assertions pass
         (confirmed against build 91093 of this PR).
-        """
-        self.env["ir.config_parameter"].sudo().set_param("tuqui.rpc.statement_timeout_ms", "1")
-        resp = self._rpc(
-            model="ir.model.fields",
-            method="search_read",
-            args=[[]],
-            kwargs={"fields": ["name", "model", "field_description", "help"]},
-        )
-        self.assertEqual(resp.status_code, 400, resp.text)
-        self.assertEqual(resp.json()["error"]["code"], "query_timeout")
-
-    @mute_logger("odoo.sql_db")
-    def test_client_timeout_ms_below_ceiling_is_honored_end_to_end(self):
-        """A caller's own client_timeout_ms (sent in the request body) is what
-        actually caps the SQL when it's tighter than the admin ceiling (#70305)
-        — the gateway doesn't wait until its own (much larger) default to cut
-        an expensive query, even though the ceiling here is left at its
-        default 120s.
         """
         resp = self._rpc(
             body_override={
