@@ -25,16 +25,8 @@ _DEFAULT_STATEMENT_TIMEOUT_MS = 120_000
 
 
 def _statement_timeout_ms(client_timeout_ms=None) -> int:
-    """Return the per-request SQL timeout in ms to apply.
-
-    The client always declares its own budget for this call
-    (CompanionTransport._post_rpc sends effective_timeout as
-    client_timeout_ms on every request) — a single query is already bounded
-    by the client's own hardcoded ceiling (odoo_execute.py's 600s), so
-    nothing here needs to second-guess or cap it further. Falls back to
-    _DEFAULT_STATEMENT_TIMEOUT_MS only if client_timeout_ms is missing or
-    garbage.
-    """
+    """Return the per-request SQL timeout in ms (falls back to
+    _DEFAULT_STATEMENT_TIMEOUT_MS if client_timeout_ms is missing/invalid)."""
     try:
         client_ms = int(client_timeout_ms)
     except (TypeError, ValueError):

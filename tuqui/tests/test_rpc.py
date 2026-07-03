@@ -513,17 +513,9 @@ class TestTuquiRpcGateway(HttpCase):
 
     @mute_logger("odoo.sql_db")
     def test_query_over_client_budget_returns_query_timeout(self):
-        """A query that blows past the caller's own declared budget is
-        cancelled and reported as a clean query_timeout (HTTP 400), not an
-        unhandled 500 — and the worker is freed. Sends client_timeout_ms=1
-        (as CompanionTransport would for a very tight budget) over a large
-        table so the statement is guaranteed to be cut.
-
-        ``@mute_logger`` suppresses the expected ``odoo.sql_db`` ERROR log that
-        psycopg2 emits when Postgres cancels the statement — without it runbot
-        counts that ERROR as a build failure even though the assertions pass
-        (confirmed against build 91093 of this PR).
-        """
+        """client_timeout_ms=1 over a large table forces the cutoff → 400
+        query_timeout, worker freed. @mute_logger: without it, runbot counts
+        the expected psycopg2 ERROR log as a build failure."""
         resp = self._rpc(
             body_override={
                 "model": "ir.model.fields",
