@@ -33,6 +33,7 @@ import { _t } from "@web/core/l10n/translation";
  *              { source: "tuqui-spa",  type: "chatter",  payload: { mode, body, subject } }
  *              { source: "tuqui-spa",  type: "navigate", payload: { model, mode, viewType, domain, defaults, title } }
  *              { source: "tuqui-spa",  type: "location", payload: { path } }
+ *              { source: "tuqui-spa",  type: "external-link-opening" }
  *
  * El host valida que cada mensaje venga del iframe montado (`ev.source ===
  * iframe.contentWindow`) Y de un origin concreto que matchee el del SPA (nunca
@@ -246,11 +247,12 @@ export class TuquiPanel extends Component {
                 },
                 this._spaOrigin
             );
-            // After auth, tell the SPA to resume at the last conversation.
-            // We always load the root embed URL (not a deep-link) because the SPA
-            // tries to fetch the conversation before the nonce arrives → 404. The
-            // SPA handles "resume" after completing authentication.
-            if (this.ui.storedPath) {
+            // After auth, tell the SPA to resume at the last conversation — but
+            // only on "restore" opens (page reload with panel already open, or a
+            // tab triggered by an external-link signal). Deliberate close → reopen
+            // from the systray should start a fresh chat, not resume. The one-time
+            // flag is consumed here so any subsequent open in this session starts fresh.
+            if (this.ui.storedPath && this.tuquiAssistant.consumeResumeOnOpen()) {
                 win.postMessage(
                     { source: "tuqui-odoo", type: "resume", payload: { path: this.ui.storedPath } },
                     this._spaOrigin
@@ -364,6 +366,19 @@ export class TuquiPanel extends Component {
                             localStorage.setItem(`tuqui_embed_path_${this.ui.slug}`, path);
                         }
                     }
+                }
+                break;
+            case "external-link-opening":
+                // The user clicked an external link in the chat. Write a short-lived
+                // signal to localStorage so the new Odoo tab (opened by target="_blank")
+                // knows to auto-open the panel and resume this conversation.
+                // The signal is consumed and cleared on the next service init; the TTL
+                // guards against stale signals in case the user opens a new Odoo tab
+                // independently later.
+                try {
+                    localStorage.setItem("tuqui_open_signal", JSON.stringify({ at: Date.now() }));
+                } catch {
+                    // Private browsing or quota exceeded — skip silently.
                 }
                 break;
         }

@@ -317,8 +317,40 @@ export const tuquiAssistantService = {
             _savedState = {};
         }
 
+        // If another tab had the panel open and the user clicked an external link
+        // from the chat (triggering "external-link-opening"), the panel wrote a
+        // short-lived signal to localStorage. Consume it here: auto-open the panel
+        // so the new tab resumes the conversation. The signal is cleared immediately
+        // to avoid affecting unrelated tabs opened later.
+        const _OPEN_SIGNAL_KEY = "tuqui_open_signal";
+        const _OPEN_SIGNAL_TTL = 5000;
+        let _openSignalFresh = false;
+        try {
+            const raw = localStorage.getItem(_OPEN_SIGNAL_KEY);
+            if (raw) {
+                localStorage.removeItem(_OPEN_SIGNAL_KEY);
+                const signal = JSON.parse(raw);
+                if (Date.now() - (signal.at || 0) < _OPEN_SIGNAL_TTL) {
+                    _openSignalFresh = true;
+                }
+            }
+        } catch {
+            // Private browsing or malformed value — ignore.
+        }
+
+        // True only for the FIRST panel mount of this page load: when the session
+        // was already active at reload (Ctrl+R with panel open) or when an external-
+        // link signal triggered the open. Consumed on first call so a deliberate
+        // close → reopen always starts a fresh chat instead of resuming.
+        let _resumeOnFirstMount = Boolean(_savedState.panelOpen) || _openSignalFresh;
+        function consumeResumeOnOpen() {
+            const v = _resumeOnFirstMount;
+            _resumeOnFirstMount = false;
+            return v;
+        }
+
         const state = reactive({
-            panelOpen: Boolean(_savedState.panelOpen),
+            panelOpen: Boolean(_savedState.panelOpen) || _openSignalFresh,
             minimized: Boolean(_savedState.minimized),
             expanded: Boolean(_savedState.expanded),
             context: null,
@@ -910,6 +942,7 @@ export const tuquiAssistantService = {
             getSsoAuth,
             getContextPayload,
             getActiveRecord: () => activeRecord,
+            consumeResumeOnOpen,
         };
     },
 };
