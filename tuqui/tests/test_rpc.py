@@ -367,12 +367,13 @@ class TestTuquiRpcGateway(HttpCase):
         self.assertEqual(resp.json()["error"]["code"], "access_denied")
 
     @mute_logger("odoo.addons.tuqui.controllers.rpc")
-    def test_internal_error_exposes_exception_message(self):
-        """A 500 must surface the real exception message so the LLM can diagnose it.
-
-        The endpoint is OAuth-protected (not public), so exposing str(exc) is
-        safe and necessary — returning a generic message leaves the LLM with no
-        information to recover from ORM errors like missing fields or bad args.
+    def test_schema_error_is_recoverable_validation_error(self):
+        """Ordering/grouping/filtering by a non-stored field is a recoverable
+        caller mistake, not a server fault: the gateway returns
+        validation_error/400 (not a fatal 500) with the offending field name
+        and a pivot hint, so the client self-corrects instead of giving up.
+        The relayed text is only Odoo's schema message (field/model name) — no
+        traceback or repr.
         """
         # Grouping by a non-stored field raises ValueError inside the ORM.
         # We use ``formatted_read_group`` (the Odoo 19 replacement) rather than
@@ -387,13 +388,15 @@ class TestTuquiRpcGateway(HttpCase):
             "res.partner",
             "formatted_read_group",
             args=[[], ["company_type"], []],  # group by non-stored selection
-            expect_status=500,
+            expect_status=400,
         )
         body = resp.json()
-        self.assertEqual(body["error"]["code"], "internal_error")
+        self.assertEqual(body["error"]["code"], "validation_error")
         msg = body["error"]["message"]
-        self.assertNotEqual(msg, "An internal error occurred.", "500 returned generic message instead of str(exc)")
-        self.assertIn("company_type", msg, f"Expected ORM error detail in message, got: {msg!r}")
+        self.assertIn("company_type", msg, f"Expected the offending field in message, got: {msg!r}")
+        self.assertIn("read_group", msg, "Expected an actionable pivot hint in the message")
+        for leak in ("Traceback", "ValueError"):
+            self.assertNotIn(leak, msg, f"Message leaked {leak!r}: {msg!r}")
 
     # ─── Access log ──────────────────────────────────────────────────
 
