@@ -416,31 +416,32 @@ class TestTuquiRpcGateway(HttpCase):
         self.assertEqual(resp.json()["error"]["code"], "access_denied")
 
     @mute_logger("odoo.addons.tuqui.controllers.rpc")
-    def test_internal_error_does_not_leak_details(self):
-        """A 500 must surface a generic message — no SQL, no ValueError repr.
-
-        The controller is expected to call ``_LOG.exception(...)`` server-side
-        before returning the generic response; muting the logger here keeps
-        runbot's red-on-any-ERROR signal honest (this isn't a real failure,
-        it's the test verifying the failure path).
+    def test_schema_error_is_recoverable_validation_error(self):
+        """Ordering/grouping/filtering by a non-stored field is a recoverable
+        caller mistake, not a server fault: the gateway returns
+        validation_error/400 (not a fatal 500) with the offending field name
+        and a pivot hint, so the client self-corrects instead of giving up.
+        The relayed text is only Odoo's schema message (field/model name) — no
+        traceback or repr.
         """
-        # Grouping by a non-stored field raises ValueError inside the ORM,
-        # which the gateway maps to a generic 500. ``read_group`` is the public
-        # grouped read on Odoo 18; ``_read_group`` is not an option here — its
-        # ``_`` prefix makes the gateway refuse it as a private method (403), so
-        # it never reaches the ORM error path this test exercises. Args:
-        # (domain, fields, groupby) — read_group's signature.
+        # Grouping by a non-stored field raises ValueError inside the ORM.
+        # ``read_group`` is the public grouped read on Odoo 18; ``_read_group``
+        # is not an option here — its ``_`` prefix makes the gateway refuse it
+        # as a private method (403), so it never reaches the ORM error path this
+        # test exercises. Args: (domain, fields, groupby) — read_group's signature.
         resp = self._rpc(
             "res.partner",
             "read_group",
             args=[[], [], ["company_type"]],  # group by non-stored selection
-            expect_status=500,
+            expect_status=400,
         )
         body = resp.json()
-        self.assertEqual(body["error"]["code"], "internal_error")
+        self.assertEqual(body["error"]["code"], "validation_error")
         msg = body["error"]["message"]
-        for leak in ("Cannot convert", "SQL", "company_type", "ValueError", "Traceback"):
-            self.assertNotIn(leak, msg, f"500 leaked {leak!r}: {msg!r}")
+        self.assertIn("company_type", msg, f"Expected the offending field in message, got: {msg!r}")
+        self.assertIn("read_group", msg, "Expected an actionable pivot hint in the message")
+        for leak in ("Traceback", "ValueError"):
+            self.assertNotIn(leak, msg, f"Message leaked {leak!r}: {msg!r}")
 
     # ─── Access log ──────────────────────────────────────────────────
 
