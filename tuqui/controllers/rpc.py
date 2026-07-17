@@ -417,7 +417,7 @@ class TuquiRpc(http.Controller):
         csrf=False,
         readonly=False,
     )
-    def rpc(self, **_kwargs):
+    def rpc(self, **_kwargs):  # noqa: C901
         env = request.env
 
         # ─── Auth ──────────────────────────────────────────────────────────
@@ -554,6 +554,24 @@ class TuquiRpc(http.Controller):
                 f"The query exceeded the {timeout_ms // 1000}s limit and was cancelled. "
                 "Narrow the domain (e.g. a date range), request fewer fields, "
                 "or use an aggregate (read_group) instead of fetching every record.",
+                status=400,
+            )
+        except ValueError as exc:  # noqa: BLE001
+            # Odoo raises a plain ValueError when a query references a field it
+            # can't push down to SQL — typically ordering/grouping/filtering by
+            # a non-stored computed field (sales_count, qty_available, …). That
+            # is a recoverable caller mistake, not a server fault, so return
+            # validation_error/400: the client treats it as correctable and can
+            # pivot (aggregate with read_group, use a stored field) instead of
+            # giving up. Odoo's message is just the model/field name and reason
+            # — no SQL, paths or data — so it is safe to relay, plus a hint.
+            duration_ms = int((time.monotonic() - started) * 1000)
+            emit(policy_allowed=True, success=False, error_code="validation_error", duration_ms=duration_ms)
+            return _error(
+                "validation_error",
+                f"{exc}. This field is likely computed/non-stored and cannot be "
+                "used to sort, group or filter at the database level — use a "
+                "stored field or aggregate the underlying model with read_group.",
                 status=400,
             )
         except Exception as exc:  # noqa: BLE001
