@@ -533,14 +533,43 @@ class TuquiRpc(http.Controller):
                 # (#70305) — for every caller: chat, MCP / Tuqui Connect, insights.
                 env.cr.execute("SET LOCAL statement_timeout = %s", (timeout_ms,))
             result = _dispatch(recordset, method, args, kwargs)
+            # Flush now, INSIDE the try. @api.constrains, stored computes and
+            # SQL constraints otherwise run at commit — after this handler has
+            # returned — where a failure bypasses every except below: Odoo
+            # rolls back the whole request (audit row included) and answers
+            # with its opaque HTML error page, so the caller never sees the
+            # business message and cannot self-correct (#70932: creating an
+            # account.move with the AR localization). Near-free for reads
+            # (nothing pending to flush).
+            env.cr.flush()
         except AccessError as exc:
+            # Roll back before answering — every error branch below does. The
+            # ORM may have already flushed rows before the failure; since we
+            # swallow the exception and return a well-formed response, Odoo
+            # would otherwise COMMIT the request and silently persist the very
+            # change whose validation failed. The rollback also reopens an
+            # aborted transaction so the audit INSERT below runs on a clean
+            # cursor.
+            env.cr.rollback()
             duration_ms = int((time.monotonic() - started) * 1000)
             emit(policy_allowed=True, success=False, error_code="access_denied", duration_ms=duration_ms)
             return _error("access_denied", str(exc), status=403)
         except (ValidationError, UserError) as exc:
+            env.cr.rollback()
             duration_ms = int((time.monotonic() - started) * 1000)
             emit(policy_allowed=True, success=False, error_code="validation_error", duration_ms=duration_ms)
             return _error("validation_error", str(exc), status=400)
+        except psycopg2.IntegrityError as exc:
+            # A flushed INSERT/UPDATE hit a database constraint (NOT NULL,
+            # CHECK, unique…). Native Odoo RPC maps these to a ValidationError,
+            # so mirror that: recoverable validation_error/400 with the
+            # constraint text — the caller fixes the payload and retries,
+            # instead of giving up on an opaque fatal 500. The message only
+            # describes the row the caller itself just tried to write.
+            env.cr.rollback()
+            duration_ms = int((time.monotonic() - started) * 1000)
+            emit(policy_allowed=True, success=False, error_code="validation_error", duration_ms=duration_ms)
+            return _error("validation_error", str(exc).strip(), status=400)
         except psycopg2.errors.QueryCanceled:
             # The query blew past the cost guard; Postgres aborted it. Roll back
             # so the audit-log INSERT below runs on a clean cursor, then free the
@@ -565,6 +594,7 @@ class TuquiRpc(http.Controller):
             # pivot (aggregate with read_group, use a stored field) instead of
             # giving up. Odoo's message is just the model/field name and reason
             # — no SQL, paths or data — so it is safe to relay, plus a hint.
+            env.cr.rollback()
             duration_ms = int((time.monotonic() - started) * 1000)
             emit(policy_allowed=True, success=False, error_code="validation_error", duration_ms=duration_ms)
             return _error(
@@ -576,6 +606,7 @@ class TuquiRpc(http.Controller):
             )
         except Exception as exc:  # noqa: BLE001
             _LOG.exception("tuqui.rpc: unhandled error in %s.%s", model_name, method)
+            env.cr.rollback()
             duration_ms = int((time.monotonic() - started) * 1000)
             emit(policy_allowed=True, success=False, error_code="internal_error", duration_ms=duration_ms)
             return _error("internal_error", str(exc), status=500)
