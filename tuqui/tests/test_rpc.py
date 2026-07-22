@@ -443,6 +443,60 @@ class TestTuquiRpcGateway(HttpCase):
         for leak in ("Traceback", "ValueError"):
             self.assertNotIn(leak, msg, f"Message leaked {leak!r}: {msg!r}")
 
+    def test_failed_write_rolls_back_instead_of_half_persisting(self):
+        """A write refused by a constraint must leave NOTHING behind. Pre-fix
+        the gateway swallowed the exception and returned a well-formed error,
+        but never rolled back — Odoo then COMMITTED the request, silently
+        persisting the very change whose validation failed (here: the
+        recursive parent_id survives its own ValidationError). Every error
+        branch must roll back before answering, and the audit row — written
+        after the rollback — must survive to record the failure.
+        """
+        partner = self.env["res.partner"].create({"name": "Tuqui Flush Probe"})
+        resp = self._rpc(
+            "res.partner",
+            "write",
+            args=[[partner.id], {"parent_id": partner.id}],  # recursion → ValidationError
+            expect_status=400,
+        )
+        body = resp.json()
+        self.assertEqual(body["error"]["code"], "validation_error")
+        self.assertIn("recursi", body["error"]["message"])
+        # The failed write must not half-persist once the request commits.
+        partner.invalidate_recordset()
+        self.assertFalse(partner.parent_id)
+        # The audit row survives the rollback and records the failure.
+        log = self._latest_log(method="write", model_name="res.partner")
+        self.assertTrue(log)
+        self.assertFalse(log.success)
+        self.assertEqual(log.error_code, "validation_error")
+
+    @mute_logger("odoo.sql_db")
+    def test_deferred_sql_constraint_error_does_not_escape_as_html(self):
+        """The exact prod failure shape of #70932 (account.move + AR
+        localization): the ORM buffers UPDATEs until flush, so a write that
+        violates a SQL constraint only explodes at commit — after the handler
+        already built an ok response. Pre-fix, Odoo rolled the request back
+        (audit row included) and replied with its opaque HTML error page: the
+        caller saw a non-JSON 4xx/5xx with no business message and could not
+        self-correct. The in-handler flush surfaces it as a recoverable
+        validation_error/400 JSON instead. @mute_logger: the expected
+        constraint violation logs an ERROR through odoo.sql_db that runbot
+        would count as a build failure.
+        """
+        partner = self.env["res.partner"].create({"name": "Tuqui SQL Probe", "type": "contact"})
+        resp = self._rpc(
+            "res.partner",
+            "write",
+            args=[[partner.id], {"name": False}],  # violates CHECK "Contacts require a name"
+            expect_status=400,
+        )
+        body = resp.json()  # pre-fix: HTML error page, not JSON
+        self.assertEqual(body["error"]["code"], "validation_error")
+        self.assertTrue(body["error"]["message"])
+        partner.invalidate_recordset()
+        self.assertEqual(partner.name, "Tuqui SQL Probe")
+
     # ─── Access log ──────────────────────────────────────────────────
 
     def test_access_log_records_successful_call(self):
