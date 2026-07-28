@@ -515,10 +515,21 @@ class TuquiRpc(http.Controller):
 
         # Member path runs under the member's ACL; connection path runs as
         # SUPERUSER (already gated read-only above).
-        if is_connection:
-            recordset = env[model_name].with_user(SUPERUSER_ID)
-        else:
-            recordset = env[model_name].with_user(acting_user)
+        #
+        # The acting identity must be adopted REQUEST-wide (update_env), not
+        # just on the dispatched recordset (with_user). ir.http pins the
+        # transaction's default_env to request.env on every web request, and
+        # deferred computes run under THAT env at flush time. This route is
+        # auth="none", so request.env has no user — any compute touching
+        # self.env.user (e.g. enterprise's _compute_signing_user calls
+        # env.user.has_group on every account.move) died with "Expected
+        # singleton: res.users()", making invoice creation impossible via
+        # companion (#70932). update_env swaps request.env AND re-points
+        # default_env, so dispatch and flush both run as the acting user —
+        # exactly like a native authenticated RPC.
+        request.update_env(user=SUPERUSER_ID if is_connection else acting_user.id)
+        env = request.env
+        recordset = env[model_name]
         if context:
             recordset = recordset.with_context(**context)
 
@@ -566,6 +577,7 @@ class TuquiRpc(http.Controller):
             # constraint text — the caller fixes the payload and retries,
             # instead of giving up on an opaque fatal 500. The message only
             # describes the row the caller itself just tried to write.
+            _LOG.info("tuqui.rpc: IntegrityError in %s.%s", model_name, method, exc_info=True)
             env.cr.rollback()
             duration_ms = int((time.monotonic() - started) * 1000)
             emit(policy_allowed=True, success=False, error_code="validation_error", duration_ms=duration_ms)
@@ -593,17 +605,27 @@ class TuquiRpc(http.Controller):
             # validation_error/400: the client treats it as correctable and can
             # pivot (aggregate with read_group, use a stored field) instead of
             # giving up. Odoo's message is just the model/field name and reason
-            # — no SQL, paths or data — so it is safe to relay, plus a hint.
+            # — no SQL, paths or data — so it is safe to relay.
+            #
+            # Log with the traceback: unlike UserError (routine business
+            # validation, message already relayed), a ValueError out of the ORM
+            # is diagnostic — WHERE it was raised is the whole story (finding
+            # the "Expected singleton" of #70932 required exactly this).
+            _LOG.info("tuqui.rpc: ValueError in %s.%s", model_name, method, exc_info=True)
             env.cr.rollback()
             duration_ms = int((time.monotonic() - started) * 1000)
             emit(policy_allowed=True, success=False, error_code="validation_error", duration_ms=duration_ms)
-            return _error(
-                "validation_error",
-                f"{exc}. This field is likely computed/non-stored and cannot be "
-                "used to sort, group or filter at the database level — use a "
-                "stored field or aggregate the underlying model with read_group.",
-                status=400,
-            )
+            # The read_group pivot hint only fits the SQL-pushdown flavor of
+            # ValueError; gluing it onto unrelated ones ("Expected singleton:
+            # …") sends the caller chasing a field problem that doesn't exist.
+            message = str(exc)
+            if "to SQL" in message or "not stored" in message:
+                message += (
+                    ". This field is likely computed/non-stored and cannot be "
+                    "used to sort, group or filter at the database level — use "
+                    "a stored field or aggregate the underlying model with read_group."
+                )
+            return _error("validation_error", message, status=400)
         except Exception as exc:  # noqa: BLE001
             _LOG.exception("tuqui.rpc: unhandled error in %s.%s", model_name, method)
             env.cr.rollback()
