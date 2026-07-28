@@ -1,6 +1,7 @@
 import json
 import secrets
 import time
+from unittest.mock import patch
 
 from odoo.addons.tuqui.controllers.rpc import (
     _DEFAULT_STATEMENT_TIMEOUT_MS,
@@ -451,6 +452,40 @@ class TestTuquiRpcGateway(HttpCase):
         self.assertTrue(body["error"]["message"])
         partner.invalidate_recordset()
         self.assertEqual(partner.name, "Tuqui SQL Probe")
+
+    def test_deferred_computes_run_with_acting_user_env(self):
+        """Deferred computes run under the transaction's ``default_env``,
+        which ir.http pins to ``request.env`` on EVERY web request
+        (ir_http.py: ``transaction.default_env = request.env``). This route
+        is ``auth="none"``, so that env has NO user — and any compute that
+        touches ``self.env.user`` blows up with "Expected singleton:
+        res.users()" at flush time (#70932, third leg: enterprise's
+        ``_compute_signing_user`` calls ``env.user.has_group`` on every
+        account.move create, so companion could not create invoices at all).
+        The gateway must adopt the acting user REQUEST-wide
+        (``request.update_env``), not just on the dispatched recordset.
+        Simulated here with a user-touching stored compute on res.partner —
+        no enterprise dependency.
+        """
+        seen = []
+        Partner = self.env.registry["res.partner"]
+        orig = Partner._compute_commercial_partner
+
+        def compute_touching_env_user(records):
+            # has_group ensure_one()s → raises on the user-less env pre-fix.
+            seen.append(records.env.user.has_group("base.group_user"))
+            return orig(records)
+
+        with patch.object(Partner, "_compute_commercial_partner", compute_touching_env_user):
+            resp = self._rpc(
+                "res.partner",
+                "create",
+                args=[{"name": "Flush Env Probe"}],
+                expect_status=200,
+            )
+        self.assertTrue(resp.json()["ok"], resp.text)
+        self.assertTrue(seen, "the patched compute never ran — pick a field that recomputes on create")
+        self.assertTrue(all(seen), "the compute ran with a user lacking base.group_user")
 
     # ─── Access log ──────────────────────────────────────────────────
 
