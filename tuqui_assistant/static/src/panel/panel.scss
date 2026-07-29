@@ -26,7 +26,11 @@
 .o-tuqui-panel {
     position: fixed;
     bottom: 0;
-    right: 12px;
+    // Slide left by the width of Odoo's chat cluster (.o-mail-ChatHub) when it is
+    // present, so we sit beside it instead of on top. Var is set from panel.js;
+    // defaults to 0 → flush right when no Odoo chat is open. See #70191.
+    right: calc(12px + var(--o-tuqui-chat-offset, 0px));
+    transition: right 0.15s ease;
     width: 380px;
     max-width: 100vw;
     height: Min(70vh, 720px);
@@ -43,12 +47,24 @@
 // z-index que la card → tampoco tapa modales.
 .o-tuqui-bubble-launcher {
     position: fixed;
-    bottom: 16px;
-    right: 16px;
-    width: 56px;
-    height: 56px;
+    // Level with Odoo's bottom chat bubble: measured pixel-for-pixel against the
+    // native .o-mail-ChatBubble stack in the corner (#70191).
+    bottom: 13px;
+    // Slide left of Odoo's chat cluster (see _syncChatOffset). Small base gap so
+    // the bubble sits close to the native ones, nudged a bit toward the edge.
+    right: calc(4px + var(--o-tuqui-chat-offset, 0px));
+    transition: right 0.15s ease;
+    // Exact size of Odoo's native chat bubbles (.o-mail-ChatBubble-avatar = 45px)
+    // so it reads identical beside them (#70191).
+    box-sizing: border-box;
+    width: 45px;
+    height: 45px;
     padding: 0;
     border-radius: 50%;
+    // The logo (SVG) is a full branded tile: let it FILL the circle so it looks
+    // centered and the same size as Odoo's bubbles, instead of a tiny glyph
+    // floating in a plain disc. overflow:hidden clips the square logo to a circle.
+    overflow: hidden;
     background: var(--tuqui-salvia-600);
     border: 0;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
@@ -56,13 +72,21 @@
     align-items: center;
     justify-content: center;
     z-index: $zindex-sticky;
+    // The logo image is opaque and fills the button, so a background swap on hover
+    // wouldn't show — brighten the whole bubble instead (like Odoo's own bubbles).
     &:hover,
     &:focus {
-        background: var(--tuqui-salvia-700);
+        filter: brightness(1.08);
     }
     .o-tuqui-bubble-logo {
-        width: 30px;
-        height: 30px;
+        // Scale slightly past 100%: the SVG has an internal margin (~4%), so at 100%
+        // its green tile stops short of the edge and the disc reads ~43px instead of
+        // 45px. Overscaling makes the green reach the button's circular clip so it
+        // fills the whole 45px circle, and enlarges the smile a touch (#70191).
+        width: 110%;
+        height: 110%;
+        object-fit: cover;
+        display: block;
     }
 }
 
