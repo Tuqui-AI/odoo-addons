@@ -385,8 +385,6 @@ class TestTuquiRpcGateway(HttpCase):
         Minted with the real ``_issue_access_token`` helper but with the clock
         wound back past the TTL so the resulting ``exp`` is already in the past.
         """
-        from unittest.mock import patch
-
         from ..controllers import oauth as oauth_mod
 
         backdated = int(time.time()) - oauth_mod._ACCESS_TOKEN_TTL_SECONDS - 3600
