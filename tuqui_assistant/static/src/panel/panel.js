@@ -111,10 +111,56 @@ export class TuquiPanel extends Component {
 
         // postMessage bridge with the SPA iframe.
         this._onMessage = this._handleMessage.bind(this);
-        onMounted(() => window.addEventListener("message", this._onMessage));
+
+        // Odoo stacks its own chat launchers/windows in the .o-mail-ChatHub cluster
+        // pinned to the bottom-right corner — exactly where our floating card and
+        // bubble live, so they overlap. Instead of a fixed gap, measure how much
+        // room the ChatHub takes on the right edge and slide Tuqui left by that much
+        // via the --o-tuqui-chat-offset CSS var. With no chat open the hub is
+        // absent/empty → offset 0 → Tuqui sits flush right; when a window or bubble
+        // appears Tuqui slides left to sit beside it.
+        const _syncChatOffset = () => {
+            let offset = 0;
+            const hub = document.querySelector(".o-mail-ChatHub");
+            if (hub) {
+                const rect = hub.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    offset = Math.max(0, Math.round(window.innerWidth - rect.left) + 12);
+                }
+            }
+            document.documentElement.style.setProperty("--o-tuqui-chat-offset", `${offset}px`);
+        };
+        // Coalesce bursts of DOM mutations into a single measurement per frame.
+        let _offsetRaf = null;
+        const _scheduleSyncChatOffset = () => {
+            if (_offsetRaf !== null) {
+                return;
+            }
+            _offsetRaf = requestAnimationFrame(() => {
+                _offsetRaf = null;
+                _syncChatOffset();
+            });
+        };
+        this._chatHubObserver = null;
+
+        onMounted(() => {
+            window.addEventListener("message", this._onMessage);
+            // A chat window opening/closing adds or removes nodes under <body>,
+            // changing the ChatHub footprint — re-measure on any such mutation.
+            _syncChatOffset();
+            this._chatHubObserver = new MutationObserver(_scheduleSyncChatOffset);
+            this._chatHubObserver.observe(document.body, { childList: true, subtree: true });
+            window.addEventListener("resize", _scheduleSyncChatOffset);
+        });
         onWillUnmount(() => {
             window.removeEventListener("message", this._onMessage);
             document.documentElement.classList.remove("o-tuqui-expanded");
+            this._chatHubObserver?.disconnect();
+            window.removeEventListener("resize", _scheduleSyncChatOffset);
+            if (_offsetRaf !== null) {
+                cancelAnimationFrame(_offsetRaf);
+            }
+            document.documentElement.style.removeProperty("--o-tuqui-chat-offset");
         });
 
         // When the context changes (open record / unsaved edits), re-push it
@@ -155,16 +201,22 @@ export class TuquiPanel extends Component {
         // computed at page load and don't react to the body padding-right change.
         // rAF ensures the CSS has painted (body is visually narrowed) before the
         // resize handlers run.
+        // The split-screen gutter only makes sense while the card is visible.
+        // Minimizing to the bubble hides the card (d-none) but leaves `expanded`
+        // set so restore() brings the expanded layout back — so the gutter must be
+        // released on minimize and re-applied on restore. Gating on !minimized (and
+        // depending on it) fixes the reserved empty space that lingered when
+        // minimizing from the expanded state.
         useEffect(
             () => {
-                if (this.state.expanded) {
+                if (this.state.expanded && !this.state.minimized) {
                     document.documentElement.classList.add("o-tuqui-expanded");
                 } else {
                     document.documentElement.classList.remove("o-tuqui-expanded");
                 }
                 requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
             },
-            () => [this.state.expanded]
+            () => [this.state.expanded, this.state.minimized]
         );
     }
 

@@ -26,7 +26,11 @@
 .o-tuqui-panel {
     position: fixed;
     bottom: 0;
-    right: 12px;
+    // Slide left by the width of Odoo's chat cluster (.o-mail-ChatHub) when it is
+    // present, so we sit beside it instead of on top. Var is set from panel.js;
+    // defaults to 0 → flush right when no Odoo chat is open. See #70191.
+    right: calc(12px + var(--o-tuqui-chat-offset, 0px));
+    transition: right 0.15s ease;
     width: 380px;
     max-width: 100vw;
     height: Min(70vh, 720px);
@@ -44,7 +48,9 @@
 .o-tuqui-bubble-launcher {
     position: fixed;
     bottom: 16px;
-    right: 16px;
+    // Same dynamic offset as the card (#70191): slide left of Odoo's chat cluster.
+    right: calc(16px + var(--o-tuqui-chat-offset, 0px));
+    transition: right 0.15s ease;
     width: 56px;
     height: 56px;
     padding: 0;
