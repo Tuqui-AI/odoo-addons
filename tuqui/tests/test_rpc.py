@@ -470,8 +470,10 @@ class TestTuquiRpcGateway(HttpCase):
         orig = Partner._compute_commercial_partner
 
         def compute_touching_env_user(records):
-            # has_group ensure_one()s → raises on the user-less env pre-fix.
-            seen.append(records.env.user.has_group("base.group_user"))
+            # env.uid is a plain int — no ORM query, no flush cascade.
+            # Pre-fix this was 0 (no user on auth="none" request.env);
+            # post-fix it's the acting member's uid.
+            seen.append(records.env.uid)
             return orig(records)
 
         with patch.object(Partner, "_compute_commercial_partner", compute_touching_env_user):
@@ -483,7 +485,7 @@ class TestTuquiRpcGateway(HttpCase):
             )
         self.assertTrue(resp.json()["ok"], resp.text)
         self.assertTrue(seen, "the patched compute never ran — pick a field that recomputes on create")
-        self.assertTrue(all(seen), "the compute ran with a user lacking base.group_user")
+        self.assertTrue(all(seen), "the compute ran with uid=0 (no user in env)")
 
     # ─── Access log ──────────────────────────────────────────────────
 
