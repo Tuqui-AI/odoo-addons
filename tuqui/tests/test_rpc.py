@@ -470,7 +470,7 @@ class TestTuquiRpcGateway(HttpCase):
         self.assertFalse(log.success)
         self.assertEqual(log.error_code, "validation_error")
 
-    @mute_logger("odoo.sql_db")
+    @mute_logger("odoo.sql_db", "odoo.addons.tuqui.controllers.rpc")
     def test_deferred_sql_constraint_error_does_not_escape_as_html(self):
         """The exact prod failure shape of #70932 (account.move + AR
         localization): the ORM buffers UPDATEs until flush, so a write that
