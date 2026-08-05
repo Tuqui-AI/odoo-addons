@@ -806,6 +806,10 @@ export const tuquiAssistantService = {
                 default_body: safeBody,
                 default_subtype_xmlid: isMessage ? "mail.mt_comment" : "mail.mt_note",
                 default_composition_mode: "comment",
+                // Without it, Odoo 19 marks `partner_ids` required while the
+                // recipients block stays hidden in a note: posting fails with no
+                // visible culprit. The native chatter passes it for the same reason.
+                clicked_on_full_composer: true,
             };
             if (typeof subject === "string" && subject.trim()) {
                 composerContext.default_subject = subject;
