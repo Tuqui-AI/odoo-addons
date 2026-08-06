@@ -2,7 +2,7 @@
     "name": "Tuqui Companion",
     "version": "19.0.0.15.0",
     "category": "Productivity",
-    "summary": "Connect this Odoo to Tuqui in one click.",
+    "summary": "One-click activation for Tuqui: registers this instance and handles the OAuth connection from Settings. For Odoo.sh and On-Premise.",
     "author": "Tuqui-AI",
     "website": "https://tuqui.com",
     "license": "LGPL-3",
