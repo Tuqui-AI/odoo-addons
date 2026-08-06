@@ -1,5 +1,5 @@
 {
-    "name": "Tuqui - MCP for Odoo",
+    "name": "Tuqui Companion",
     "version": "19.0.0.15.0",
     "category": "Productivity",
     "summary": "Connect this Odoo to Tuqui in one click.",
