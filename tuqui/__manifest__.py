@@ -1,5 +1,5 @@
 {
-    "name": "Tuqui",
+    "name": "Tuqui Companion",
     "version": "18.0.1.5.0",
     "category": "Productivity",
     "summary": "Connect this Odoo to Tuqui in one click.",
