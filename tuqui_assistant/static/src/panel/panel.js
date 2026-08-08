@@ -54,7 +54,6 @@ export class TuquiPanel extends Component {
             connected: false,
             baseUrl: null,
             slug: null,
-            chatEnabled: false,
             embedReady: false,
             // Last SPA path (e.g. /w/:slug/chat/:id), persisted in localStorage so
             // the conversation resumes on page reload or panel reopen. Updated when
@@ -71,7 +70,6 @@ export class TuquiPanel extends Component {
             this.ui.connected = Boolean(boot?.connected);
             this.ui.baseUrl = boot?.base_url || null;
             this.ui.slug = boot?.slug || null;
-            this.ui.chatEnabled = Boolean(boot?.chat_enabled);
             // Restore the last conversation from localStorage (keyed by slug to
             // avoid cross-workspace contamination). Used in embedUrl so the iframe
             // loads where the user left off instead of starting a new chat.

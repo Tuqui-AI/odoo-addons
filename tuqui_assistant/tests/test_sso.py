@@ -32,6 +32,9 @@ class TestTuquiAssistantSsoNonceModel(TransactionCase):
         self.assertTrue(boot["connected"], "active companion + slug → connected")
         self.assertEqual(boot["slug"], "test-workspace")
         self.assertTrue(boot["base_url"], "base_url must always be present")
+        # Exact contract: the payload is resolved from local state only, with no
+        # HTTP call to Tuqui (this test used to reach the network for the plan flag).
+        self.assertEqual(set(boot), {"connected", "base_url", "slug"})
 
     def test_embed_bootstrap_not_connected_without_slug(self):
         self.oauth_client.write({"workspace_id_external": False})

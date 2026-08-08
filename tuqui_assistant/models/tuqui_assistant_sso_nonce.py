@@ -1,6 +1,5 @@
 import secrets
 
-import requests
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
@@ -81,34 +80,22 @@ class TuquiAssistantSsoNonce(models.Model):
         Returns ``{connected, base_url, slug}``. ``connected`` is False unless the
         companion is ``active`` AND a workspace slug is known; the panel shows a
         "connect Tuqui" prompt instead of the iframe when it's False.
+
+        Resolved entirely from local state — no HTTP call to Tuqui. The panel used
+        to hit ``/api/companion/bootstrap`` to read a ``chat_enabled`` plan flag;
+        chat is GA (spec ``chat-ga-sin-feature-flag``) so the flag no longer exists
+        and the request is gone. Its 401 branch auto-disconnected the companion,
+        which would have fired en masse the day an edge/proxy answered 401 instead
+        of 404 for the retired route.
         """
         oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         base_url = oauth_client._get_tuqui_base_url() if oauth_client else "https://tuqui.com"
         connected = bool(oauth_client and oauth_client.state == "active" and oauth_client.workspace_id_external)
 
-        chat_enabled = False
-        if connected:
-            try:
-                client_id = oauth_client.client_id
-                url = f"{base_url}/api/companion/bootstrap?client_id={client_id}"
-                resp = requests.get(url, timeout=3)
-                if resp.status_code == 401:
-                    # Tuqui rejected our credentials — the connection is stale on
-                    # their side (e.g. workspace deleted or reassigned). Auto-disconnect
-                    # so Settings reflects reality without requiring a manual action.
-                    oauth_client.action_disconnect()
-                    connected = False
-                else:
-                    resp.raise_for_status()
-                    chat_enabled = resp.json().get("chat_enabled", False)
-            except Exception:
-                chat_enabled = True  # fail-open: network error, Tuqui temporarily down
-
         return {
             "connected": connected,
             "base_url": base_url,
-            "slug": oauth_client.workspace_id_external if (oauth_client and connected) else False,
-            "chat_enabled": chat_enabled,
+            "slug": oauth_client.workspace_id_external if connected else False,
         }
 
     @api.model
