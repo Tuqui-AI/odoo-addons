@@ -34,25 +34,13 @@
             </div>
 
             <!-- L1: iframe del SPA de Tuqui (modo embed). Solo si el companion
-                 está conectado (slug + estado active) Y el plan incluye chat. -->
-            <t t-if="ui.connected and ui.slug and ui.chatEnabled">
+                 está conectado (slug + estado active). -->
+            <t t-if="ui.connected and ui.slug">
                 <iframe class="o-tuqui-iframe flex-grow-1"
                         t-ref="iframe"
                         t-att-src="embedUrl"
                         allow="microphone; clipboard-write; clipboard-read"
                         title="Tuqui"/>
-            </t>
-
-            <!-- Conectado pero chat_enabled = false: plan no incluye Tuqui Chat. -->
-            <t t-elif="ui.connected and ui.slug">
-                <div class="o-tuqui-disconnected flex-grow-1 d-flex flex-column align-items-center justify-content-center text-center p-4">
-                    <img class="o-tuqui-logo mb-3" style="width: 48px; opacity: .8;"
-                         src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
-                    <p class="mb-1 fw-bold">Chat no disponible</p>
-                    <p class="small text-muted mb-0">
-                        El plan actual de este workspace no incluye Tuqui Chat.
-                    </p>
-                </div>
             </t>
 
             <!-- Sin companion conectado: prompt para conectar Tuqui. El chat
