@@ -32,18 +32,6 @@ Patrón estándar de repos de addons Odoo.
 Consecuencia práctica: **un checkout no sirve para dos versiones.** Cuando un
 fix aplica a más de una, va una branch y un PR por rama de versión.
 
-## Probar los módulos
-
-Estos módulos corren dentro de un devcontainer OBA, y para eso tienen que estar
-en el `addons_path` de esa versión — tener el repo en el workspace de Tuqui no
-alcanza, y el fallo es silencioso (Odoo puede levantar otra copia del módulo
-sin dar error). En una línea: **un clone por versión, dentro del devcontainer
-de esa versión, con la rama de esa versión.**
-
-El checkout que vive en el workspace de Tuqui (`odoo-addons/`) es para leer,
-editar cambios simples y trabajo cross-repo. **Para correr, el que manda es el
-del devcontainer.**
-
 ## Convenciones
 
 - **Commits**: español, prefijo conventional con módulo entre paréntesis —
