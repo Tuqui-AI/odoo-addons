@@ -18,18 +18,18 @@ Una rama por versión soportada de Odoo (`19.0`, `18.0`, …) — no hay `main`.
 
 ## Cómo se usa en desarrollo
 
-Este repo se clona dentro del workspace OBA en `data/custom/repositories/tuqui-ai-odoo-addons` para que el devcontainer lo levante automáticamente como `addons_path`. La carpeta `custom/repositories/` es la raíz que el devcontainer suma al `addons_path` de Odoo; los repos que NO son addons (FastAPI, evals, contenido) viven en `custom/` directo. Desde el workspace de Tuqui (`~/tuqui/`) hay un symlink (`~/tuqui/odoo-addons -> ../odoo/19/data/custom/repositories/tuqui-ai-odoo-addons`) para tenerlo a tiro junto al resto de los repos de Tuqui-AI (cross-repo work, edición desde el host).
+Para **correr** los módulos hace falta un clone dentro del devcontainer OBA de
+la versión que corresponda — uno por versión, con la rama de esa versión.
+Tener el repo en el workspace de Tuqui no alcanza: no entra al `addons_path`, y
+el fallo es silencioso.
 
-> **Nota:** después del primer clone hace falta reiniciar el devcontainer para que tome el repo nuevo dentro de `repositories/`.
+El checkout del workspace de Tuqui sirve para leer, editar cambios simples y
+trabajo cross-repo.
 
 ## Specs y diseño
 
-El alcance funcional vive en `Tuqui-AI/tuqui` (`docs/specs/`). Punto de partida actual:
-
-- `docs/specs/10_draft/44-onboarding-from-odoo.md` — módulo "Tuqui" + `CompanionTransport`.
-- `docs/specs/10_draft/45-onboarding-from-web.md` — flujo desde tuqui.com.
-
-Spec orquestadora cross-repo (cuando exista): `Tuqui-AI/tuqui-workspace` → `specs/10_draft/04-modulo-tuqui-y-companion-transport.md`.
+Las specs del ecosistema Tuqui-AI viven en [`Tuqui-AI/specs`](https://github.com/Tuqui-AI/specs)
+— repo dedicado, con su propio `AGENTS.md`.
 
 ## Licencia
 
