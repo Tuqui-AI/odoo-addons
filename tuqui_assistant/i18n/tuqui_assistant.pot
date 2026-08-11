@@ -6,8 +6,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 19.0+e\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-21 04:32+0000\n"
-"PO-Revision-Date: 2026-06-21 04:32+0000\n"
+"POT-Creation-Date: 2026-08-11 15:15+0000\n"
+"PO-Revision-Date: 2026-08-11 15:15+0000\n"
 "Last-Translator: \n"
 "Language-Team: \n"
 "MIME-Version: 1.0\n"
@@ -17,44 +17,42 @@ msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
-msgid "Abrir Tuqui"
-msgstr ""
-
-#. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
-msgid "Abrir en Tuqui"
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Cannot navigate: missing Odoo model to open."
 msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "Abrí un formulario (1 registro) para aplicar cambios desde acá."
-msgstr ""
-
-#. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "Abrí un formulario (1 registro) para mandar al chatter."
+msgid "Changes applied to the form (unsaved). Review and Save or Discard."
 msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
 msgid ""
-"Cambios aplicados al formulario (sin guardar). Revisá y Guardá o Descartá."
+"Changes applied, but could not add line(s) for: %s. Check the form — a "
+"required field may be missing (e.g. the product). Do not assume the line was"
+" added."
 msgstr ""
 
 #. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
-msgid "Cerrar"
+#. odoo-python
+#: code:addons/tuqui_assistant/models/res_config_settings.py:0
+msgid ""
+"Chat access is unchanged — the last known state is kept. Try again in a "
+"moment."
 msgstr ""
 
 #. module: tuqui_assistant
 #: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__client_id
 msgid "Client"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+msgid "Close"
 msgstr ""
 
 #. module: tuqui_assistant
@@ -65,22 +63,8 @@ msgid ""
 msgstr ""
 
 #. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
-msgid "Chat no disponible"
-msgstr ""
-
-#. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
-msgid ""
-"Conectá Tuqui (companion) desde Ajustes para usar el asistente desde acá."
-msgstr ""
-
-#. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
-msgid "El plan actual de este workspace no incluye Tuqui Chat."
+#: model:ir.model,name:tuqui_assistant.model_res_config_settings
+msgid "Config Settings"
 msgstr ""
 
 #. module: tuqui_assistant
@@ -91,7 +75,31 @@ msgstr ""
 #. module: tuqui_assistant
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/panel/panel.js:0
-msgid "Contraer"
+msgid "Contract"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Could not apply changes: %s"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Could not open the chatter composer: %s"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Could not open the new form in Odoo: %s"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Could not open the view in Odoo: %s"
 msgstr ""
 
 #. module: tuqui_assistant
@@ -105,20 +113,18 @@ msgid "Created on"
 msgstr ""
 
 #. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_ir_http__display_name
+#: model:ir.model.fields,field_description:tuqui_assistant.field_res_config_settings__display_name
+#: model:ir.model.fields,field_description:tuqui_assistant.field_res_users__display_name
 #: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__display_name
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_oauth_client__display_name
 msgid "Display Name"
 msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "Enviar mensaje"
-msgstr ""
-
-#. module: tuqui_assistant
-#. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/panel/panel.js:0
-msgid "Expandir"
+msgid "Expand"
 msgstr ""
 
 #. module: tuqui_assistant
@@ -127,14 +133,17 @@ msgid "Expires At"
 msgstr ""
 
 #. module: tuqui_assistant
-#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__id
-msgid "ID"
+#: model:ir.model,name:tuqui_assistant.model_ir_http
+msgid "HTTP Routing"
 msgstr ""
 
 #. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "La propuesta debe ser un objeto { campo: valor }."
+#: model:ir.model.fields,field_description:tuqui_assistant.field_ir_http__id
+#: model:ir.model.fields,field_description:tuqui_assistant.field_res_config_settings__id
+#: model:ir.model.fields,field_description:tuqui_assistant.field_res_users__id
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_assistant_sso_nonce__id
+#: model:ir.model.fields,field_description:tuqui_assistant.field_tuqui_oauth_client__id
+msgid "ID"
 msgstr ""
 
 #. module: tuqui_assistant
@@ -149,44 +158,20 @@ msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Log note"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/panel/panel.js:0
-msgid "Minimizar"
+msgid "Minimize"
 msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "Ningún campo de la propuesta se puede aplicar al formulario abierto."
-msgstr ""
-
-#. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "No se pudieron aplicar los cambios: %s"
-msgstr ""
-
-#. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "No se pudo abrir el compositor del chatter: %s"
-msgstr ""
-
-#. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "No se pudo abrir el formulario nuevo en Odoo: %s"
-msgstr ""
-
-#. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "No se pudo abrir la vista en Odoo: %s"
-msgstr ""
-
-#. module: tuqui_assistant
-#. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "No se pudo navegar: falta el modelo de Odoo a abrir."
+msgid "No field from the proposal can be applied to the open form."
 msgstr ""
 
 #. module: tuqui_assistant
@@ -201,29 +186,65 @@ msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
-#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "Registrar nota"
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+msgid "Open Tuqui"
 msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid ""
-"Se aplicaron los cambios, pero no se pudo agregar la(s) línea(s) en: %s. "
-"Revisá el formulario; puede que falte resolver un dato (p.ej. el producto). "
-"No des por hecho que la línea quedó agregada."
+msgid "Open a form (1 record) to apply changes from here."
 msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
-msgid "Se ignoraron campos que no se pueden editar en este formulario: %s"
+msgid "Open a form (1 record) to post to the chatter."
 msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/panel/panel.js:0
-msgid "Seguir el contexto de Odoo"
+msgid "Open in Tuqui"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model_terms:ir.ui.view,arch_db:tuqui_assistant.res_config_settings_view_form
+msgid ""
+"Refresh which users have Tuqui chat, instead of waiting for the scheduled "
+"sync."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Send message"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "Skipped fields that cannot be edited in this form: %s"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model_terms:ir.ui.view,arch_db:tuqui_assistant.res_config_settings_view_form
+msgid "Sync chat access"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid ""
+"The connection between this Odoo and Tuqui is no longer active. Reload the "
+"page; if it keeps happening, ask your administrator to check the Tuqui "
+"connection in Settings."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
+msgid "The proposal must be an object { field: value }."
 msgstr ""
 
 #. module: tuqui_assistant
@@ -244,28 +265,64 @@ msgid "Tuqui Assistant: GC SSO nonces"
 msgstr ""
 
 #. module: tuqui_assistant
+#: model:ir.actions.server,name:tuqui_assistant.ir_cron_sync_chat_members_ir_actions_server
+msgid "Tuqui Assistant: sync chat members"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model,name:tuqui_assistant.model_tuqui_oauth_client
+msgid "Tuqui OAuth Client Credentials"
+msgstr ""
+
+#. module: tuqui_assistant
 #. odoo-python
 #: code:addons/tuqui_assistant/models/tuqui_assistant_sso_nonce.py:0
 msgid "Tuqui SSO nonce must be unique."
 msgstr ""
 
 #. module: tuqui_assistant
+#: model:ir.model.fields,field_description:tuqui_assistant.field_res_users__tuqui_has_chat
+msgid "Tuqui chat access"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-python
+#: code:addons/tuqui_assistant/models/res_config_settings.py:0
+msgid "Tuqui did not answer"
+msgstr ""
+
+#. module: tuqui_assistant
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
-msgid "Tuqui no está conectado a este Odoo"
+msgid "Tuqui is not available right now"
 msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-python
 #: code:addons/tuqui_assistant/models/tuqui_assistant_sso_nonce.py:0
 msgid ""
-"Tuqui no está conectado a este Odoo (companion). Activá la conexión primero."
+"Tuqui is not connected to this Odoo (companion). Please activate the "
+"connection first."
 msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/panel/panel.js:0
-msgid "Tuqui no está conectado: no se puede abrir la app."
+msgid "Tuqui is not connected: cannot open the app."
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model,name:tuqui_assistant.model_res_users
+msgid "User"
+msgstr ""
+
+#. module: tuqui_assistant
+#: model:ir.model.fields,help:tuqui_assistant.field_res_users__tuqui_has_chat
+msgid ""
+"Whether this user has a Tuqui chat seat, as last reported by Tuqui. "
+"Refreshed by the 'Tuqui Assistant: sync chat members' scheduled action; the "
+"systray icon is shown only to users who have it. A cache, not a setting: "
+"editing it by hand is undone by the next sync."
 msgstr ""
 
 #. module: tuqui_assistant

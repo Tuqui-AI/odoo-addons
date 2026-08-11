@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- "Sync now" lives next to the connector's own buttons: the admin who just
+         assigned seats in Tuqui is already on this screen, and the alternative is
+         explaining that they should wait up to 15 minutes. Priority above the
+         connector's view (70) so the xpath resolves after it added the block. -->
+    <record id="res_config_settings_view_form" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.tuqui.assistant</field>
+        <field name="model">res.config.settings</field>
+        <field name="priority" eval="80"/>
+        <field name="inherit_id" ref="tuqui.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//button[@name='action_tuqui_open_access_log']" position="after">
+                <button name="action_tuqui_sync_chat_members" type="object"
+                        string="Sync chat access" icon="fa-refresh"
+                        class="btn-link p-0"
+                        title="Refresh which users have Tuqui chat, instead of waiting for the scheduled sync."/>
+            </xpath>
+        </field>
+    </record>
+</odoo>
