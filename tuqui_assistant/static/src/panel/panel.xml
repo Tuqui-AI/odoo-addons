@@ -43,15 +43,19 @@
                         title="Tuqui"/>
             </t>
 
-            <!-- Sin companion conectado: prompt para conectar Tuqui. El chat
-                 vive atado a companion (ADR 0001), así que no hay fallback. -->
+            <!-- Red de seguridad para una carrera, no un camino de descubrimiento:
+                 con el gating del systray, quien ve el ícono tiene chat, y por lo
+                 tanto hay companion. Esta rama queda alcanzable solo si la conexión
+                 se cayó entre el page load y el click (o si un admin la desconectó
+                 con el panel abierto). Por eso el copy no invita a configurar nada:
+                 le habla a alguien que hasta hace un segundo lo tenía funcionando. -->
             <t t-else="">
                 <div class="o-tuqui-disconnected flex-grow-1 d-flex flex-column align-items-center justify-content-center text-center p-4">
                     <img class="o-tuqui-logo mb-3" style="width: 48px; opacity: .8;"
                          src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
-                    <p class="mb-1 fw-bold">Tuqui no está conectado a este Odoo</p>
+                    <p class="mb-1 fw-bold">Tuqui is not available right now</p>
                     <p class="small text-muted mb-0">
-                        Conectá Tuqui (companion) desde Ajustes para usar el asistente desde acá.
+                        The connection between this Odoo and Tuqui is no longer active. Reload the page; if it keeps happening, ask your administrator to check the Tuqui connection in Settings.
                     </p>
                 </div>
             </t>

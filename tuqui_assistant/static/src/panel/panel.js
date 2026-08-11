@@ -1,6 +1,7 @@
 /** @odoo-module **/
 import { Component, useState, useRef, useEffect, onWillStart, onMounted, onWillUnmount } from "@odoo/owl";
 import { registry } from "@web/core/registry";
+import { session } from "@web/session";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 
@@ -521,4 +522,11 @@ export class TuquiPanel extends Component {
 
 }
 
-registry.category("main_components").add("tuqui_assistant.Panel", { Component: TuquiPanel });
+// Misma regla que el systray, y por el mismo motivo: sin chat no hay forma de
+// abrir el panel (el ícono es su único disparador), así que montarlo sería montar
+// maquinaria inalcanzable. Y no es gratis — su onWillStart hace un ORM call
+// (embed_bootstrap) en CADA page load, así que hoy el 80% del padrón de un cliente
+// paga una consulta por pantalla para algo que no puede usar.
+if (session.tuqui_has_chat) {
+    registry.category("main_components").add("tuqui_assistant.Panel", { Component: TuquiPanel });
+}
