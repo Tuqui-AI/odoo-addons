@@ -227,6 +227,7 @@ class TestTuquiRpcGateway(HttpCase):
         token=None,
         body_override=None,
         expect_status=None,
+        turn_read_only=None,
     ):
         """Invoke ``/tuqui/rpc`` and return the response.
 
@@ -242,6 +243,10 @@ class TestTuquiRpcGateway(HttpCase):
 
         Pass ``body_override`` to send a malformed body for perimeter tests;
         otherwise the body is built from the named params.
+
+        ``turn_read_only`` sets ``X-Tuqui-Read-Only`` to that literal string.
+        ``None`` omits the header entirely, which is what every pre-existing
+        test does — the header must be inert when absent.
         """
         token = token or self._get_token()
         if body_override is not None:
@@ -262,6 +267,8 @@ class TestTuquiRpcGateway(HttpCase):
         if not connection:
             uid = self.admin_uid if acting_uid == "__admin__" else acting_uid
             headers["X-Tuqui-Acting-Uid"] = str(uid)
+        if turn_read_only is not None:
+            headers["X-Tuqui-Read-Only"] = turn_read_only
         resp = self.url_open(
             "/tuqui/rpc",
             data=json.dumps(body),
@@ -766,6 +773,80 @@ class TestTuquiRpcGateway(HttpCase):
         and execute never runs as superuser."""
         with self._probe_method("search_tuqui_probe", declared_readonly=False):
             resp = self._rpc("res.partner", "search_tuqui_probe", args=[], connection=True, expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "connection_read_only")
+
+    # ─── Per-request read-only declaration ────────────────────────────────
+
+    def test_turn_header_tightens_a_read_write_connection(self):
+        """The caller declares one turn read-only over a connection that is not.
+
+        This is the whole point of the header: a workspace serves interactive
+        chat and an anonymous widget over the same OAuth client, and only the
+        caller knows which turn is which.
+        """
+        self.client.write({"read_only": False})
+        resp = self._rpc("res.partner", "create", args=[{"name": "no_va"}], turn_read_only="1", expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
+        # Same connection, same call, no header → allowed. Proves the refusal
+        # came from the header and not from leftover state.
+        resp = self._rpc("res.partner", "create", args=[{"name": "si_va"}], expect_status=200)
+        self.assertIsInstance(resp.json()["data"], int)
+
+    def test_turn_header_still_admits_declared_readonly_methods(self):
+        """Tightening is not shutting the door: what the declaration allows still
+        passes. This is the path that unblocks the RAG for a client-facing turn."""
+        self.client.write({"read_only": False})
+        with self._probe_method("tuqui_probe_summary", declared_readonly=True):
+            resp = self._rpc("res.partner", "tuqui_probe_summary", args=[], turn_read_only="1", expect_status=200)
+        self.assertTrue(resp.json()["ok"])
+        self.assertEqual(self._latest_log(method="tuqui_probe_summary").operation_type, "read")
+
+    def test_turn_header_refuses_an_undeclared_method(self):
+        """The complement: under the header, an undeclared method is refused even
+        though the connection itself would allow it."""
+        self.client.write({"read_only": False})
+        with self._probe_method("tuqui_probe_summary", declared_readonly=False):
+            resp = self._rpc("res.partner", "tuqui_probe_summary", args=[], turn_read_only="1", expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
+
+    def test_turn_header_cannot_loosen_a_read_only_connection(self):
+        """The header is OR'd, never consulted as an override: an explicit falsey
+        value does not buy write access on a read-only connection."""
+        self.client.write({"read_only": True})
+        for value in ("0", "false", "no", "off"):
+            resp = self._rpc(
+                "res.partner",
+                "create",
+                args=[{"name": "tampoco"}],
+                turn_read_only=value,
+                expect_status=403,
+            )
+            self.assertEqual(
+                resp.json()["error"]["code"],
+                "read_only_mode",
+                f"X-Tuqui-Read-Only: {value} must not unlock a read-only connection",
+            )
+
+    def test_malformed_header_value_tightens_rather_than_being_ignored(self):
+        """Parsing fails toward tightening: a typo the caller meant as "on" must
+        not silently drop the constraint."""
+        self.client.write({"read_only": False})
+        resp = self._rpc("res.partner", "create", args=[{"name": "typo"}], turn_read_only="ture", expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
+
+    def test_connection_path_keeps_its_own_deny_reason_under_the_header(self):
+        """On the connection path the unconditional lock is evaluated first, so the
+        audit keeps saying ``connection_read_only`` — the header does not reshuffle
+        existing deny reasons."""
+        self.client.write({"read_only": False})
+        resp = self._rpc(
+            "res.partner",
+            "create",
+            args=[{"name": "conn"}],
+            connection=True,
+            turn_read_only="1",
+            expect_status=403,
+        )
         self.assertEqual(resp.json()["error"]["code"], "connection_read_only")
 
     def test_connection_path_always_read_only_regardless_of_member_flag(self):
