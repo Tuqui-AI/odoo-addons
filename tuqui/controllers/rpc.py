@@ -56,47 +56,107 @@ def _is_absolutely_blocked(method: str) -> bool:
 
 
 # ─── Classification ──────────────────────────────────────────────────
-# Each inbound method gets one of four operation types. The classifier
-# is intentionally pattern-light: most cases fall into private/_-prefix,
-# explicit write set, or the read prefix family. Business methods and
-# actions land in `execute` and only get bouncing by explicit rules.
+# Each inbound method gets one of four operation types, from two sources
+# in this order of authority:
+#
+#   1. The explicit ORM sets below — the closed surface Tuqui's
+#      CompanionTransport posts here, pinned by the contract test
+#      ``test_classify_covers_companion_transport_surface``.
+#   2. The model's own ``@api.readonly`` declaration (``_declared_readonly``),
+#      for everything else. That is what lets a business method which only
+#      reads — ``ai.agent.search_documentation``, the RAG entrypoint behind
+#      every ``docs-*`` skill — be invoked from a read-only connection without
+#      Tuqui shipping (and redeploying) a dedicated tool per method.
+#
+# There is NO name-prefix rule: a method is a read because it is listed or
+# because its author declared it, never because it happens to be called
+# ``search_*``/``read_*``. That prefix family used to be the L1 caveat of this
+# module — a mutating method named ``search_something`` classified as a read
+# and slipped past both the read_only gate and the superuser-locked connection
+# path. Business methods and actions land in ``execute``.
+#
+# What this classification is and isn't: it decides the audit label AND which
+# calls the read_only / connection gates admit, so it is a real part of the
+# perimeter. It is not what authorizes a write — that stays the backend
+# whitelist (``workspace_write_models``) plus the acting user's own Odoo ACL.
+# Classifying a call as ``read`` widens no privilege beyond reading.
 
 # These sets mirror the typed method names Tuqui's CompanionTransport posts to
 # this gateway — see tuqui_core/integrations/odoo/transports/companion.py and
 # the contract test ``test_classify_covers_companion_transport_surface``. Keep
 # all three in sync. Asymmetry to remember when the transport gains a method:
-#   * a READ not recognized here → ``execute`` → mislabelled in the audit log
-#     (that was the formatted_read_group bug; explicit entry in _READ_METHODS fixes it).
-#   * a WRITE not listed → also ``execute`` → only its audit row gets mislabelled.
-# This classifier is the audit label, NOT the authorization boundary: writes
-# are really gated by the backend whitelist (workspace_write_models) and the
-# acting user's Odoo ACL.
+#   * a READ not recognized here and not declared ``@api.readonly`` → ``execute``
+#     → refused outright on the connection path and in read_only mode, not just
+#     mislabelled in the audit log.
+#   * a WRITE not listed → also ``execute`` → still refused wherever writes are;
+#     only its audit row gets mislabelled.
 _WRITE_METHODS = frozenset({"create", "write", "unlink", "copy", "name_create"})
-# Reads that don't begin with the search/read prefix must be listed explicitly
-# (e.g. ``formatted_read_group``, the Odoo 19 grouped read).
+# Every ORM reader the transport relies on is listed explicitly, including the
+# ones Odoo does NOT decorate: ``fields_get`` and ``default_get`` carry only
+# ``@api.model``, so the declaration alone would classify them as ``execute``
+# and break the transport. The decorated long tail (``search_fetch``,
+# ``read_progress_bar``, …) needs no entry — ``_declared_readonly`` covers it.
 _READ_METHODS = frozenset(
     {
+        "read",
+        "search",
+        "search_read",
+        "search_count",
+        "read_group",
+        "formatted_read_group",
         "name_search",
         "fields_get",
         "default_get",
-        "formatted_read_group",
     }
 )
-_READ_PREFIXES = ("search", "read")
 
 
-# L1: read_only is enforced by method-NAME classification, not at the cursor
-# level. A mutating method whose name starts with ``read``/``search`` (or is
-# listed in ``_READ_METHODS``) would classify as ``read`` and slip past the
-# read_only gate — and on the connection path it would run as superuser. No
-# core Odoo method does this, but a custom client module could; a cursor-level
-# read-only guard was deemed disproportionate vs. the LOCKED auth design.
-def _classify(method: str) -> str:
+def _declared_readonly(model_cls, method: str) -> bool:
+    """Whether ``method`` is declared read-only by the class that PROVIDES it.
+
+    ``@api.readonly`` (``odoo/orm/decorators.py``) does nothing but set
+    ``method._readonly = True``; Odoo's own controllers read that flag to pick
+    the request cursor — ``web/controllers/dataset.py::_call_kw_readonly`` and,
+    since 19, ``rpc/controllers/json2.py::_web_json_2_rpc_readonly``. Both walk
+    ``Model.mro()`` and return the flag of the FIRST ancestor carrying it.
+
+    We deliberately diverge on that walk. An override that mutates and
+    redeclares nothing is not itself flagged, so Odoo's walk keeps going and
+    inherits the parent's ``_readonly=True`` — a module can silently turn a
+    write into a "read". Python function attributes live on the function
+    object, so resolving the *effective* method (the one that would actually
+    run) and reading the flag off that object is precisely the comparison the
+    MRO walk skips: declaring class vs. providing class.
+
+    Being stricter than Odoo costs nothing here. An undeclared override falls
+    back to ``execute``, which is refused only where writes already are.
+    """
+    effective = getattr(model_cls, method, None)
+    if effective is None:
+        return False
+    # ``is True`` and not a truthiness check: the flag is a declaration, and a
+    # field or attribute that merely happens to be truthy is not one.
+    return getattr(effective, "_readonly", False) is True
+
+
+def _classify(method: str, model_cls=None) -> str:
+    """Classify one inbound call into an operation type.
+
+    ``model_cls`` is the registry class for the target model — the carrier of
+    the ``@api.readonly`` declaration. It is ``None`` when the model does not
+    resolve, in which case only the explicit sets apply; that call is refused
+    as an unknown model right after the policy gate anyway.
+    """
     if method.startswith("_"):
         return "private_execute"
+    # Writes are matched before the declaration is consulted, so an
+    # ``@api.readonly`` mistakenly stuck on a mutating override cannot demote a
+    # known write to a read.
     if method in _WRITE_METHODS:
         return "write"
-    if method in _READ_METHODS or method.startswith(_READ_PREFIXES):
+    if method in _READ_METHODS:
+        return "read"
+    if model_cls is not None and _declared_readonly(model_cls, method):
         return "read"
     return "execute"
 
@@ -454,7 +514,12 @@ class TuquiRpc(http.Controller):
         # on the recordset, then ``_dispatch`` pops any context inside
         # kwargs and layers it on top — inner wins on key conflicts,
         # matching Odoo's own call_kw semantics.
-        operation_type = _classify(method)
+        #
+        # The registry class carries the ``@api.readonly`` declaration, so it
+        # has to be resolved before classifying. An unknown model yields None
+        # (classification falls back to the explicit sets) and is refused as
+        # ``validation_error`` further down, after the policy gate.
+        operation_type = _classify(method, env.registry.get(model_name))
 
         # ─── Acting user ───────────────────────────────────────────────────
         # acting_uid / is_connection already resolved above (path detection).

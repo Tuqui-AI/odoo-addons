@@ -1,15 +1,35 @@
 import json
 import secrets
 import time
+from contextlib import contextmanager
 from unittest.mock import patch
 
+from odoo import api
 from odoo.addons.tuqui.controllers.rpc import (
     _DEFAULT_STATEMENT_TIMEOUT_MS,
     _classify,
+    _declared_readonly,
     _statement_timeout_ms,
 )
-from odoo.tests import HttpCase, tagged
+from odoo.tests import HttpCase, TransactionCase, tagged
 from odoo.tools import mute_logger
+
+
+def _odoo_mro_readonly(model_cls, method):
+    """Verbatim transcription of how Odoo itself resolves ``_readonly``.
+
+    Copied from ``addons/web/controllers/dataset.py::_call_kw_readonly`` (and
+    identical in ``addons/rpc/controllers/json2.py::_web_json_2_rpc_readonly``).
+    Present only so the tests can assert where our own resolution
+    deliberately diverges — if this ever stops matching upstream, the
+    divergence test below is what tells us.
+    """
+    for cls in model_cls.mro():
+        method_obj = getattr(cls, method, None)
+        if method_obj is not None and hasattr(method_obj, "_readonly"):
+            return method_obj._readonly
+    return False
+
 
 # ─── Helpers shared by the HTTP suite ────────────────────────────────
 
@@ -28,6 +48,113 @@ def _rotate_oauth_secret(env):
         }
     )
     return client.client_id, plain
+
+
+@tagged("post_install", "-at_install", "tuqui")
+class TestTuquiRpcClassification(TransactionCase):
+    """Unit coverage of ``_classify`` / ``_declared_readonly``.
+
+    The gateway classifies a call from two sources: the explicit ORM sets and
+    the target model's own ``@api.readonly`` declaration. These tests pin the
+    declaration half — including the one place where we are deliberately
+    stricter than Odoo.
+    """
+
+    def test_declaration_widens_read_surface_to_business_methods(self):
+        """A declared read-only method classifies as a read even though its
+        name is in neither set — the mechanism that lets a read-only channel
+        reach ``ai.agent.search_documentation`` without a dedicated tool."""
+
+        class Reader:
+            @api.readonly
+            def summarize_documentation(self):
+                pass
+
+            def rebuild_documentation(self):
+                pass
+
+        self.assertTrue(_declared_readonly(Reader, "summarize_documentation"))
+        self.assertEqual(_classify("summarize_documentation", Reader), "read")
+
+        # Same class, undeclared sibling: nothing about the name or the model
+        # promotes it, so it stays an execute.
+        self.assertFalse(_declared_readonly(Reader, "rebuild_documentation"))
+        self.assertEqual(_classify("rebuild_documentation", Reader), "execute")
+
+    def test_declaration_is_not_inherited_by_an_undeclared_override(self):
+        """The inherited-flag hole, refuted.
+
+        Odoo resolves ``_readonly`` by walking the MRO and trusting the first
+        ancestor that carries it, so an override that mutates and redeclares
+        nothing inherits its parent's ``@api.readonly``. We resolve the
+        *effective* method instead and read the flag off that object, so the
+        override classifies as an execute. The assertion on
+        ``_odoo_mro_readonly`` is the point: the hole is real upstream, not a
+        hypothetical we are guarding against for free.
+        """
+
+        class Base:
+            @api.readonly
+            def fetch_summary(self):
+                pass
+
+        class Mutating(Base):
+            # Redeclares nothing and writes. Nothing here is flagged.
+            def fetch_summary(self):
+                pass
+
+        self.assertTrue(
+            _odoo_mro_readonly(Mutating, "fetch_summary"),
+            "upstream Odoo would inherit the parent flag — if this fails, "
+            "Odoo changed its resolution and this divergence may be moot",
+        )
+        self.assertFalse(
+            _declared_readonly(Mutating, "fetch_summary"),
+            "the flag must count only on the class providing the effective method",
+        )
+        self.assertEqual(_classify("fetch_summary", Mutating), "execute")
+
+        # An override that DOES redeclare is trusted again — the rule is about
+        # the declaration being present, not about overriding being suspicious.
+        class Declaring(Base):
+            @api.readonly
+            def fetch_summary(self):
+                pass
+
+        self.assertTrue(_declared_readonly(Declaring, "fetch_summary"))
+        self.assertEqual(_classify("fetch_summary", Declaring), "read")
+
+    def test_name_prefix_alone_never_classifies_as_read(self):
+        """The retired L1 caveat: a ``search_``/``read_``-prefixed method that
+        nobody declared is an execute, not a read."""
+        partner_cls = self.env.registry["res.partner"]
+        for method in ("search_invoices_to_pay", "read_pending_balance"):
+            self.assertFalse(_declared_readonly(partner_cls, method))
+            self.assertEqual(
+                _classify(method, partner_cls),
+                "execute",
+                f"{method} must not classify as a read on its prefix alone",
+            )
+
+    def test_write_set_wins_over_a_stray_declaration(self):
+        """A mutating method that carries the flag by mistake cannot be
+        demoted to a read: the explicit write set is consulted first."""
+
+        class Sloppy:
+            @api.readonly
+            def name_create(self, name):
+                pass
+
+        self.assertTrue(_declared_readonly(Sloppy, "name_create"))
+        self.assertEqual(_classify("name_create", Sloppy), "write")
+
+    def test_unresolvable_model_falls_back_to_the_explicit_sets(self):
+        """An unknown model yields no class to inspect; the explicit sets still
+        classify. (Such a call is refused as validation_error downstream.)"""
+        self.assertEqual(_classify("search_read", None), "read")
+        self.assertEqual(_classify("create", None), "write")
+        self.assertEqual(_classify("action_confirm", None), "execute")
+        self.assertEqual(_classify("_compute_display_name", None), "private_execute")
 
 
 @tagged("post_install", "-at_install", "tuqui")
@@ -195,7 +322,13 @@ class TestTuquiRpcGateway(HttpCase):
         /tuqui/rpc must classify as intended. Mirror of
         tuqui_core/integrations/odoo/transports/companion.py — when its method
         surface changes, update this list and _READ_METHODS/_WRITE_METHODS
-        together."""
+        together.
+
+        Called without a model class on purpose: the transport's surface must
+        classify off the explicit sets alone, never depending on whether a
+        given model happens to declare ``@api.readonly``. ``fields_get`` is the
+        case that proves it matters — Odoo decorates it with ``@api.model``
+        only, so the declaration would classify it as an execute."""
         reads = ("search_read", "read", "read_group", "formatted_read_group", "search_count", "fields_get")
         writes = ("create", "write", "unlink", "copy")
         for method in reads:
@@ -565,6 +698,75 @@ class TestTuquiRpcGateway(HttpCase):
         self.client.write({"read_only": False})
         resp = self._rpc("res.partner", "create", args=[{"name": "ro_allowed"}], expect_status=200)
         self.assertIsInstance(resp.json()["data"], int)
+
+    # ─── Declared read-only methods (end to end) ──────────────────────────
+
+    @contextmanager
+    def _probe_method(self, name, *, declared_readonly):
+        """Attach a public ``@api.model`` probe method to res.partner.
+
+        No core method fits as a specimen: every public ``search_``/``read_``
+        method of the base ORM is declared read-only, and the one decorated
+        reader outside ``_READ_METHODS`` (``search_fetch``) is also
+        ``@api.private``, so the gateway refuses it before classification. The
+        probe stands in for what a client module ships — which is exactly the
+        surface this mechanism exists to serve.
+        """
+
+        def probe(self):
+            return self.env["res.partner"].search_count([])
+
+        probe._api_model = True  # @api.model: dispatched on the model, no ids
+        if declared_readonly:
+            probe._readonly = True  # what @api.readonly does, and all it does
+        with patch.object(self.env.registry["res.partner"], name, probe, create=True):
+            yield
+
+    def test_read_only_turn_allows_a_declared_readonly_method(self):
+        """P1: a business method its author declared read-only is invocable
+        from a read-only connection, with no entry in _READ_METHODS."""
+        self.client.write({"read_only": True})
+        with self._probe_method("tuqui_probe_summary", declared_readonly=True):
+            resp = self._rpc("res.partner", "tuqui_probe_summary", args=[], expect_status=200)
+        self.assertTrue(resp.json()["ok"])
+        self.assertIsInstance(resp.json()["data"], int)
+        log = self._latest_log(method="tuqui_probe_summary")
+        self.assertEqual(log.operation_type, "read")
+        self.assertTrue(log.policy_allowed)
+
+    def test_read_only_turn_blocks_the_same_method_undeclared(self):
+        """The declaration is what moves the needle: the identical method
+        without the flag is refused in a read-only turn."""
+        self.client.write({"read_only": True})
+        with self._probe_method("tuqui_probe_summary", declared_readonly=False):
+            resp = self._rpc("res.partner", "tuqui_probe_summary", args=[], expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
+
+    def test_read_only_turn_blocks_an_undeclared_search_prefixed_method(self):
+        """Retired L1 caveat, end to end: a mutating method named ``search_*``
+        no longer slips past the read_only gate on its prefix."""
+        self.client.write({"read_only": True})
+        with self._probe_method("search_tuqui_probe", declared_readonly=False):
+            resp = self._rpc("res.partner", "search_tuqui_probe", args=[], expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "read_only_mode")
+        log = self._latest_log(method="search_tuqui_probe")
+        self.assertEqual(log.operation_type, "execute")
+        self.assertEqual(log.policy_denied_reason, "read_only_mode")
+
+    def test_connection_path_allows_a_declared_readonly_method(self):
+        """The superuser-locked connection path accepts read-classified calls,
+        so a declared read-only method works there too — the path a scheduled
+        or system caller uses."""
+        with self._probe_method("tuqui_probe_summary", declared_readonly=True):
+            resp = self._rpc("res.partner", "tuqui_probe_summary", args=[], connection=True, expect_status=200)
+        self.assertTrue(resp.json()["ok"])
+
+    def test_connection_path_blocks_an_undeclared_search_prefixed_method(self):
+        """Same specimen on the connection path: undeclared means execute,
+        and execute never runs as superuser."""
+        with self._probe_method("search_tuqui_probe", declared_readonly=False):
+            resp = self._rpc("res.partner", "search_tuqui_probe", args=[], connection=True, expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "connection_read_only")
 
     def test_connection_path_always_read_only_regardless_of_member_flag(self):
         """connection_read_only is unconditional: connection path refuses writes
