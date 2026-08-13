@@ -301,6 +301,37 @@ def _bearer_token():
     return auth[7:].strip()
 
 
+# Values that turn the read-only header OFF. Everything else that is present and
+# non-empty turns it ON — see ``_request_declared_read_only``.
+_READ_ONLY_HEADER_FALSEY = frozenset({"0", "false", "no", "off"})
+
+
+def _request_declared_read_only() -> bool:
+    """Whether the caller declared THIS request read-only via header.
+
+    Tuqui runs a client-facing turn with no human on the other side, and its
+    read-only-ness is a property of the TURN, not of the Odoo connection: the
+    same workspace serves interactive chat (read/write) and an anonymous widget
+    (read-only) over one OAuth client. The connection-level ``read_only`` flag
+    cannot express that, so the caller states it per request and the gateway
+    resolves what the declaration allows.
+
+    The header can only ever TIGHTEN: it is OR'd with the connection flag, never
+    consulted to override it. A caller cannot use it to escape a read-only
+    connection, which is why accepting it needs no privilege of its own — it
+    arrives on an already-authenticated request and asks for less, not more.
+
+    Parsing fails toward tightening on purpose. A malformed value
+    (``read-onlyy``, ``ture``) is treated as ON rather than silently ignored,
+    because ignoring it would drop a perimeter constraint the caller meant to
+    apply. Only an explicit falsey value or an absent/empty header means OFF.
+    """
+    raw = (request.httprequest.headers.get("X-Tuqui-Read-Only") or "").strip().lower()
+    if not raw:
+        return False
+    return raw not in _READ_ONLY_HEADER_FALSEY
+
+
 def _resolve_acting_member(env, uid):
     """Resolve + vet the workspace member a member-path ORM call impersonates.
 
@@ -465,6 +496,13 @@ class TuquiRpc(http.Controller):
       ``user_id`` on ``tuqui.oauth.client``, so an ACL applies — which is
       deliberately NOT part of this change.
 
+    Orthogonal to both paths, a request may declare itself read-only with
+    ``X-Tuqui-Read-Only`` (see ``_request_declared_read_only``). It is OR'd with
+    the connection-level ``read_only`` flag, so it only ever tightens: a caller
+    serving an anonymous widget marks the turn read-only, and only calls that
+    classify as ``read`` — by the explicit sets or by the model's own
+    ``@api.readonly`` — get through.
+
     Defense in depth, applied to both paths:
 
     1. OAuth ``client_credentials`` bearer (verified upstream).
@@ -494,7 +532,13 @@ class TuquiRpc(http.Controller):
         # ─── Path detection (header only, no body needed) ─────────────────
         acting_uid = request.httprequest.headers.get("X-Tuqui-Acting-Uid") or ""
         is_connection = not acting_uid
-        read_only = False if is_connection else env["tuqui.oauth.client"].sudo()._is_read_only()
+        # Two independent sources, OR'd: the connection-level flag on the OAuth
+        # client (an admin's standing choice for this Odoo) and the per-request
+        # header (the caller declaring THIS turn read-only). See
+        # ``_request_declared_read_only`` for why the header can only tighten.
+        read_only = (False if is_connection else env["tuqui.oauth.client"].sudo()._is_read_only()) or (
+            _request_declared_read_only()
+        )
 
         # ─── Body ──────────────────────────────────────────────────────────
         try:
