@@ -176,8 +176,11 @@ def _evaluate_policy(read_only: bool, method: str, op_type: str, *, is_connectio
     2. Private (``_``-prefixed) methods — internal ORM surface, never exposed.
     3. Connection path (``is_connection=True``): runs as SUPERUSER with no
        record rules, so it is locked to reads UNCONDITIONALLY — anything that
-       can mutate is refused with ``connection_read_only``. Keeps the blast
-       radius of a stolen token to read-only on workspace-level/system traffic.
+       can mutate is refused with ``connection_read_only``. Note that "read" is
+       wider than it used to be: since read is decided by ``@api.readonly`` and
+       not by a fixed list of ORM methods, this path now reaches any business
+       method a model declares read-only, as superuser. Still no writes; a much
+       larger surface to read with.
     4. Member path: when the connection is flagged ``read_only``, anything that
        can mutate is refused with ``read_only_mode``.
     """
@@ -451,8 +454,16 @@ class TuquiRpc(http.Controller):
       traffic). The call runs as SUPERUSER (``with_user(SUPERUSER_ID)``).
       Because the superuser bypasses record rules, this path is locked to reads
       UNCONDITIONALLY: any write / execute / private / blocked op is refused
-      (``connection_read_only``). A stolen token can therefore only ever read
-      on this path.
+      (``connection_read_only``). A stolen token can therefore never write on
+      this path — but read now means more than it did. Classification moved from
+      a fixed list of ORM methods to the model's own ``@api.readonly``, so any
+      business method whose author declared it read-only is reachable here, as
+      superuser and without record rules. The guarantee that held is write-vs-
+      read; what widened is how much can be read, and by a decision that lives
+      in each model rather than in this file. Narrowing it means giving the
+      connection path an identity of its own instead of superuser — a technical
+      ``user_id`` on ``tuqui.oauth.client``, so an ACL applies — which is
+      deliberately NOT part of this change.
 
     Defense in depth, applied to both paths:
 
