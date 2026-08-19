@@ -1,5 +1,6 @@
 /** @odoo-module **/
 import { beforeEach, describe, expect, test } from "@odoo/hoot";
+import { animationFrame } from "@odoo/hoot-mock";
 import {
     contains,
     defineModels,
@@ -20,6 +21,11 @@ import {
  * capa donde vivieron las fallas del propose-apply (tuplas comando de x2many,
  * líneas nuevas que no disparan onchange, m2o pasado como entero pelado), y la
  * que un mock no reproduce.
+ *
+ * Cómo correrlos (el runner vive en `web`, no acá — ver .github/workflows/js-tests.yml):
+ *
+ *   odoo -d <db> -i tuqui_assistant -u web --test-enable --stop-after-init \
+ *        --test-tags "/web:WebSuite.test_unit_desktop[@tuqui_assistant]"
  *
  * Ver la spec `assistant-en-odoo-confiabilidad` §Tests reales — tarea 72555.
  */
@@ -60,6 +66,20 @@ async function mountPartnerForm() {
     return getService("tuquiAssistant");
 }
 
+/**
+ * Aplica una propuesta y espera el re-render.
+ *
+ * `applyProposal` resuelve cuando el record model ya tiene los valores, pero OWL
+ * pinta recién en el frame siguiente. Sin este await las aserciones leen la
+ * pantalla vieja — y lo que hay que verificar acá es justamente lo que el usuario
+ * VE antes de decidir si guarda.
+ */
+async function applyAndRender(assistant, changes, options) {
+    const ok = await assistant.applyProposal(changes, options);
+    await animationFrame();
+    return ok;
+}
+
 describe("applyProposal — campos simples", () => {
     let assistant;
     beforeEach(async () => {
@@ -67,17 +87,16 @@ describe("applyProposal — campos simples", () => {
     });
 
     test("aplica un char y deja el registro sucio", async () => {
-        const ok = await assistant.applyProposal({ name: "Acme SA" });
+        const ok = await applyAndRender(assistant, { name: "Acme SA" });
         expect(ok).toBe(true);
         // El valor tiene que estar EN LA UI, no sólo en el datapoint: lo que el
         // usuario revisa antes de Guardar es la pantalla.
         expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
-        const record = assistant.getActiveRecord();
-        expect(record.dirty).toBe(true);
+        expect(assistant.getActiveRecord().dirty).toBe(true);
     });
 
     test("aplica varios campos de una", async () => {
-        await assistant.applyProposal({ name: "Acme SA", email: "nuevo@example.com" });
+        await applyAndRender(assistant, { name: "Acme SA", email: "nuevo@example.com" });
         expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
         expect(".o_field_widget[name=email] input").toHaveValue("nuevo@example.com");
     });
@@ -91,12 +110,11 @@ describe("applyProposal — lo que NO se puede aplicar", () => {
 
     test("un campo inexistente se descarta y no revienta", async () => {
         // Antes esto reventaba `_update` con un error JS sin atrapar.
-        const ok = await assistant.applyProposal({ campo_que_no_existe: "x" });
-        expect(ok).toBe(false);
+        expect(await applyAndRender(assistant, { campo_que_no_existe: "x" })).toBe(false);
     });
 
     test("un campo readonly se descarta, y lo aplicable igual se aplica", async () => {
-        const ok = await assistant.applyProposal({ name: "Acme SA", ref: "R-999" });
+        const ok = await applyAndRender(assistant, { name: "Acme SA", ref: "R-999" });
         expect(ok).toBe(true);
         expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
         // El readonly quedó como estaba: nunca un "ok" silencioso sobre un cambio
@@ -114,7 +132,7 @@ describe("applyProposal — many2one", () => {
     test("un id pelado setea el m2o y muestra su nombre", async () => {
         const assistant = await mountPartnerForm();
         // Un entero pelado dejaba el campo visualmente vacío aunque el id estuviera.
-        const ok = await assistant.applyProposal({ parent_id: 2 });
+        const ok = await applyAndRender(assistant, { parent_id: 2 });
         expect(ok).toBe(true);
         expect(".o_field_widget[name=parent_id] input").toHaveValue("Beta");
     });
@@ -126,14 +144,14 @@ describe("applyProposal — one2many", () => {
         // La forma "amigable" que manda un LLM: lista de objetos planos, no
         // tuplas-comando. Antes era un NO-OP SILENCIOSO — `_applyCommands` no
         // matchea ningún case y `_update` igual resolvía "ok".
-        const ok = await assistant.applyProposal({ child_ids: [{ name: "Sucursal" }] });
+        const ok = await applyAndRender(assistant, { child_ids: [{ name: "Sucursal" }] });
         expect(ok).toBe(true);
         expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(1);
     });
 
     test("una línea nueva como tupla-comando también", async () => {
         const assistant = await mountPartnerForm();
-        const ok = await assistant.applyProposal({
+        const ok = await applyAndRender(assistant, {
             child_ids: [[0, false, { name: "Sucursal" }]],
         });
         expect(ok).toBe(true);
@@ -154,7 +172,6 @@ describe("contexto vivo", () => {
     test("los valores SIN GUARDAR viajan en el contexto", async () => {
         const assistant = await mountPartnerForm();
         await contains(".o_field_widget[name=name] input").edit("Editado a mano");
-        assistant.refreshRecordContext();
         const ctx = assistant.getContextPayload();
         // Es todo el punto del contexto vivo: el assistant trabaja sobre lo que el
         // usuario está escribiendo, no sobre lo último guardado.
@@ -162,16 +179,22 @@ describe("contexto vivo", () => {
         expect(ctx.dirty).toBe(true);
     });
 
-    test("la revisión sube cuando los valores cambian, y no cuando no", async () => {
+    test("editar un campo publica una revisión nueva sin que nadie la pida", async () => {
         const assistant = await mountPartnerForm();
         const before = assistant.getContextPayload().revision;
-        // Sin edición: un focusout no debe gastar una revisión.
+        await contains(".o_field_widget[name=name] input").edit("Otro nombre");
+        // Nadie llama a refreshRecordContext acá: lo hace el FormController al
+        // salir del campo. Que la revisión suba sola es el contrato del contexto
+        // vivo — si esto se rompe, el assistant vuelve a razonar sobre lo guardado.
+        expect(assistant.getContextPayload().revision).not.toBe(before);
+    });
+
+    test("salir de un campo sin editar no quema una revisión", async () => {
+        const assistant = await mountPartnerForm();
+        const before = assistant.getContextPayload().revision;
+        // Un focusout sin edición: misma firma de valores, no se re-publica.
         expect(assistant.refreshRecordContext()).toBe(false);
         expect(assistant.getContextPayload().revision).toBe(before);
-
-        await contains(".o_field_widget[name=name] input").edit("Otro nombre");
-        expect(assistant.refreshRecordContext()).toBe(true);
-        expect(assistant.getContextPayload().revision).not.toBe(before);
     });
 });
 
@@ -182,9 +205,12 @@ describe("conflicto de revisión", () => {
         const baseRevision = assistant.getContextPayload().revision;
         // …y mientras piensa, el usuario edita ese mismo campo a mano.
         await contains(".o_field_widget[name=name] input").edit("Lo que escribió el usuario");
-        assistant.refreshRecordContext();
 
-        const ok = await assistant.applyProposal({ name: "Lo que propuso el agente" }, { baseRevision });
+        const ok = await applyAndRender(
+            assistant,
+            { name: "Lo que propuso el agente" },
+            { baseRevision }
+        );
         expect(ok).toBe(false);
         // Gana el usuario: su valor sigue ahí.
         expect(".o_field_widget[name=name] input").toHaveValue("Lo que escribió el usuario");
@@ -193,8 +219,7 @@ describe("conflicto de revisión", () => {
     test("sin baseRevision se aplica como siempre (SPA viejo)", async () => {
         const assistant = await mountPartnerForm();
         await contains(".o_field_widget[name=name] input").edit("Lo del usuario");
-        assistant.refreshRecordContext();
-        const ok = await assistant.applyProposal({ name: "Lo del agente" });
+        const ok = await applyAndRender(assistant, { name: "Lo del agente" });
         expect(ok).toBe(true);
         expect(".o_field_widget[name=name] input").toHaveValue("Lo del agente");
     });
@@ -203,10 +228,9 @@ describe("conflicto de revisión", () => {
         const assistant = await mountPartnerForm();
         const baseRevision = assistant.getContextPayload().revision;
         await contains(".o_field_widget[name=name] input").edit("Lo del usuario");
-        assistant.refreshRecordContext();
         // El conflicto es POR CAMPO, no por registro: tocar `name` no puede
         // bloquear una propuesta sobre `email`.
-        const ok = await assistant.applyProposal({ email: "otro@example.com" }, { baseRevision });
+        const ok = await applyAndRender(assistant, { email: "otro@example.com" }, { baseRevision });
         expect(ok).toBe(true);
         expect(".o_field_widget[name=email] input").toHaveValue("otro@example.com");
     });

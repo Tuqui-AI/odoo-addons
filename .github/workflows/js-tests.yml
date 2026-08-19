@@ -7,11 +7,33 @@ name: JS tests (Hoot)
 # Un test que le pegue por RPC no lo toca, y montar el stack completo con un
 # navegador manejando el SPA es mucho más caro para cubrir menos.
 #
-# El runner es el de Odoo: `--test-tags` levanta el bundle `web.assets_unit_tests`
-# y corre los tests Hoot del addon en un navegador headless que la propia imagen
-# trae. Sin devcontainer propio y sin builds de runbot que expiran.
-#
 # Spec: assistant-en-odoo-confiabilidad §Tests reales — tarea 72555.
+#
+# ── Cómo se corren los tests Hoot, que no es obvio ──────────────────────────
+#
+# El runner NO vive en el addon: es `web.tests.test_js.WebSuite.test_unit_desktop`,
+# un HttpCase `post_install` del módulo `web` que abre Chrome headless contra
+# `/web/tests` y corre TODO el bundle `web.assets_unit_tests`. De ahí las dos
+# partes raras del comando:
+#
+#   -u web            → sin esto los post-tests de `web` no entran en la corrida
+#                       (Odoo sólo corre tests de los módulos que instala/actualiza),
+#                       y no se ejecuta un solo test JS.
+#   [@tuqui_assistant] → parámetro de tag que filtra el suite Hoot a los tests de
+#                       ESTE addon, para que un test roto del core no pinte el PR
+#                       de rojo. Sin el filtro corren miles de tests ajenos.
+#
+# ── Por qué se instalan un browser y python3-websocket ──────────────────────
+#
+# La imagen oficial `odoo:19` no trae ninguno de los dos, y cuando falta
+# cualquiera de ellos el test NO falla: hace `unittest.SkipTest` y el job queda
+# VERDE sin haber corrido nada. Por eso además del install hay un paso final que
+# verifica en el log que el suite realmente se ejecutó — un verde vacío es peor
+# que un rojo.
+#
+# Chrome no se puede reemplazar por `chromium` de Ubuntu: la imagen es noble
+# (24.04), donde `chromium-browser` es el stub de transición a snap y no arranca
+# en un container. Va el paquete de Google.
 
 on:
   push:
@@ -28,22 +50,20 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:15
+        image: postgres:16
         env:
           POSTGRES_USER: odoo
           POSTGRES_PASSWORD: odoo
           POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U odoo"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
     container:
-      # La imagen oficial trae Odoo, sus dependencias y el navegador headless que
-      # el runner de Hoot necesita. Fijada a la major del repo: una rama de
-      # versión sólo se prueba contra su propio Odoo.
+      # Fijada a la major del repo: una rama de versión sólo se prueba contra su
+      # propio Odoo. `--user root` es para poder instalar el browser; Chrome corre
+      # headless, que ya implica `--no-sandbox`, así que root no lo rompe.
       image: odoo:19
       options: --user root
     steps:
@@ -51,17 +71,46 @@ jobs:
         with:
           path: addons/tuqui-ai
 
-      - name: Run the addon's Hoot suite
-        # `-i` instala tuqui_assistant (y su dependencia `tuqui`) en una base
-        # limpia; `--test-tags` restringe la corrida a los tests de ESTE addon,
-        # así un test roto del core de Odoo no nos pinta el PR de rojo.
-        # `--stop-after-init` hace que el exit code sea el resultado de los tests.
+      - name: Install the test browser and the websocket client
         run: |
+          set -eux
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            ca-certificates gnupg wget python3-websocket
+          wget -qO- https://dl.google.com/linux/linux_signing_key.pub \
+            | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+            > /etc/apt/sources.list.d/google-chrome.list
+          apt-get update -qq
+          apt-get install -y --no-install-recommends google-chrome-stable
+          google-chrome --version
+          python3 -c "import websocket"
+
+      - name: Run the addon's Hoot suite
+        run: |
+          set -o pipefail
           odoo \
             --db_host postgres --db_user odoo --db_password odoo \
             --addons-path "/usr/lib/python3/dist-packages/odoo/addons,${GITHUB_WORKSPACE}/addons/tuqui-ai" \
+            --data-dir /tmp/odoo-data \
             -d hoot_test \
-            -i tuqui_assistant \
-            --test-tags "/tuqui_assistant" \
+            -i tuqui_assistant -u web \
+            --without-demo=True \
+            --test-enable \
+            --test-tags "/web:WebSuite.test_unit_desktop[@tuqui_assistant]" \
             --stop-after-init \
-            --log-level=test
+            --log-level=test 2>&1 | tee /tmp/hoot.log
+
+      - name: Fail if the suite did not actually run
+        # Red de seguridad contra el verde vacío: si faltó el browser, si faltó
+        # websocket-client o si el filtro dejó de matchear (por un rename del
+        # addon o de los archivos de test), arriba no falla nada. Acá sí.
+        run: |
+          if ! grep -q '\[HOOT\] "@tuqui_assistant" ended' /tmp/hoot.log; then
+            echo "::error::El suite Hoot de tuqui_assistant no se ejecutó."
+            echo "Revisá si el job se salteó los tests (browser o websocket-client"
+            echo "ausentes) o si el filtro --test-tags dejó de matchear."
+            grep -iE 'skip|not installed' /tmp/hoot.log || true
+            exit 1
+          fi
+          grep '\[HOOT\] "@tuqui_assistant" ended' /tmp/hoot.log
