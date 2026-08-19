@@ -6,6 +6,13 @@ import { _t } from "@web/core/l10n/translation";
 // Guard de tamaño para ids de campos x2many enviados como contexto al SPA.
 const MAX_X2MANY_IDS = 50;
 
+// Guard de tamaño para los ids de una selección de lista/kanban. Espeja el
+// límite duro de registros por corrida multi-registro del backend
+// (`batch_service.MAX_RECORDS`): por encima de eso el assistant no corre el
+// batch igual, así que mandar más ids es contexto pago sin uso. El `count`
+// sigue siendo el real — es lo que necesita para derivar a automatización.
+const MAX_SELECTION_IDS = 50;
+
 /**
  * Estado compartido + puente (bridge) entre el panel del asistente y lo que el
  * usuario está mirando en Odoo.
@@ -387,6 +394,40 @@ export const tuquiAssistantService = {
         // from the dialog restores it instead of clearing it.
         let _contextStack = [];
 
+        // --- Contexto vivo: revisión + snapshots ---------------------------------
+        // `_revision` es un contador monotónico del contexto de formulario. Sube
+        // cuando cambia el record publicado y cuando los valores EN MEMORIA cambian
+        // (on-blur, debounced desde el FormController). Viaja en el payload y vuelve
+        // en la propuesta como `baseRevision`: con eso sabemos sobre qué valores
+        // razonó el assistant y detectamos conflicto en vez de pisar en silencio.
+        let _revision = 0;
+        // Firma de los últimos valores publicados: evita re-publicar (y quemar una
+        // revisión) cuando el usuario sale de un campo sin haber editado nada.
+        let _lastFieldsSig = null;
+        // Snapshots de lo publicado, por revisión. Ring chico: el SPA propone sobre
+        // la última revisión o una muy cercana; guardar más es memoria al pedo.
+        const _MAX_SNAPSHOTS = 10;
+        const _snapshots = new Map();
+
+        /** Firma JSON de los valores en memoria, o null si no se pudo serializar. */
+        function _fieldsSignature(record) {
+            if (!record) {
+                return null;
+            }
+            try {
+                return JSON.stringify(serializeRecordFields(record));
+            } catch {
+                return null;
+            }
+        }
+
+        function _rememberSnapshot(revision, fields) {
+            _snapshots.set(revision, fields);
+            while (_snapshots.size > _MAX_SNAPSHOTS) {
+                _snapshots.delete(_snapshots.keys().next().value);
+            }
+        }
+
         function _makeRecordContext(record) {
             return {
                 kind: "record",
@@ -394,6 +435,7 @@ export const tuquiAssistantService = {
                 resId: record.resId,
                 displayName: record.data?.display_name || record.data?.name || "",
                 dirty: Boolean(record.dirty),
+                revision: _revision,
             };
         }
 
@@ -407,7 +449,39 @@ export const tuquiAssistantService = {
             }
             _owner = owner;
             activeRecord = record || null;
+            // Record nuevo → revisión nueva, y la firma arranca de sus valores
+            // actuales (un focusout inmediato sin edición no debe re-publicar).
+            _revision += 1;
+            _lastFieldsSig = _fieldsSignature(activeRecord);
             state.context = record ? _makeRecordContext(record) : null;
+        }
+
+        /**
+         * Re-publica el contexto del form si los valores EN MEMORIA cambiaron.
+         * La llama el FormController al salir de un campo (`focusout`, debounced):
+         * el assistant tiene que ver lo que el usuario está escribiendo sin guardar,
+         * pero sin una revisión por tecla — eso infla el contexto de cada turno
+         * (costo de LLM y ruido) sin agregar valor. Ver la spec
+         * `assistant-en-odoo-confiabilidad` §Contexto vivo.
+         *
+         * No-op si no hay form abierto, si el llamador no es el dueño del contexto
+         * (p.ej. el form de abajo mientras hay un diálogo arriba) o si nada cambió.
+         *
+         * @param {Object} [owner] controller que llama; si no es el dueño, no hace nada
+         * @returns {boolean} true si publicó una revisión nueva
+         */
+        function refreshRecordContext(owner) {
+            if (!activeRecord || (owner && _owner !== owner)) {
+                return false;
+            }
+            const sig = _fieldsSignature(activeRecord);
+            if (sig === null || sig === _lastFieldsSig) {
+                return false;
+            }
+            _lastFieldsSig = sig;
+            _revision += 1;
+            state.context = _makeRecordContext(activeRecord);
+            return true;
         }
 
         /**
@@ -428,11 +502,19 @@ export const tuquiAssistantService = {
                     allMatching: true,
                 };
             } else if (resIds.length) {
+                // `count` es la selección REAL; `resIds` va capeado en
+                // MAX_SELECTION_IDS. Mandar 500 ids infla el contexto de cada
+                // turno para nada: por encima del límite el assistant no corre
+                // el batch, deriva a automatización — y para decir eso le
+                // alcanza con el count. Cuando la selección excede el cap, el
+                // truncado es EXPLÍCITO (`truncated`) para que no crea que
+                // tiene la lista entera.
                 state.context = {
                     kind: "selection",
                     model: payload.model,
                     count: resIds.length,
-                    resIds,
+                    resIds: resIds.slice(0, MAX_SELECTION_IDS),
+                    truncated: resIds.length > MAX_SELECTION_IDS,
                 };
             } else {
                 state.context = {
@@ -467,6 +549,11 @@ export const tuquiAssistantService = {
             if (parent) {
                 _owner = parent.owner;
                 activeRecord = parent.record;
+                // Volver al form de abajo es contexto nuevo para el SPA: revisión
+                // nueva y firma re-sincronizada con lo que el record tiene AHORA
+                // (el diálogo pudo haberlo cambiado).
+                _revision += 1;
+                _lastFieldsSig = _fieldsSignature(parent.record);
                 // Re-build from the live record so dirty reflects current state.
                 state.context = parent.record ? _makeRecordContext(parent.record) : parent.context;
             } else {
@@ -590,7 +677,14 @@ export const tuquiAssistantService = {
             // que llevan son JSON-safe (arrays/strings/números/booleanos), así que
             // un round-trip por JSON es seguro y suficiente.
             try {
-                return JSON.parse(JSON.stringify(ctx));
+                const flat = JSON.parse(JSON.stringify(ctx));
+                if (flat.kind === "record" && flat.fields) {
+                    // Guardamos EXACTAMENTE lo que ve el SPA en esta revisión: es la
+                    // base contra la que `applyProposal` mide el conflicto cuando la
+                    // propuesta vuelve con su `baseRevision`.
+                    _rememberSnapshot(flat.revision, flat.fields);
+                }
+                return flat;
             } catch {
                 // Defensa: si algo no fuese serializable, devolvé al menos la
                 // identidad mínima en vez de nada (mejor contexto parcial que cero).
@@ -603,7 +697,7 @@ export const tuquiAssistantService = {
          * Requiere modo "record" (hay activeRecord). Origen: panel (fallback) o
          * iframe del SPA (tool propose_odoo_form_changes vía postMessage).
          */
-        async function applyProposal(changes) {
+        async function applyProposal(changes, options) {
             if (!activeRecord) {
                 notification.add(
                     _t("Open a form (1 record) to apply changes from here."),
@@ -636,6 +730,44 @@ export const tuquiAssistantService = {
                     _t("Skipped fields that cannot be edited in this form: %s", dropped.join(", ")),
                     { type: "warning" }
                 );
+            }
+            // Conflicto de contexto vivo: la propuesta razonó sobre los valores de
+            // `baseRevision`. Si el usuario cambió alguno de esos campos DESPUÉS, no
+            // lo pisamos en silencio — lo sacamos de la propuesta y lo decimos, para
+            // que vuelva a pedir sobre el valor actual. Sin `baseRevision` (SPA viejo)
+            // o con la revisión ya fuera del ring, no hay contra qué comparar: se
+            // aplica como antes.
+            const baseRevision = options?.baseRevision;
+            const stale = [];
+            if (typeof baseRevision === "number" && _snapshots.has(baseRevision)) {
+                const snapshot = _snapshots.get(baseRevision);
+                const current = serializeRecordFields(activeRecord);
+                for (const name of Object.keys(known)) {
+                    if (!(name in snapshot)) {
+                        continue; // no viajó en ese contexto: nada con qué comparar
+                    }
+                    if (JSON.stringify(current[name]) !== JSON.stringify(snapshot[name])) {
+                        stale.push(name);
+                    }
+                }
+            }
+            for (const name of stale) {
+                delete known[name];
+            }
+            if (stale.length) {
+                notification.add(
+                    _t(
+                        "Not applied because you changed them after the proposal: %s. Ask again to work on the current value.",
+                        stale.join(", ")
+                    ),
+                    { type: "warning" }
+                );
+                if (!Object.keys(known).length) {
+                    // Todo lo propuesto quedó obsoleto. Ya dijimos por qué; el
+                    // mensaje genérico de abajo ("ningún campo aplica al form")
+                    // sería falso — los campos aplican, el valor cambió.
+                    return false;
+                }
             }
             if (!Object.keys(known).length) {
                 notification.add(
@@ -765,6 +897,11 @@ export const tuquiAssistantService = {
                 );
                 return false;
             }
+            // Re-publicar: los valores que acabamos de aplicar son el nuevo estado
+            // sobre el que el assistant tiene que razonar. Sin esto, una segunda
+            // propuesta sobre la misma `baseRevision` leería su propio cambio como
+            // conflicto del usuario.
+            refreshRecordContext();
             notification.add(
                 _t("Changes applied to the form (unsaved). Review and Save or Discard."),
                 { type: "success" }
@@ -931,6 +1068,7 @@ export const tuquiAssistantService = {
         return {
             state,
             setRecordContext,
+            refreshRecordContext,
             setSearchContext,
             clearContext,
             togglePanel,
