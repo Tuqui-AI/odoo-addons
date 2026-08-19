@@ -1068,6 +1068,16 @@ export const tuquiAssistantService = {
                 console.warn("[tuqui_assistant] Could not reload the view:", e);
                 return false;
             }
+            // `model.load()` REEMPLAZA el root del modelo: el record que teníamos
+            // publicado queda DESCONECTADO, con los valores de antes del reload.
+            // Si no lo re-apuntamos, el contexto sigue mostrando lo viejo y —peor—
+            // la próxima propuesta se aplica sobre un datapoint que ya no está
+            // renderizado: nada cambia en pantalla y `applyProposal` igual devuelve
+            // true. Ese "ok silencioso" es justo lo que esta feature no puede
+            // introducir. En modo lista no hay record publicado y no se toca.
+            if (activeRecord && viewModel.root) {
+                activeRecord = viewModel.root;
+            }
             // Re-publicar: lo que se acaba de releer es el contexto nuevo sobre el
             // que el assistant tiene que razonar en el próximo turno.
             refreshRecordContext();

@@ -60,6 +60,13 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+    defaults:
+      run:
+        # El job corre DENTRO del container, donde Actions resuelve el shell por
+        # su cuenta y puede caer en `sh` (dash): ahí `set -o pipefail` es un error
+        # de sintaxis y el paso muere antes de correr un solo test. La imagen trae
+        # bash; se lo pedimos explícito.
+        shell: bash
     container:
       # Fijada a la major del repo: una rama de versión sólo se prueba contra su
       # propio Odoo. `--user root` es para poder instalar el browser; Chrome corre
