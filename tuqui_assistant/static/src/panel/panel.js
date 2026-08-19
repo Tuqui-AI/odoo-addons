@@ -263,7 +263,10 @@ export class TuquiPanel extends Component {
                 // Include dirty: when the user edits a field (many2one, etc.) the
                 // form becomes dirty, state.context updates, and the panel re-pushes
                 // fresh field values to the SPA.
-                return `record:${c.model}:${c.resId}:${c.dirty}`;
+                // Include revision: `dirty` es booleano y flipea UNA vez, así que no
+                // alcanza para el contexto vivo. La revisión sube cada vez que los
+                // valores en memoria cambian (on-blur, debounced) → re-push.
+                return `record:${c.model}:${c.resId}:${c.dirty}:${c.revision}`;
             case "selection":
                 return `sel:${c.model}:${c.count}:${(c.resIds || []).length}`;
             case "list":
@@ -395,7 +398,12 @@ export class TuquiPanel extends Component {
                 this._postContext();
                 break;
             case "apply":
-                this.tuquiAssistant.applyProposal(data.payload?.changes || {});
+                // `baseRevision` (opcional): la revisión del contexto sobre la que
+                // el SPA razonó. Con eso el servicio detecta si el usuario tocó
+                // alguno de esos campos después y no lo pisa en silencio.
+                this.tuquiAssistant.applyProposal(data.payload?.changes || {}, {
+                    baseRevision: data.payload?.baseRevision,
+                });
                 break;
             case "chatter":
                 // Chatter content proposal: opens the standard Odoo composer

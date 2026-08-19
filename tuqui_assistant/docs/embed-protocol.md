@@ -57,7 +57,8 @@ Host (Odoo) → SPA (iframe):
     "client_id": "…", "nonce": "…" } }                  // SSO: antes del contexto
 { "source": "tuqui-odoo", "type": "context", "payload": {
     "model": "helpdesk.ticket", "resId": 42, "displayName": "INC-0042",
-    "dirty": true, "fields": { /* valores en memoria, incl. sin guardar */ } } }
+    "dirty": true, "revision": 7,
+    "fields": { /* valores en memoria, incl. sin guardar */ } } }
 ```
 
 SPA (iframe) → Host (Odoo):
@@ -65,10 +66,47 @@ SPA (iframe) → Host (Odoo):
 ```jsonc
 { "source": "tuqui-spa", "type": "ready" }                         // montado; el host responde con auth + context
 { "source": "tuqui-spa", "type": "apply",
-  "payload": { "changes": { "campo": "valor" }, "rationale": "…" } } // aplicar al form en memoria
+  "payload": { "changes": { "campo": "valor" }, "rationale": "…",
+               "baseRevision": 7 } }                                // aplicar al form en memoria
 { "source": "tuqui-spa", "type": "chatter",
   "payload": { "mode": "…", "body": "…", "subject": "…" } }          // pre-carga el compositor nativo (nunca publica solo)
 ```
+
+## Contexto vivo y conflicto (`revision` / `baseRevision`)
+
+El contexto del form no se manda una sola vez: se re-manda **mientras el usuario
+edita**, para que el assistant trabaje sobre lo que está escribiendo sin guardar.
+
+- **Cadencia:** al salir de un campo (`focusout`) con **debounce de 400 ms** —
+  nunca por tecla. Una revisión por tecla infla el contexto de cada turno (costo
+  de LLM y ruido) sin agregar valor. El disparador vive en
+  `form_controller_patch.js`; el servicio compara contra lo último publicado y
+  **no** gasta una revisión si nada cambió.
+- **`revision`** (host → SPA): contador monotónico del contexto de formulario.
+  Sube al cambiar de record y cada vez que los valores en memoria cambian. El
+  host guarda un snapshot de los valores publicados en cada revisión (ring de
+  las últimas 10).
+- **`baseRevision`** (SPA → host, en `apply`): la revisión sobre la que el SPA
+  razonó. El host compara, campo por campo, el valor actual contra el snapshot
+  de esa revisión: **si el usuario cambió un campo después de la propuesta, ese
+  campo NO se aplica** y el usuario ve por qué. Nunca se pisa en silencio.
+  Si el `apply` viene sin `baseRevision` (SPA viejo) o la revisión ya salió del
+  ring, no hay contra qué comparar y se aplica como antes.
+
+## Selección de lista y multi-registro
+
+Cuando el usuario tiene N filas seleccionadas, el contexto baja como
+`kind:"selection"` con `count` (la selección REAL) y `resIds` **capeado en 50**
+(`MAX_SELECTION_IDS`, que espeja el `batch_service.MAX_RECORDS` del backend). Si
+se cortó, el payload lo dice con `truncated: true` — el agente no tiene que
+creer que recibió la lista entera.
+
+La corrida multi-registro **no pasa por `postMessage`**: el SPA llama a la tool
+`run_over_selection`, que persiste un batch del lado de Tuqui y lo corre en
+background. Eso es lo que hace que sobreviva a que se cierre el panel; el
+resultado de cada registro queda como **nota interna en su chatter**, y el
+reporte por registro se consulta con `check_selection_run`. Nada de eso necesita
+que el iframe siga vivo.
 
 `targetOrigin`: el host usa `new URL(base_url).origin`. El host valida que cada
 mensaje entrante venga del iframe montado (`ev.source === iframe.contentWindow`)
