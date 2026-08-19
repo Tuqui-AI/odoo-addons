@@ -988,6 +988,56 @@ export const tuquiAssistantService = {
          *
          * @returns {Promise<boolean>} true si efectivamente recargó
          */
+        /**
+         * Guarda el formulario abierto — el mismo Guardar que apretaría el usuario.
+         * Lo pide el SPA cuando el usuario dice "guardá" (tool `save_odoo_form`).
+         *
+         * NO es un atajo para que el assistant confirme sus propias propuestas: el
+         * propose-then-apply existe para que el usuario revise antes de que algo se
+         * escriba, y guardar por él le saca justo eso. La tool del backend se lo
+         * dice al modelo; acá guardamos igual porque quien decide es el usuario.
+         *
+         * La validación es de Odoo: campos requeridos, constraints y reglas de
+         * acceso siguen aplicando, y un guardado rechazado se ve en Odoo.
+         *
+         * @returns {Promise<boolean>} true si guardó
+         */
+        async function saveRecord() {
+            if (!activeRecord) {
+                notification.add(_t("Open a form (1 record) to save it from here."), {
+                    type: "warning",
+                });
+                return false;
+            }
+            if (!activeRecord.dirty) {
+                notification.add(_t("Nothing to save — the form has no pending changes."), {
+                    type: "info",
+                });
+                return false;
+            }
+            let saved = false;
+            try {
+                saved = await activeRecord.save();
+            } catch (e) {
+                notification.add(_t("Could not save: %s", e.message || e), { type: "danger" });
+                return false;
+            }
+            if (!saved) {
+                // `save()` devuelve false cuando Odoo rechazó (requerido vacío,
+                // constraint). Odoo ya marcó el campo en rojo; no lo tapamos con
+                // un toast propio, pero tampoco decimos que salió bien.
+                notification.add(
+                    _t("Odoo did not save the form — check the fields it marked."),
+                    { type: "warning" }
+                );
+                return false;
+            }
+            // Guardado: el registro dejó de estar sucio y los computados cambiaron.
+            refreshRecordContext();
+            notification.add(_t("Form saved."), { type: "success" });
+            return true;
+        }
+
         async function reloadView() {
             const viewModel = _owner?.model;
             if (!viewModel) {
@@ -1130,6 +1180,7 @@ export const tuquiAssistantService = {
             proposeChatter,
             navigate,
             reloadView,
+            saveRecord,
             getEmbedBootstrap,
             getSsoAuth,
             getContextPayload,

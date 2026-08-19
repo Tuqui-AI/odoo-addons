@@ -71,6 +71,7 @@ SPA (iframe) → Host (Odoo):
 { "source": "tuqui-spa", "type": "chatter",
   "payload": { "mode": "…", "body": "…", "subject": "…" } }          // pre-carga el compositor nativo (nunca publica solo)
 { "source": "tuqui-spa", "type": "reload" }                        // releer la vista tras una escritura por atrás
+{ "source": "tuqui-spa", "type": "save" }                          // guardar el form abierto (lo pidió el usuario)
 ```
 
 ## Contexto vivo y conflicto (`revision` / `baseRevision`)
@@ -107,6 +108,29 @@ guardar, y perder lo que alguien estaba escribiendo es mucho peor que mostrar un
 dato viejo un rato. En ese caso el host avisa y deja que el usuario guarde o
 descarte. Después de recargar se re-publica el contexto, así el próximo turno
 razona sobre los valores nuevos.
+
+## Guardar el formulario (`save`)
+
+`save` aprieta el mismo Guardar que apretaría el usuario, y existe porque
+"guardalo" es lo obvio para decirle a un asistente embebido en ese formulario.
+
+Dos cosas que NO cambia:
+
+- **No es un atajo para que el assistant confirme sus propias propuestas.** El
+  propose-then-apply existe para que el usuario revise antes de que algo se
+  escriba; guardar por él le saca justo eso. La tool del backend se lo prohíbe
+  explícitamente al modelo — sólo va cuando el usuario lo pide.
+- **La validación sigue siendo de Odoo.** Requeridos, constraints y reglas de
+  acceso aplican igual, y un guardado rechazado se reporta como rechazado en vez
+  de cantar victoria.
+
+**Nota sobre el ciclo de vida de una propuesta:** una propuesta aplicada queda en
+el formulario SIN guardar, pero si el usuario **navega a otra pantalla Odoo la
+guarda solo** — no la descarta. Así que "no se guarda hasta que vos guardes" es
+falso; lo cierto es "hasta que guardes o te vayas de la pantalla". El prompt del
+contexto de record se lo dice al modelo, y por eso también le prohíbe llamar a
+`open_odoo_view` justo después de proponer: navegar commitea una propuesta que el
+usuario todavía no miró.
 
 ## Selección de lista y multi-registro
 

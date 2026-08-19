@@ -33,6 +33,7 @@ import { _t } from "@web/core/l10n/translation";
  *              { source: "tuqui-spa",  type: "chatter",  payload: { mode, body, subject } }
  *              { source: "tuqui-spa",  type: "navigate", payload: { model, mode, viewType, domain, defaults, title } }
  *              { source: "tuqui-spa",  type: "reload" }   // releer la vista tras una escritura por atrás
+ *              { source: "tuqui-spa",  type: "save" }     // guardar el form abierto (lo pidió el usuario)
  *              { source: "tuqui-spa",  type: "location", payload: { path } }
  *              { source: "tuqui-spa",  type: "external-link-opening" }
  *
@@ -411,6 +412,11 @@ export class TuquiPanel extends Component {
                 // pre-filled (user reviews and sends). NEVER posted silently —
                 // human dispatch is structural.
                 this.tuquiAssistant.proposeChatter(data.payload || {});
+                break;
+            case "save":
+                // El usuario pidió guardar. Odoo valida; si rechaza, el servicio
+                // lo dice en vez de cantar victoria.
+                this.tuquiAssistant.saveRecord();
                 break;
             case "reload":
                 // El turno escribió en Odoo por atrás: los datos de la vista
