@@ -70,6 +70,7 @@ SPA (iframe) → Host (Odoo):
                "baseRevision": 7 } }                                // aplicar al form en memoria
 { "source": "tuqui-spa", "type": "chatter",
   "payload": { "mode": "…", "body": "…", "subject": "…" } }          // pre-carga el compositor nativo (nunca publica solo)
+{ "source": "tuqui-spa", "type": "reload" }                        // releer la vista tras una escritura por atrás
 ```
 
 ## Contexto vivo y conflicto (`revision` / `baseRevision`)
@@ -92,6 +93,20 @@ edita**, para que el assistant trabaje sobre lo que está escribiendo sin guarda
   campo NO se aplica** y el usuario ve por qué. Nunca se pisa en silencio.
   Si el `apply` viene sin `baseRevision` (SPA viejo) o la revisión ya salió del
   ring, no hay contra qué comparar y se aplica como antes.
+
+## Reload de la vista (`reload`)
+
+Cuando un turno escribe en Odoo **por atrás** (`odoo_write`, `odoo_create`,
+`odoo_message_post`…), la base ya cambió pero la vista abierta sigue mostrando
+lo viejo: el usuario lee "listo, actualicé los 3 contactos" arriba de tres filas
+sin tocar. El SPA cierra ese hueco posteando `reload` al terminar el turno, y el
+host relee los datos de la vista sin recargar la página.
+
+**Regla dura: un formulario sucio NO se recarga.** Recargar tira los cambios sin
+guardar, y perder lo que alguien estaba escribiendo es mucho peor que mostrar un
+dato viejo un rato. En ese caso el host avisa y deja que el usuario guarde o
+descarte. Después de recargar se re-publica el contexto, así el próximo turno
+razona sobre los valores nuevos.
 
 ## Selección de lista y multi-registro
 
