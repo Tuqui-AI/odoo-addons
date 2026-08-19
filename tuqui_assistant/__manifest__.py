@@ -1,6 +1,6 @@
 {
     "name": "Tuqui Assistant",
-    "version": "19.0.1.3.0",
+    "version": "19.0.1.4.0",
     "category": "Productivity",
     "summary": "Asistente Tuqui embebido en Odoo: chat contextual + propose-then-apply sobre el formulario",
     "author": "Tuqui-AI",
@@ -16,6 +16,12 @@
     "assets": {
         "web.assets_backend": [
             "tuqui_assistant/static/src/**/*",
+        ],
+        # Tests de interacción (Hoot). Corren con el runner del propio Odoo, sin
+        # LLM y sin navegador externo: montan un form view real y ejercitan el
+        # propose-apply contra el record model de verdad.
+        "web.assets_unit_tests": [
+            "tuqui_assistant/static/tests/**/*",
         ],
     },
     "installable": True,

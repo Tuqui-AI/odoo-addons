@@ -1193,7 +1193,7 @@ export const tuquiAssistantService = {
 registry.category("services").add("tuquiAssistant", tuquiAssistantService);
 
 // Helpers puros de normalización x2many, exportados para test en aislamiento
-// (sin montar el servicio OWL). Ver embed_apply_x2many_normalize_test.js.
+// (sin montar el servicio OWL). Ver static/tests/proposal_normalize.test.js.
 export {
     normalizeX2manyValue,
     normalizeProposalX2many,

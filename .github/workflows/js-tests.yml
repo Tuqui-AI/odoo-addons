@@ -1,0 +1,67 @@
+name: JS tests (Hoot)
+
+# Tests de interacción del assistant contra un Odoo de verdad, sin LLM.
+#
+# Por qué acá y no en el repo de Tuqui: lo que se rompe es JavaScript que corre
+# DENTRO del cliente web de Odoo (`applyProposal` sobre el record model de OWL).
+# Un test que le pegue por RPC no lo toca, y montar el stack completo con un
+# navegador manejando el SPA es mucho más caro para cubrir menos.
+#
+# El runner es el de Odoo: `--test-tags` levanta el bundle `web.assets_unit_tests`
+# y corre los tests Hoot del addon en un navegador headless que la propia imagen
+# trae. Sin devcontainer propio y sin builds de runbot que expiran.
+#
+# Spec: assistant-en-odoo-confiabilidad §Tests reales — tarea 72555.
+
+on:
+  push:
+    branches:
+      - "1[8-9].0"
+      - "[2-9][0-9].0"
+  pull_request:
+    branches:
+      - "1[8-9].0*"
+      - "[2-9][0-9].0*"
+
+jobs:
+  hoot:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: odoo
+          POSTGRES_PASSWORD: odoo
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U odoo"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    container:
+      # La imagen oficial trae Odoo, sus dependencias y el navegador headless que
+      # el runner de Hoot necesita. Fijada a la major del repo: una rama de
+      # versión sólo se prueba contra su propio Odoo.
+      image: odoo:19
+      options: --user root
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: addons/tuqui-ai
+
+      - name: Run the addon's Hoot suite
+        # `-i` instala tuqui_assistant (y su dependencia `tuqui`) en una base
+        # limpia; `--test-tags` restringe la corrida a los tests de ESTE addon,
+        # así un test roto del core de Odoo no nos pinta el PR de rojo.
+        # `--stop-after-init` hace que el exit code sea el resultado de los tests.
+        run: |
+          odoo \
+            --db_host postgres --db_user odoo --db_password odoo \
+            --addons-path "/usr/lib/python3/dist-packages/odoo/addons,${GITHUB_WORKSPACE}/addons/tuqui-ai" \
+            -d hoot_test \
+            -i tuqui_assistant \
+            --test-tags "/tuqui_assistant" \
+            --stop-after-init \
+            --log-level=test
