@@ -976,6 +976,55 @@ export const tuquiAssistantService = {
         const BROWSE_VIEW_TYPES = ["list", "kanban", "pivot", "graph", "calendar", "form"];
 
         /**
+         * Recarga los datos de la vista abierta (form o lista) sin recargar la
+         * página. La pide el SPA después de un turno que escribió en Odoo por
+         * atrás (`odoo_write`, `odoo_create`, `message_post`…): el dato ya cambió
+         * en la base pero la vista sigue mostrando lo viejo, y el usuario lee al
+         * assistant decir "listo" arriba de datos que no se movieron.
+         *
+         * REGLA DURA: si el registro está sucio NO recargamos. Recargar tira los
+         * cambios sin guardar — perder lo que alguien estaba escribiendo es mucho
+         * peor que mostrar un dato viejo un rato. Ahí avisamos y decide él.
+         *
+         * @returns {Promise<boolean>} true si efectivamente recargó
+         */
+        async function reloadView() {
+            const viewModel = _owner?.model;
+            if (!viewModel) {
+                return false; // sin vista publicada (home, settings…): nada que recargar
+            }
+            if (activeRecord?.dirty) {
+                notification.add(
+                    _t(
+                        "Data changed in Odoo, but the form has unsaved changes so it was not reloaded. Save or discard to see the new values."
+                    ),
+                    { type: "warning" }
+                );
+                return false;
+            }
+            try {
+                // `model.load()` es el camino del propio Odoo para releer una vista;
+                // en las que no lo exponen, el root del modelo sí sabe recargarse.
+                if (typeof viewModel.load === "function") {
+                    await viewModel.load();
+                } else if (typeof viewModel.root?.load === "function") {
+                    await viewModel.root.load();
+                } else {
+                    return false;
+                }
+            } catch (e) {
+                // Un reload fallido no es un error del usuario: el dato está en la
+                // base y se ve al refrescar a mano. Consola, sin toast.
+                console.warn("[tuqui_assistant] Could not reload the view:", e);
+                return false;
+            }
+            // Re-publicar: lo que se acaba de releer es el contexto nuevo sobre el
+            // que el assistant tiene que razonar en el próximo turno.
+            refreshRecordContext();
+            return true;
+        }
+
+        /**
          * Navega la UI de Odoo desde el chat embebido (tool open_odoo_view del
          * SPA vía postMessage). NO escribe nada: abre una pantalla con el
          * act_window estándar de Odoo (que chequea permisos como cualquier acción).
@@ -1080,6 +1129,7 @@ export const tuquiAssistantService = {
             applyProposal,
             proposeChatter,
             navigate,
+            reloadView,
             getEmbedBootstrap,
             getSsoAuth,
             getContextPayload,
