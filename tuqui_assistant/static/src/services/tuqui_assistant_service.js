@@ -895,6 +895,15 @@ export const tuquiAssistantService = {
                     ),
                     { type: "warning" }
                 );
+                // Re-publicar IGUAL antes de salir: el aviso dice "Changes
+                // applied, but…", o sea que los escalares del mismo payload SÍ
+                // entraron. Sin esto el contexto se queda en la revisión previa y
+                // la próxima propuesta sobre esa misma baseRevision lee nuestro
+                // propio cambio como una edición del usuario, y contesta que no
+                // aplica por conflicto. Es exactamente lo que el comentario de
+                // abajo dice que el re-publish evita — sólo que este camino se
+                // iba antes de llegar ahí.
+                refreshRecordContext();
                 return false;
             }
             // Re-publicar: los valores que acabamos de aplicar son el nuevo estado
