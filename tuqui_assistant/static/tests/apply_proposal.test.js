@@ -41,8 +41,12 @@ class Partner extends models.Model {
     child_ids = fields.One2many({ relation: "res.partner", relation_field: "parent_id" });
 
     _records = [
-        { id: 1, name: "Acme", email: "acme@example.com", ref: "R-1" },
+        // `child_ids` se declara explícito: el mock NO lo puebla desde la relación
+        // inversa, así que sin esto la lista arranca vacía y un LINK siempre la
+        // hace crecer — que es justo lo contrario del caso que hay que probar.
+        { id: 1, name: "Acme", email: "acme@example.com", ref: "R-1", child_ids: [3] },
         { id: 2, name: "Beta", email: "beta@example.com" },
+        { id: 3, name: "Sucursal" },
     ];
 }
 
@@ -144,18 +148,18 @@ describe("applyProposal — one2many", () => {
         // La forma "amigable" que manda un LLM: lista de objetos planos, no
         // tuplas-comando. Antes era un NO-OP SILENCIOSO — `_applyCommands` no
         // matchea ningún case y `_update` igual resolvía "ok".
-        const ok = await applyAndRender(assistant, { child_ids: [{ name: "Sucursal" }] });
+        const ok = await applyAndRender(assistant, { child_ids: [{ name: "Nueva" }] });
         expect(ok).toBe(true);
-        expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(1);
+        expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(2);
     });
 
     test("una línea nueva como tupla-comando también", async () => {
         const assistant = await mountPartnerForm();
         const ok = await applyAndRender(assistant, {
-            child_ids: [[0, false, { name: "Sucursal" }]],
+            child_ids: [[0, false, { name: "Nueva" }]],
         });
         expect(ok).toBe(true);
-        expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(1);
+        expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(2);
     });
 });
 
@@ -233,5 +237,41 @@ describe("conflicto de revisión", () => {
         const ok = await applyAndRender(assistant, { email: "otro@example.com" }, { baseRevision });
         expect(ok).toBe(true);
         expect(".o_field_widget[name=email] input").toHaveValue("otro@example.com");
+    });
+});
+
+describe("applyProposal — lo que se aplicó a medias", () => {
+    /**
+     * Una propuesta puede entrar en parte: los escalares se aplican y la línea
+     * nueva no. `applyProposal` avisa y devuelve false, pero lo que SÍ entró está
+     * en el formulario, así que el contexto publicado tiene que reflejarlo. Si se
+     * queda en la revisión previa, el assistant sigue razonando sobre valores que
+     * él mismo ya cambió.
+     *
+     * Para provocar el "no creció": un LINK a una fila que YA está en la lista.
+     * El campo se marca como "se espera que crezca" y el conteo no sube, que es
+     * exactamente la señal de "pedí agregar y no se agregó".
+     *
+     * Y el formulario arranca SUCIO a propósito. Con un record limpio, aplicar lo
+     * ensucia, y esa transición ya hace que el FormController re-publique el
+     * contexto por su cuenta — tapando el agujero sin arreglarlo. Sobre un
+     * formulario que el usuario ya venía editando no hay transición que lo tape,
+     * y es además el caso realista: se propone sobre algo a medio llenar.
+     */
+    test("el contexto refleja lo que sí entró, aunque el form ya estuviera sucio", async () => {
+        const assistant = await mountPartnerForm();
+        await contains(".o_field_widget[name=email] input").edit("editado@example.com");
+        const revisionBefore = assistant.getContextPayload().revision;
+
+        const ok = await applyAndRender(assistant, { name: "Acme SA", child_ids: [[4, 3]] });
+        // La línea no se agregó (ya estaba), así que la propuesta NO entró entera.
+        expect(ok).toBe(false);
+        expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(1);
+        // …pero el nombre sí, y eso es lo que hay que re-publicar.
+        expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
+
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fields.name).toBe("Acme SA");
+        expect(ctx.revision).not.toBe(revisionBefore);
     });
 });
