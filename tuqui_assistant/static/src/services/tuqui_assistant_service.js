@@ -925,6 +925,32 @@ export const tuquiAssistantService = {
          *
          * @param {{mode?: string, body?: string, subject?: string}} payload
          */
+        /**
+         * Refresca lo que quedó viejo después de postear desde el composer.
+         *
+         * Hacen falta las DOS cosas, y con una sola no alcanza: `model.load()`
+         * relee el registro pero NO el chatter, que es un componente aparte con
+         * su propio store — verificado contra un Odoo real, el mensaje quedaba
+         * en la base y el hilo seguía diciendo "The conversation is empty".
+         * Odoo hace lo mismo en su composer nativo: refetch del thread y reload
+         * de la vista de atrás (ver mail/static/src/chatter/web/chatter_patch.js,
+         * onCloseFullComposerCallback).
+         *
+         * `mail.store` se toma acá y no como dependencia declarada porque este
+         * addon no depende de `mail`: si no está instalado, no hay chatter que
+         * refrescar y el reload de la vista alcanza.
+         */
+        async function refreshAfterChatterPost(model, resId) {
+            try {
+                const thread = env.services["mail.store"]?.Thread?.insert({ model, id: resId });
+                await thread?.fetchNewMessages();
+            } catch (e) {
+                // El mensaje YA se posteó; no poder refrescar es cosmético.
+                console.warn("[tuqui_assistant] Could not refresh the chatter:", e);
+            }
+            await reloadView();
+        }
+
         async function proposeChatter({ mode, body, subject } = {}) {
             const ctx = state.context;
             if (!ctx || ctx.kind !== "record" || !ctx.model || !ctx.resId) {
@@ -952,15 +978,32 @@ export const tuquiAssistantService = {
                 composerContext.default_subject = subject;
             }
             try {
-                await action.doAction({
-                    type: "ir.actions.act_window",
-                    name: isMessage ? _t("Send message") : _t("Log note"),
-                    res_model: "mail.compose.message",
-                    view_mode: "form",
-                    views: [[false, "form"]],
-                    target: "new",
-                    context: composerContext,
-                });
+                await action.doAction(
+                    {
+                        type: "ir.actions.act_window",
+                        name: isMessage ? _t("Send message") : _t("Log note"),
+                        res_model: "mail.compose.message",
+                        view_mode: "form",
+                        views: [[false, "form"]],
+                        target: "new",
+                        context: composerContext,
+                    },
+                    {
+                        // El composer es un DIÁLOGO aparte: postea y se cierra, y el
+                        // chatter de atrás no se entera — el mensaje sólo aparece si
+                        // se recarga la página.
+                        //
+                        // Odoo avisa en `args` si el usuario NO posteó: {dismiss:true}
+                        // al cerrar con la X o Escape, {special:true} con Discard.
+                        // Mismo criterio que su composer nativo.
+                        onClose: (args) => {
+                            if (args?.dismiss || args?.special) {
+                                return;
+                            }
+                            refreshAfterChatterPost(ctx.model, ctx.resId);
+                        },
+                    }
+                );
             } catch (e) {
                 notification.add(
                     _t("Could not open the chatter composer: %s", e.message || e),

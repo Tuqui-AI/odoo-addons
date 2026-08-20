@@ -1,6 +1,6 @@
 {
     "name": "Tuqui Assistant",
-    "version": "19.0.1.5.2",
+    "version": "19.0.1.6.0",
     "category": "Productivity",
     "summary": "Asistente Tuqui embebido en Odoo: chat contextual + propose-then-apply sobre el formulario",
     "author": "Tuqui-AI",
