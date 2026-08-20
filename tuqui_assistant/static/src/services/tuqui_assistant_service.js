@@ -1023,13 +1023,11 @@ export const tuquiAssistantService = {
                 return false;
             }
             if (!saved) {
-                // `save()` devuelve false cuando Odoo rechazó (requerido vacío,
-                // constraint). Odoo ya marcó el campo en rojo; no lo tapamos con
-                // un toast propio, pero tampoco decimos que salió bien.
-                notification.add(
-                    _t("Odoo did not save the form — check the fields it marked."),
-                    { type: "warning" }
-                );
+                // Odoo ya avisó: el único camino por el que `save()` devuelve false
+                // es `_checkValidity({ displayNotification: true })`, que muestra
+                // "Missing required fields" y marca los campos en rojo. Un toast
+                // nuestro encima decía lo mismo, más vago y tapando el panel.
+                // Devolvemos false igual: es la señal interna, no un aviso.
                 return false;
             }
             // Guardado: el registro dejó de estar sucio y los computados cambiaron.
