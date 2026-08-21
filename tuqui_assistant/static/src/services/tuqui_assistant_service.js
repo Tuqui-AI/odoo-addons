@@ -255,10 +255,24 @@ function x2manyCount(record, name) {
 }
 
 /**
- * Dada la propuesta NORMALIZADA, devuelve los campos x2many que incluyen al
- * menos un comando que AGREGA filas (CREATE=0 o LINK=4) — esos son los que
- * deberían hacer crecer el `count`. Sirve para el chequeo honesto post-apply:
- * si pedimos agregar una línea y el count no subió, fue un no-op → warning.
+ * Dada la propuesta NORMALIZADA, devuelve los campos x2many con al menos un
+ * comando CREATE (op 0), y cuántos — esos son los que TIENEN que hacer crecer
+ * el `count` en exactamente esa cantidad. Sirve para el chequeo honesto
+ * post-apply: pedimos N líneas nuevas, si no aparecieron N fue un no-op.
+ *
+ * LINK (op 4) queda AFUERA a propósito, por dos razones independientes:
+ *
+ *   1. Re-linkear una fila que ya está en la lista es un no-op LEGÍTIMO: lo
+ *      que se pidió (que el registro quede vinculado) es verdad antes y
+ *      después. Contarlo como "no se aplicó" es una falsa alarma, y el aviso
+ *      le dice al usuario que revise algo que está bien.
+ *   2. Para el caso que sí es un error —LINK a un id inexistente— el modelo
+ *      falla visible por su propio camino, así que el guard no compra nada.
+ *
+ * Con CREATE no hay ambigüedad: "tiene que haber una fila nueva por cada
+ * comando" es cierto siempre, y por eso el oráculo puede ser cuantitativo
+ * (`after >= before + adds`) en vez del `after > before` que dejaba pasar
+ * "pedí 3 líneas, entró 1".
  */
 function x2manyFieldsExpectingGrowth(normalized, fieldDefs) {
     const defs = fieldDefs || {};
@@ -266,7 +280,7 @@ function x2manyFieldsExpectingGrowth(normalized, fieldDefs) {
     for (const [name, value] of Object.entries(normalized)) {
         const type = defs[name]?.type;
         if ((type === "one2many" || type === "many2many") && Array.isArray(value)) {
-            const adds = value.filter((c) => Array.isArray(c) && (c[0] === 0 || c[0] === 4)).length;
+            const adds = value.filter((c) => Array.isArray(c) && c[0] === 0).length;
             if (adds > 0) {
                 fields.push({ name, adds });
             }
@@ -872,16 +886,26 @@ export const tuquiAssistantService = {
                 notification.add(_t("Could not apply changes: %s", e.message || e), {
                     type: "danger",
                 });
+                // Re-publicar IGUAL, por la misma razón que abajo: los escalares se
+                // aplican ANTES que las líneas nuevas, así que cuando revienta una
+                // línea lo de arriba ya entró al formulario. Sin esto el contexto
+                // queda en la revisión previa y la próxima propuesta sobre esa
+                // misma baseRevision lee nuestro propio cambio como una edición del
+                // usuario. Es el gemelo del camino de `notApplied` — y desde que el
+                // guard mira sólo CREATE, el que de verdad se recorre.
+                refreshRecordContext();
                 return false;
             }
-            // Chequeo honesto: ¿los x2many que debían crecer realmente crecieron?
-            // Un count que no cambió (de un número conocido) = la línea no se aplicó
-            // (forma inválida, id inexistente, etc.). Avisamos en vez del verde feliz.
+            // Chequeo honesto: ¿aparecieron TODAS las líneas nuevas que se pidieron?
+            // Se compara contra `before + adds`, no contra `before`: con el `after >
+            // before` de antes, pedir 3 líneas y que entre 1 pasaba como éxito.
+            // Un faltante = la línea no se aplicó (forma inválida, vals que el
+            // sub-modelo rechaza, etc.). Avisamos en vez del verde feliz.
             const notApplied = [];
-            for (const { name } of growthExpected) {
+            for (const { name, adds } of growthExpected) {
                 const before = countsBefore[name];
                 const after = x2manyCount(activeRecord, name);
-                if (typeof before === "number" && typeof after === "number" && after <= before) {
+                if (typeof before === "number" && typeof after === "number" && after < before + adds) {
                     notApplied.push(name);
                 }
             }
