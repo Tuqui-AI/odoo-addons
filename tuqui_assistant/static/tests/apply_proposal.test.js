@@ -8,6 +8,7 @@ import {
     getService,
     models,
     mountView,
+    onRpc,
 } from "@web/../tests/web_test_helpers";
 
 /**
@@ -243,14 +244,17 @@ describe("conflicto de revisión", () => {
 describe("applyProposal — lo que se aplicó a medias", () => {
     /**
      * Una propuesta puede entrar en parte: los escalares se aplican y la línea
-     * nueva no. `applyProposal` avisa y devuelve false, pero lo que SÍ entró está
-     * en el formulario, así que el contexto publicado tiene que reflejarlo. Si se
-     * queda en la revisión previa, el assistant sigue razonando sobre valores que
-     * él mismo ya cambió.
+     * nueva revienta. `applyProposal` avisa y devuelve false, pero lo que SÍ entró
+     * está en el formulario, así que el contexto publicado tiene que reflejarlo.
+     * Si se queda en la revisión previa, el assistant sigue razonando sobre
+     * valores que él mismo ya cambió — y la próxima propuesta contra esa misma
+     * `baseRevision` lee el cambio propio como una edición del usuario.
      *
-     * Para provocar el "no creció": un LINK a una fila que YA está en la lista.
-     * El campo se marca como "se espera que crezca" y el conteo no sube, que es
-     * exactamente la señal de "pedí agregar y no se agregó".
+     * El orden es lo que hace posible el estado a medias: los escalares van
+     * primero, por `record._update`; las líneas nuevas después, una por una vía
+     * `addNewRecord`. Cuando esa segunda parte falla —acá, el onchange de la línea
+     * tirando desde el servidor, que es como se rompe de verdad— el `name` ya está
+     * puesto en el formulario.
      *
      * Y el formulario arranca SUCIO a propósito. Con un record limpio, aplicar lo
      * ensucia, y esa transición ya hace que el FormController re-publique el
@@ -259,19 +263,114 @@ describe("applyProposal — lo que se aplicó a medias", () => {
      * y es además el caso realista: se propone sobre algo a medio llenar.
      */
     test("el contexto refleja lo que sí entró, aunque el form ya estuviera sucio", async () => {
+        onRpc("onchange", () => {
+            throw new Error("el onchange de la línea falló");
+        });
         const assistant = await mountPartnerForm();
         await contains(".o_field_widget[name=email] input").edit("editado@example.com");
         const revisionBefore = assistant.getContextPayload().revision;
 
-        const ok = await applyAndRender(assistant, { name: "Acme SA", child_ids: [[4, 3]] });
-        // La línea no se agregó (ya estaba), así que la propuesta NO entró entera.
+        const ok = await applyAndRender(assistant, {
+            name: "Acme SA",
+            child_ids: [[0, false, { name: "Nueva" }]],
+        });
+        // La línea no se pudo agregar, así que la propuesta NO entró entera.
         expect(ok).toBe(false);
-        expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(1);
         // …pero el nombre sí, y eso es lo que hay que re-publicar.
         expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
 
         const ctx = assistant.getContextPayload();
         expect(ctx.fields.name).toBe("Acme SA");
         expect(ctx.revision).not.toBe(revisionBefore);
+    });
+});
+
+describe("applyProposal — el guard de líneas nuevas", () => {
+    let assistant;
+    beforeEach(async () => {
+        assistant = await mountPartnerForm();
+    });
+
+    /**
+     * El guard sólo mira CREATE (op 0). Un LINK a una fila que YA está en la lista
+     * deja el conteo igual, y está bien que lo deje: lo que se pidió —que el
+     * registro quede vinculado— es verdad antes y después. Avisar ahí es mandar al
+     * usuario a revisar algo que está bien.
+     */
+    test("re-linkear una fila que ya está no es un error", async () => {
+        const ok = await applyAndRender(assistant, { name: "Acme SA", child_ids: [[4, 3]] });
+        expect(ok).toBe(true);
+        expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(1);
+        expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
+    });
+
+    test("todas las líneas pedidas aparecen", async () => {
+        const ok = await applyAndRender(assistant, {
+            child_ids: [
+                [0, false, { name: "Nueva A" }],
+                [0, false, { name: "Nueva B" }],
+            ],
+        });
+        expect(ok).toBe(true);
+        expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(3);
+    });
+
+    /**
+     * Hace que el StaticList ACEPTE cada línea nueva y materialice sólo las
+     * primeras `materialize`. El resto devuelve un record de mentira cuyo
+     * `_update` no hace nada: la lista dijo que sí y no agregó nada.
+     *
+     * Hace falta un doble porque el `StaticList` real no falla así: `addNewRecord`
+     * siempre agrega la fila, y una tupla CREATE mal formada tira en vez de ser un
+     * no-op (probado: `[0, false, null]`, vals string y vals ausente revientan las
+     * tres). El no-op silencioso que le dio origen al guard era el OBJETO PLANO, y
+     * ese ya no llega hasta acá — `normalizeProposalX2many` lo convierte en tupla
+     * antes. Tampoco entra por el fallback defensivo: con `addNewRecord` fuera de
+     * juego, `_update` manda la tupla cruda y `_applyCommands` la aplica bien
+     * (verificado: 3 CREATE → 3 filas).
+     *
+     * O sea que el modo de falla que el guard cubre hoy es "la API de la lista
+     * cambió, o un widget la reemplazó, y acepta sin agregar". Eso es lo que el
+     * doble reproduce, y sin él el oráculo no tiene forma de ejercitarse.
+     */
+    function acceptButOnlyAdd(list, materialize) {
+        const real = list.addNewRecord.bind(list);
+        let seen = 0;
+        list.addNewRecord = async (params) => {
+            seen += 1;
+            return seen <= materialize ? await real(params) : { _update: async () => {} };
+        };
+    }
+
+    test("avisa cuando la lista acepta la línea y no la agrega", async () => {
+        acceptButOnlyAdd(assistant.getActiveRecord().data.child_ids, 0);
+        const ok = await applyAndRender(assistant, {
+            name: "Acme SA",
+            child_ids: [[0, false, { name: "Nueva" }]],
+        });
+        expect(ok).toBe(false);
+        expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(1);
+        // Lo que sí entró queda en el formulario: el aviso dice "Changes applied,
+        // but…", no "no se aplicó nada".
+        expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
+    });
+
+    /**
+     * El caso que separa los dos oráculos, y la razón de que el chequeo cuente.
+     * Se piden 3 líneas y entra 1: la lista CRECIÓ, así que el `after > before`
+     * anterior lo daba por bueno. Con `after >= before + adds` se ve el faltante.
+     */
+    test("avisa cuando entran algunas líneas y otras no", async () => {
+        acceptButOnlyAdd(assistant.getActiveRecord().data.child_ids, 1);
+        const ok = await applyAndRender(assistant, {
+            child_ids: [
+                [0, false, { name: "A" }],
+                [0, false, { name: "B" }],
+                [0, false, { name: "C" }],
+            ],
+        });
+        expect(ok).toBe(false);
+        // 1 de las 3 entró — creció, pero no lo suficiente.
+        expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(2);
     });
 });

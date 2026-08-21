@@ -168,9 +168,37 @@ describe("x2manyFieldsExpectingGrowth", () => {
         expect(grow.map((g) => g.name)).toEqual(["order_line"]);
     });
 
-    test("un LINK también", () => {
-        const grow = x2manyFieldsExpectingGrowth({ order_line: [[4, 7]] }, fieldDefs);
-        expect(grow.map((g) => g.name)).toEqual(["order_line"]);
+    test("cuenta CUÁNTAS líneas nuevas se pidieron", () => {
+        // El `adds` es el oráculo del chequeo post-apply (`after >= before + adds`).
+        // Si sólo dijera "este campo debería crecer", pedir 3 y que entre 1 pasaría
+        // como éxito.
+        const grow = x2manyFieldsExpectingGrowth(
+            {
+                order_line: [
+                    [0, false, { product_id: 1 }],
+                    [0, false, { product_id: 2 }],
+                    [0, false, { product_id: 3 }],
+                ],
+            },
+            fieldDefs
+        );
+        expect(grow).toEqual([{ name: "order_line", adds: 3 }]);
+    });
+
+    test("un LINK no: re-linkear lo que ya está es un no-op legítimo", () => {
+        // El count no sube y está bien que no suba — lo pedido (que el registro
+        // quede vinculado) ya era cierto. Contarlo sería una falsa alarma. El caso
+        // que sí es un error, LINK a un id inexistente, falla visible por su
+        // propio camino.
+        expect(x2manyFieldsExpectingGrowth({ order_line: [[4, 7]] }, fieldDefs)).toEqual([]);
+    });
+
+    test("un CREATE mezclado con LINKs cuenta sólo el CREATE", () => {
+        const grow = x2manyFieldsExpectingGrowth(
+            { order_line: [[4, 7], [0, false, { product_id: 1 }], [4, 9]] },
+            fieldDefs
+        );
+        expect(grow).toEqual([{ name: "order_line", adds: 1 }]);
     });
 
     test("un DELETE no", () => {
