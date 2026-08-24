@@ -78,6 +78,11 @@ class TuquiOAuthClient(models.Model):
         return rec or self.env["tuqui.oauth.client"]
 
     @api.model
+    def _is_read_only(self) -> bool:
+        client = self._get_singleton()
+        return bool(client.read_only) if client else False
+
+    @api.model
     def _get_or_create_singleton(self):
         rec = self._get_singleton()
         if rec:
