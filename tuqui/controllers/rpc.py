@@ -500,8 +500,7 @@ class TuquiRpc(http.Controller):
         )
 
         # ─── Policy gate ───────────────────────────────────────────────────
-        client = env["tuqui.oauth.client"].sudo()._get_singleton()
-        read_only = bool(client.read_only) if client else False
+        read_only = env["tuqui.oauth.client"].sudo()._is_read_only()
         allowed, denied_reason = _evaluate_policy(read_only, method, operation_type, is_connection=is_connection)
         if not allowed:
             emit(policy_allowed=False, policy_denied_reason=denied_reason, success=False)
