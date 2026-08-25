@@ -1,7 +1,9 @@
 /** @odoo-module **/
 import { describe, expect, test } from "@odoo/hoot";
+import { mockTimeZone } from "@odoo/hoot-mock";
 import {
-    coerceX2manyCommandRelations,
+    coerceDateValue,
+    coerceX2manyCommandVals,
     isX2manyCommandTuple,
     normalizeProposalX2many,
     normalizeX2manyValue,
@@ -111,26 +113,59 @@ describe("normalizeProposalX2many", () => {
     });
 });
 
-describe("coerceX2manyCommandRelations", () => {
+describe("coerceX2manyCommandVals", () => {
     const subFields = { product_id: { type: "many2one" }, name: { type: "char" } };
 
     test("un m2o pelado dentro de un CREATE se envuelve en {id}", () => {
         // Sin esto la línea queda SIN producto y el onchange no calcula
         // name/precio/totales: `parseServerValue` devuelve el entero tal cual.
-        expect(coerceX2manyCommandRelations([[0, false, { product_id: 1 }]], subFields)).toEqual([
+        expect(coerceX2manyCommandVals([[0, false, { product_id: 1 }]], subFields)).toEqual([
             [0, false, { product_id: { id: 1 } }],
         ]);
     });
 
     test("no toca los campos que no son relacionales", () => {
-        expect(coerceX2manyCommandRelations([[0, false, { name: "x" }]], subFields)).toEqual([
+        expect(coerceX2manyCommandVals([[0, false, { name: "x" }]], subFields)).toEqual([
             [0, false, { name: "x" }],
         ]);
     });
 
     test("sin defs del sub-modelo devuelve los comandos intactos", () => {
         const cmds = [[0, false, { product_id: 1 }]];
-        expect(coerceX2manyCommandRelations(cmds, undefined)).toEqual(cmds);
+        expect(coerceX2manyCommandVals(cmds, undefined)).toEqual(cmds);
+    });
+
+    test("una fecha dentro de un comando queda en formato SERVIDOR, no en Luxon", () => {
+        // Las vals de un comando las vuelve a parsear Odoo: el case UPDATE de
+        // `_applyCommands` hace `record._parseServerValues(changes)`, que llama a
+        // `deserializeDate` = `DateTime.fromSQL(...)`. Con un objeto Luxon adentro
+        // eso da `Invalid DateTime` — y no tira: la celda queda con ese texto y al
+        // guardar se manda el literal al servidor. La conversión a Luxon vive sólo
+        // donde se llama `line._update`, el único camino que NO re-parsea.
+        const defs = { fecha: { type: "date" } };
+        const [[, , vals]] = coerceX2manyCommandVals([[0, false, { fecha: "2026-09-30" }]], defs);
+        expect(vals.fecha).toBe("2026-09-30");
+    });
+
+    test("un ISO con T se NORMALIZA a formato servidor", () => {
+        // El modelo puede mandar la forma que ve en el contexto (`toISO()`), y esa
+        // `deserializeDate` no la parsea. Normalizar acá es lo que hace que los dos
+        // formatos terminen igual del lado de Odoo.
+        const defs = { fecha: { type: "date" } };
+        const [[, , vals]] = coerceX2manyCommandVals([[0, false, { fecha: "2026-09-30T14:30:00Z" }]], defs);
+        expect(vals.fecha).toBe("2026-09-30");
+    });
+
+    test("una fecha ilegible se descarta y se reporta, no viaja cruda", () => {
+        const defs = { fecha: { type: "date" }, name: { type: "char" } };
+        const bad = [];
+        const [[, , vals]] = coerceX2manyCommandVals(
+            [[0, false, { fecha: "cuando puedas", name: "Nueva" }]],
+            defs,
+            bad
+        );
+        expect(vals).toEqual({ name: "Nueva" });
+        expect(bad).toEqual(["fecha"]);
     });
 });
 
@@ -207,5 +242,55 @@ describe("x2manyFieldsExpectingGrowth", () => {
 
     test("un campo escalar nunca", () => {
         expect(x2manyFieldsExpectingGrowth({ name: "x" }, fieldDefs)).toEqual([]);
+    });
+});
+
+describe("coerceDateValue", () => {
+    // El modelo OWL guarda las fechas como objetos Luxon y el widget las
+    // renderiza con `value.toFormat()`. Un string crudo no revienta al aplicar:
+    // revienta al RENDERIZAR, con "value.toFormat is not a function", y se lleva
+    // puesto el formulario entero. Estos tests fijan las dos formas que llegan.
+
+    test("una fecha en formato servidor se parsea", () => {
+        const parsed = coerceDateValue("2026-09-30", "date");
+        expect(parsed.isValid).toBe(true);
+        expect(parsed.toISODate()).toBe("2026-09-30");
+    });
+
+    test("un datetime en formato servidor se parsea", () => {
+        const parsed = coerceDateValue("2026-09-30 14:30:00", "datetime");
+        expect(parsed.isValid).toBe(true);
+    });
+
+    test("un datetime en ISO con T también: es lo que el modelo VE", () => {
+        // Nuestro propio serializador de salida emite `toISO()` para los
+        // datetime, así que el modelo devuelve esa forma — que NO es la que
+        // parsea `deserializeDateTime`. Si esto se rompe, vuelve el crash.
+        const parsed = coerceDateValue("2026-09-30T14:30:00+00:00", "datetime");
+        expect(parsed.isValid).toBe(true);
+        expect(parsed.toUTC().toFormat("yyyy-LL-dd HH:mm")).toBe("2026-09-30 14:30");
+    });
+
+    test("un campo date toma la fecha tal como está escrita, sin correrla de zona", () => {
+        // En UTC-3, las 01:00Z del 1/10 son el 30/9 local: convertir a la zona
+        // del usuario correría la fecha un día para atrás. Un campo date no
+        // tiene hora ni zona — vale lo que dice el string.
+        mockTimeZone(-3);
+        expect(coerceDateValue("2026-10-01T01:00:00Z", "date").toISODate()).toBe("2026-10-01");
+    });
+
+    test("limpiar el campo es legítimo y no es un error", () => {
+        expect(coerceDateValue(false, "date")).toBe(false);
+        expect(coerceDateValue(null, "datetime")).toBe(false);
+        expect(coerceDateValue("", "date")).toBe(false);
+        expect(coerceDateValue("   ", "date")).toBe(false);
+    });
+
+    test("lo que no se puede leer da null, no un DateTime inválido", () => {
+        // Un DateTime inválido no tira: pinta "Invalid DateTime" en el campo.
+        // Preferimos descartarlo y decirlo.
+        expect(coerceDateValue("el martes que viene", "date")).toBe(null);
+        expect(coerceDateValue("30/09/2026", "datetime")).toBe(null);
+        expect(coerceDateValue(20260930, "date")).toBe(null);
     });
 });

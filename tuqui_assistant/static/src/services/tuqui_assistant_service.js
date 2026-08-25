@@ -2,6 +2,16 @@
 import { registry } from "@web/core/registry";
 import { reactive } from "@odoo/owl";
 import { _t } from "@web/core/l10n/translation";
+import {
+    deserializeDate,
+    deserializeDateTime,
+    serializeDate,
+    serializeDateTime,
+} from "@web/core/l10n/dates";
+
+// Luxon es un global en Odoo, no un import ESM — igual que en
+// web/static/src/core/l10n/dates.js.
+const { DateTime } = luxon;
 
 // Guard de tamaño para ids de campos x2many enviados como contexto al SPA.
 const MAX_X2MANY_IDS = 50;
@@ -153,11 +163,82 @@ function normalizeProposalX2many(known, fieldDefs) {
 }
 
 /**
- * Coerce los valores RELACIONALES dentro de las `vals` de un comando CREATE/UPDATE
- * de un x2many a la forma que el record OWL del sub-modelo entiende.
+ * Parsea a Luxon el valor propuesto para un campo `date` / `datetime`.
  *
- * Por qué hace falta: `StaticList._applyCommands` (case CREATE) crea el datapoint
- * de la línea con `new Record(..., command[2])`, y `parseServerValue` para un
+ * Por qué hace falta: el modelo OWL guarda las fechas como objetos Luxon
+ * — `parseServerValue` (web/static/src/model/relational_model/utils.js) hace
+ * literalmente `value ? deserializeDate(value) : false` — y el widget las
+ * renderiza con `value.toFormat()`. Un string crudo metido por `record._update`
+ * NO revienta ahí: revienta después, al renderizar, con `value.toFormat is not
+ * a function`, un OwlError que se lleva puesto el formulario entero. Es el mismo
+ * agujero que ya estaba tapado para los m2o (id pelado → `{id}`), en el campo de
+ * al lado: coercionábamos las relaciones y no las fechas.
+ *
+ * Aceptamos las DOS formas que llegan en la práctica:
+ *   - formato servidor de Odoo ("2026-09-30", "2026-09-30 14:30:00"), que es lo
+ *     que manda un modelo que conoce Odoo y lo único que parsean los helpers;
+ *   - ISO 8601 con "T" y offset ("2026-09-30T14:30:00+02:00"), que es lo que el
+ *     modelo VE: nuestro propio serializador de salida emite `toISO()` para los
+ *     datetime, así que lo natural es que lo devuelva en esa forma.
+ *
+ * No unificamos cambiando el formato de SALIDA: el SPA y el modelo están fuera
+ * de nuestro control y pueden mandar cualquiera de las dos igual. Ser tolerante
+ * acá cubre los dos casos; cambiar la salida no cubre ninguno.
+ *
+ * @param {*} value valor propuesto
+ * @param {"date"|"datetime"} type tipo del campo
+ * @returns {DateTime|false|null} el objeto Luxon; `false` para limpiar el campo;
+ *   `null` si no se pudo parsear — el llamador descarta el campo y lo dice, en
+ *   vez de meter un DateTime inválido que el form pinta como "Invalid DateTime".
+ */
+function coerceDateValue(value, type) {
+    // Limpiar el campo es legítimo, y viaja como false/null/"".
+    if (value === false || value === null || value === undefined) {
+        return false;
+    }
+    // Ya es un DateTime: no llega así por postMessage, pero sí desde un test.
+    if (typeof value?.toFormat === "function") {
+        return value.isValid ? value : null;
+    }
+    if (typeof value !== "string") {
+        return null;
+    }
+    const raw = value.trim();
+    if (!raw) {
+        return false;
+    }
+    // Exigir una fecha completa adelante. Luxon es MÁS permisivo de lo que sirve
+    // acá: `fromSQL("14:30")` devuelve HOY a las 14:30, y `"2026"` se lee como la
+    // hora 20:26 de hoy. Sin este guard, "poné la reunión a las 14:30" entra como
+    // un valor plausible y equivocado — que es peor que rebotar, porque el aviso
+    // de "no pude leer la fecha" nunca aparece y el usuario ve un dato creíble.
+    if (!/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+        return null;
+    }
+    if (type === "date") {
+        // Un campo date no tiene hora ni zona. Si viene un datetime nos quedamos
+        // con la fecha TAL COMO ESTÁ ESCRITA, sin convertir: pasar por la zona
+        // local puede correrla un día (las 23:00Z, en UTC-3, son el día anterior).
+        const parsed = deserializeDate(raw.split(/[T ]/)[0]);
+        return parsed.isValid ? parsed : null;
+    }
+    const fromServer = deserializeDateTime(raw);
+    if (fromServer.isValid) {
+        return fromServer;
+    }
+    // ISO con "T". Un string sin offset se interpreta en UTC, la misma convención
+    // que `deserializeDateTime` (el servidor manda UTC); uno con offset ya trae
+    // el instante y Luxon lo respeta.
+    const fromIso = DateTime.fromISO(raw, { zone: "utc" });
+    return fromIso.isValid ? fromIso.setZone("default") : null;
+}
+
+/**
+ * Coerce los valores dentro de las `vals` de un comando CREATE/UPDATE de un
+ * x2many a la forma que el record OWL del sub-modelo entiende. Dos tipos:
+ *
+ * **Relaciones.** `StaticList._applyCommands` (case CREATE) crea el datapoint de
+ * la línea con `new Record(..., command[2])`, y `parseServerValue` para un
  * many2one acepta `[id, name]` o `{id, display_name}` pero un **entero pelado lo
  * devuelve tal cual** (no lo reconoce como m2o seteado). Un LLM manda
  * `{"product_id": 1}` (id pelado) → la línea queda SIN producto y el onchange ve
@@ -165,10 +246,20 @@ function normalizeProposalX2many(known, fieldDefs) {
  * campo many2one/many2one_reference de `<int>` a `{id: <int>}` para que el m2o
  * quede seteado y el onchange del padre resuelva el resto (name, precio, totales).
  *
+ * **Fechas.** Una línea nueva con fecha (`{"x_fecha_entrega": "2026-09-30"}`) se
+ * aplica con `line._update(campo)` y cae en el MISMO agujero que los escalares
+ * del record padre: string crudo → `value.toFormat is not a function` al
+ * renderizar. Ver `coerceDateValue`.
+ *
  * `subFields` son las defs de campo del SUB-modelo (las del StaticList del x2many).
  * Sin ellas (no resolubles) devolvemos las vals sin tocar (best-effort, no rompe).
+ *
+ * `badKeys` (opcional) recolecta los sub-campos fecha que no se pudieron parsear;
+ * se descartan de las vals en vez de meter un DateTime inválido en la línea. Se
+ * pasa por parámetro para que la función siga siendo pura (sin notificaciones ni
+ * dependencias de OWL) y testeable en aislamiento.
  */
-function coerceRelationalCommandVals(vals, subFields) {
+function coerceCommandVals(vals, subFields, badKeys) {
     if (!vals || typeof vals !== "object" || Array.isArray(vals) || !subFields) {
         return vals;
     }
@@ -177,6 +268,24 @@ function coerceRelationalCommandVals(vals, subFields) {
         const t = subFields[k]?.type;
         if ((t === "many2one" || t === "many2one_reference") && typeof v === "number") {
             out[k] = { id: v };
+        } else if (t === "date" || t === "datetime") {
+            // A FORMATO SERVIDOR, no a Luxon. Las vals de un comando las vuelve a
+            // parsear Odoo: el case UPDATE de `_applyCommands` hace
+            // `record._parseServerValues(changes)` y el CREATE por `_update` pasa
+            // por `_setData` → lo mismo. `parseServerValue` llama a
+            // `deserializeDate`, o sea `DateTime.fromSQL(...)`, y con un objeto
+            // Luxon adentro eso da `Invalid DateTime` — sin tirar: la celda queda
+            // en "Invalid DateTime" y al guardar se manda ese literal al server.
+            // Normalizamos igual (parse + re-serialize) porque el modelo puede
+            // mandar ISO con "T", que `deserializeDate` tampoco parsea.
+            const parsed = coerceDateValue(v, t);
+            if (parsed === null) {
+                badKeys?.push(k);
+            } else if (parsed === false) {
+                out[k] = false;
+            } else {
+                out[k] = t === "date" ? serializeDate(parsed) : serializeDateTime(parsed);
+            }
         } else {
             out[k] = v;
         }
@@ -185,17 +294,17 @@ function coerceRelationalCommandVals(vals, subFields) {
 }
 
 /**
- * Aplica coerceRelationalCommandVals a cada comando CREATE(0)/UPDATE(1) de un
- * valor x2many ya normalizado a tuplas-comando. Deja intactos LINK/DELETE/UNLINK
- * (no llevan vals que coercer) y cualquier forma que no sea tupla.
+ * Aplica coerceCommandVals a cada comando CREATE(0)/UPDATE(1) de un valor x2many
+ * ya normalizado a tuplas-comando. Deja intactos LINK/DELETE/UNLINK (no llevan
+ * vals que coercer) y cualquier forma que no sea tupla.
  */
-function coerceX2manyCommandRelations(commands, subFields) {
+function coerceX2manyCommandVals(commands, subFields, badKeys) {
     if (!Array.isArray(commands) || !subFields) {
         return commands;
     }
     return commands.map((cmd) => {
         if (Array.isArray(cmd) && (cmd[0] === 0 || cmd[0] === 1) && cmd[2] && typeof cmd[2] === "object") {
-            return [cmd[0], cmd[1], coerceRelationalCommandVals(cmd[2], subFields)];
+            return [cmd[0], cmd[1], coerceCommandVals(cmd[2], subFields, badKeys)];
         }
         return cmd;
     });
@@ -815,16 +924,27 @@ export const tuquiAssistantService = {
             // (no matchea ningún case, sin `default`) → la línea nunca se agrega y
             // `_update` igual resuelve "ok". Toleramos AMBAS formas. Ver helpers arriba.
             const normalized = normalizeProposalX2many(known, fieldDefs);
-            // Coerce los m2o pelados (id entero) dentro de las vals de cada comando
-            // CREATE/UPDATE a `{id}`: si no, la línea nueva queda SIN el m2o (p.ej.
-            // sin producto) y el onchange no calcula name/precio/totales. Las defs
-            // del sub-modelo salen del StaticList vivo del x2many (`.fields`).
+            // Coerce las vals de cada comando CREATE/UPDATE: los m2o pelados (id
+            // entero) a `{id}` — si no, la línea nueva queda SIN el m2o (p.ej. sin
+            // producto) y el onchange no calcula name/precio/totales — y las fechas
+            // a Luxon, que si no revientan el render igual que en el record padre.
+            // Las defs del sub-modelo salen del StaticList vivo del x2many (`.fields`).
+            const unparsedLineDates = [];
             for (const [name, value] of Object.entries(normalized)) {
                 const type = fieldDefs[name]?.type;
                 if (type === "one2many" || type === "many2many") {
                     const subFields = activeRecord.data?.[name]?.fields;
-                    normalized[name] = coerceX2manyCommandRelations(value, subFields);
+                    normalized[name] = coerceX2manyCommandVals(value, subFields, unparsedLineDates);
                 }
+            }
+            if (unparsedLineDates.length) {
+                notification.add(
+                    _t(
+                        "Could not read the date for these line fields: %s. The lines go in without them.",
+                        [...new Set(unparsedLineDates)].join(", ")
+                    ),
+                    { type: "warning" }
+                );
             }
             // Las líneas NUEVAS (comando CREATE) NO se aplican con
             // `_update({campo:[[0,false,vals]]})`: por ese camino la línea se crea
@@ -836,12 +956,18 @@ export const tuquiAssistantService = {
             // que sí van bien por `_update`.
             const updatePayload = {};
             const createsByField = {}; // { campo: [vals, …] }
+            const unparsedDates = [];
             for (const [name, value] of Object.entries(normalized)) {
                 const type = fieldDefs[name]?.type;
                 if (type === "one2many" || type === "many2many") {
                     const { creates, rest } = splitX2manyCreates(value);
-                    if (creates.length) {
-                        createsByField[name] = creates;
+                    // Una línea cuyas vals quedaron VACÍAS tras descartar lo
+                    // ilegible no es una línea: agregarla mete una fila en blanco
+                    // en la grilla y encima el guard de crecimiento la da por
+                    // buena. Si no quedó nada que poner, no hay línea que crear.
+                    const usable = creates.filter((v) => v && Object.keys(v).length);
+                    if (usable.length) {
+                        createsByField[name] = usable;
                     }
                     // Solo mandamos por _update el resto si quedó algún comando.
                     if (Array.isArray(rest) ? rest.length : rest != null) {
@@ -852,9 +978,43 @@ export const tuquiAssistantService = {
                     // display_name. Passing a raw integer leaves the field visually
                     // empty even though the ID is set.
                     updatePayload[name] = { id: value };
+                } else if (type === "date" || type === "datetime") {
+                    // El modelo OWL guarda fechas como Luxon; un string crudo revienta
+                    // el render del form entero. Ver `coerceDateValue`.
+                    const parsed = coerceDateValue(value, type);
+                    if (parsed === null) {
+                        unparsedDates.push(name);
+                    } else {
+                        updatePayload[name] = parsed;
+                    }
                 } else {
                     updatePayload[name] = value;
                 }
+            }
+            if (unparsedDates.length) {
+                notification.add(
+                    _t(
+                        "Could not read the date for: %s. Ask again with a date like 2026-09-30.",
+                        unparsedDates.join(", ")
+                    ),
+                    { type: "warning" }
+                );
+            }
+            if (!Object.keys(updatePayload).length && !Object.keys(createsByField).length) {
+                if (!unparsedDates.length && !unparsedLineDates.length) {
+                    // Sin fechas ilegibles no dijimos NADA todavía, y salir mudo
+                    // es peor que el verde falso que había antes: el usuario pidió
+                    // algo y no pasa nada en pantalla.
+                    notification.add(
+                        _t("No field from the proposal can be applied to the open form."),
+                        { type: "warning" }
+                    );
+                }
+                // Todo lo que quedaba eran fechas ilegibles. Ya dijimos cuáles; cortamos
+                // acá para no llegar a `_update` con un payload vacío y cantar un
+                // "aplicado" verde. No hace falta re-publicar el contexto: a diferencia
+                // del camino de `notApplied`, acá NO se escribió nada en el record.
+                return false;
             }
             // Snapshot del count de los x2many que esperamos que CREZCAN (CREATE/LINK),
             // para el chequeo honesto post-apply: si pedimos agregar una línea y el
@@ -896,7 +1056,16 @@ export const tuquiAssistantService = {
                         // Aplicar cada campo de la línea (dispara su onchange). `_update`
                         // toma el mutex por dentro, así que lo llamamos directo.
                         for (const [k, v] of Object.entries(vals)) {
-                            await line._update({ [k]: v });
+                            // Acá SÍ va Luxon: `_update` → `_applyChanges` asigna
+                            // crudo, sin pasar por `parseServerValue`. Es el único
+                            // camino de los tres que NO re-parsea, y por eso la
+                            // conversión vive acá y no en `coerceCommandVals`.
+                            const t = list.fields?.[k]?.type;
+                            const value = t === "date" || t === "datetime" ? coerceDateValue(v, t) : v;
+                            if (value === null) {
+                                continue; // ya reportada al normalizar
+                            }
+                            await line._update({ [k]: value });
                         }
                     }
                 }
@@ -1301,7 +1470,8 @@ export {
     normalizeProposalX2many,
     x2manyFieldsExpectingGrowth,
     isX2manyCommandTuple,
-    coerceRelationalCommandVals,
-    coerceX2manyCommandRelations,
+    coerceDateValue,
+    coerceCommandVals,
+    coerceX2manyCommandVals,
     splitX2manyCreates,
 };
