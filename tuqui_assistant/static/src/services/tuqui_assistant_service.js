@@ -500,7 +500,16 @@ export const tuquiAssistantService = {
 
         /**
          * Context for a list/kanban view. `payload`:
-         *   { model, resIds, isDomainSelected, count, domain, filters }
+         *   { model, modelLabel, resIds, isDomainSelected, count, domain, filters }
+         *
+         * `modelLabel` es el nombre del modelo COMO LO VE el usuario (el
+         * breadcrumb de la acción, ej. "Contactos") — el chip del SPA lo
+         * muestra en lugar del nombre técnico `res.partner`. Display-only.
+         *
+         * La intención manda qué viaja: seleccionar (parcial o "todos los N")
+         * es un gesto explícito y lleva el set (ids capeados, o domain cuando
+         * allMatching); pararse en una lista sin seleccionar es solo ubicación
+         * y lleva únicamente modelo + label.
          */
         function setSearchContext(owner, payload) {
             _owner = owner;
@@ -508,12 +517,16 @@ export const tuquiAssistantService = {
             const resIds = payload.resIds || [];
             if (payload.isDomainSelected) {
                 // "Select all N matching the domain": full filter, no explicit id list.
+                // El dominio ES la selección acá: sin él, el assistant sabe
+                // que "son todos los del filtro" pero no puede reproducir el set.
                 state.context = {
                     kind: "selection",
                     model: payload.model,
+                    modelLabel: payload.modelLabel || "",
                     count: payload.count,
                     resIds: [],
                     allMatching: true,
+                    domain: payload.domain || [],
                 };
             } else if (resIds.length) {
                 // `count` es la selección REAL; `resIds` va capeado en
@@ -526,16 +539,21 @@ export const tuquiAssistantService = {
                 state.context = {
                     kind: "selection",
                     model: payload.model,
+                    modelLabel: payload.modelLabel || "",
                     count: resIds.length,
                     resIds: resIds.slice(0, MAX_SELECTION_IDS),
                     truncated: resIds.length > MAX_SELECTION_IDS,
                 };
             } else {
+                // Sin selección NO hay intención de operar sobre el set: viaja
+                // la ubicación ("estás parado en Facturas, filtrado por
+                // Vencidas") — modelo, label y etiquetas legibles de los
+                // filtros. Nada de count ni dominio máquina: para darle el set
+                // al assistant está "seleccionar todo", gesto explícito.
                 state.context = {
                     kind: "list",
                     model: payload.model,
-                    count: payload.count,
-                    domain: payload.domain || [],
+                    modelLabel: payload.modelLabel || "",
                     filters: payload.filters || [],
                 };
             }
