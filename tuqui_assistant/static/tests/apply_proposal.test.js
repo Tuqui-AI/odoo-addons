@@ -1,6 +1,6 @@
 /** @odoo-module **/
 import { beforeEach, describe, expect, test } from "@odoo/hoot";
-import { animationFrame } from "@odoo/hoot-mock";
+import { animationFrame, mockTimeZone } from "@odoo/hoot-mock";
 import {
     contains,
     defineModels,
@@ -39,6 +39,8 @@ class Partner extends models.Model {
     ref = fields.Char({ readonly: true });
     active = fields.Boolean({ default: true });
     parent_id = fields.Many2one({ relation: "res.partner" });
+    fecha = fields.Date();
+    fecha_hora = fields.Datetime();
     child_ids = fields.One2many({ relation: "res.partner", relation_field: "parent_id" });
 
     _records = [
@@ -59,9 +61,12 @@ const FORM_ARCH = `
         <field name="email"/>
         <field name="ref"/>
         <field name="parent_id"/>
+        <field name="fecha"/>
+        <field name="fecha_hora"/>
         <field name="child_ids">
             <list editable="bottom">
                 <field name="name"/>
+                <field name="fecha"/>
             </list>
         </field>
     </form>`;
@@ -104,6 +109,60 @@ describe("applyProposal — campos simples", () => {
         await applyAndRender(assistant, { name: "Acme SA", email: "nuevo@example.com" });
         expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
         expect(".o_field_widget[name=email] input").toHaveValue("nuevo@example.com");
+    });
+});
+
+describe("applyProposal — fechas", () => {
+    let assistant;
+    beforeEach(async () => {
+        assistant = await mountPartnerForm();
+    });
+
+    // El modelo OWL guarda las fechas como objetos Luxon y el widget las pinta
+    // con `value.toFormat()`. Antes mandábamos el string crudo del SPA: `_update`
+    // lo aceptaba sin chistar y el form reventaba DESPUÉS, al renderizar, con
+    // "value.toFormat is not a function" — un OwlError que se llevaba puesta la
+    // vista entera. Estos tests fallan (error no verificado) sin la coerción.
+
+    // OJO con el selector: el widget de fecha pinta un <button> cuando TIENE
+    // valor y un <input> sólo cuando está vacío. Por eso los tests de "se aplicó"
+    // miran el button y los de "no se aplicó" miran el input — no es un descuido.
+    test("aplica una fecha y el formulario la muestra", async () => {
+        const ok = await applyAndRender(assistant, { fecha: "2026-09-30" });
+        expect(ok).toBe(true);
+        expect(".o_field_date button").toHaveAttribute("value", "09/30/2026");
+    });
+
+    // Los dos siguientes son el MISMO instante escrito de dos formas. Con la zona
+    // fijada en UTC tienen que pintar exactamente lo mismo: es lo que prueba que
+    // aceptar las dos formas no es aceptar cualquier cosa.
+    test("aplica un datetime en formato servidor", async () => {
+        mockTimeZone(0);
+        const ok = await applyAndRender(assistant, { fecha_hora: "2026-09-30 14:30:00" });
+        expect(ok).toBe(true);
+        expect(".o_field_datetime button").toHaveAttribute("value", "09/30/2026 14:30:00");
+    });
+
+    test("aplica un datetime en ISO con T, que es lo que el modelo VE", async () => {
+        // Nuestro serializador de salida emite `toISO()`, así que el modelo
+        // devuelve esa forma — y NO es la que parsea `deserializeDateTime`.
+        mockTimeZone(0);
+        const ok = await applyAndRender(assistant, { fecha_hora: "2026-09-30T14:30:00+00:00" });
+        expect(ok).toBe(true);
+        expect(".o_field_datetime button").toHaveAttribute("value", "09/30/2026 14:30:00");
+    });
+
+    test("una fecha que no se puede leer no se aplica, y el campo queda como estaba", async () => {
+        const ok = await applyAndRender(assistant, { fecha: "el martes que viene" });
+        expect(ok).toBe(false);
+        expect(".o_field_date input").toHaveValue("");
+    });
+
+    test("una fecha ilegible no arrastra a los campos que sí se entienden", async () => {
+        const ok = await applyAndRender(assistant, { name: "Acme SA", fecha: "cuando puedas" });
+        expect(ok).toBe(true);
+        expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
+        expect(".o_field_date input").toHaveValue("");
     });
 });
 
@@ -372,5 +431,73 @@ describe("applyProposal — el guard de líneas nuevas", () => {
         expect(ok).toBe(false);
         // 1 de las 3 entró — creció, pero no lo suficiente.
         expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(2);
+    });
+});
+
+describe("applyProposal — fechas dentro de líneas x2many", () => {
+    let assistant;
+    beforeEach(async () => {
+        assistant = await mountPartnerForm();
+    });
+
+    // Las vals de un comando x2many las vuelve a parsear Odoo: el case UPDATE de
+    // `_applyCommands` hace `record._parseServerValues(changes)`, y eso llama a
+    // `deserializeDate` = `DateTime.fromSQL(...)`. Con un objeto Luxon adentro,
+    // `fromSQL` devuelve `Invalid DateTime` — y no tira: la celda queda con ese
+    // texto y al guardar se manda el literal al servidor. Por eso las vals van en
+    // formato SERVIDOR y la conversión a Luxon vive sólo donde se llama
+    // `line._update`, que es el único camino que no re-parsea.
+
+    test("actualizar la fecha de una línea existente la deja legible", async () => {
+        const ok = await applyAndRender(assistant, {
+            child_ids: [[1, 3, { fecha: "2026-09-30" }]],
+        });
+        expect(ok).toBe(true);
+        const cells = [...document.querySelectorAll(".o_data_row .o_data_cell")].map((c) => c.textContent);
+        // La celda READONLY de la grilla renderiza "Sep 30, 2026" (el
+        // "09/30/2026" es el formato del input al editar). Lo que importa acá es
+        // que la fecha llegó legible: sin el fix dice "Invalid DateTime", que no
+        // contiene el año — así que asertar el año discrimina.
+        expect(cells.join(" | ")).not.toInclude("Invalid");
+        expect(cells.join(" | ")).toInclude("2026");
+    });
+
+    test("una línea nueva con fecha la deja legible", async () => {
+        const ok = await applyAndRender(assistant, {
+            child_ids: [{ name: "Nueva", fecha: "2026-09-30" }],
+        });
+        expect(ok).toBe(true);
+        const cells = [...document.querySelectorAll(".o_data_row")].map((r) => r.textContent).join(" | ");
+        expect(cells).not.toInclude("Invalid");
+    });
+
+    test("una línea cuya única fecha es ilegible no entra vacía", async () => {
+        // Descartar el campo ilegible dejaba `{}` como vals: `addNewRecord` metía
+        // una fila en blanco y el guard de crecimiento la daba por buena.
+        const before = document.querySelectorAll(".o_data_row").length;
+        await applyAndRender(assistant, { child_ids: [{ fecha: "cuando puedas" }] });
+        expect(document.querySelectorAll(".o_data_row")).toHaveCount(before);
+    });
+});
+
+describe("applyProposal — lo que Luxon acepta y no debería", () => {
+    let assistant;
+    beforeEach(async () => {
+        assistant = await mountPartnerForm();
+    });
+
+    // `DateTime.fromSQL("14:30")` devuelve HOY a las 14:30, y `"2026"` se lee como
+    // la hora 20:26. Sin un guard, "poné la reunión a las 14:30" entra como un
+    // valor plausible y equivocado, sin que aparezca ningún aviso.
+    test("una hora suelta no es una fecha", async () => {
+        const ok = await applyAndRender(assistant, { fecha_hora: "14:30" });
+        expect(ok).toBe(false);
+        expect(".o_field_datetime input").toHaveValue("");
+    });
+
+    test("un año pelado tampoco", async () => {
+        const ok = await applyAndRender(assistant, { fecha: "2026" });
+        expect(ok).toBe(false);
+        expect(".o_field_date input").toHaveValue("");
     });
 });
