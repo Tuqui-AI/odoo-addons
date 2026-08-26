@@ -37,7 +37,18 @@ patch(ListController.prototype, {
             },
             () => [
                 this.model.root.resModel,
-                this.model.root.selection.length,
+                // Los IDS, no su cantidad. Con `selection.length` acá, destildar
+                // una fila y tildar otra deja el largo igual: el efecto no vuelve
+                // a correr, no se re-publica el contexto, y el assistant sigue
+                // creyendo que está seleccionada la que sacaste.
+                //
+                // Con el cap en 50 eso terminaba en una negativa: la selección
+                // llegaba marcada como cortada y el assistant no actuaba. Ahora
+                // que viaja entera, el prompt manda hacer el trabajo INLINE — así
+                // que el mismo desfasaje termina en una escritura sobre el
+                // registro equivocado, en silencio. Es el modo de falla que el
+                // flag `truncated` existe para evitar, entrando por otra puerta.
+                this.model.root.selection.map((r) => r.resId).join(","),
                 this.model.root.isDomainSelected,
                 this.model.root.count,
                 JSON.stringify(this.model.root.domain),

@@ -16,12 +16,29 @@ const { DateTime } = luxon;
 // Guard de tamaño para ids de campos x2many enviados como contexto al SPA.
 const MAX_X2MANY_IDS = 50;
 
-// Guard de tamaño para los ids de una selección de lista/kanban. Espeja el
-// límite duro de registros por corrida multi-registro del backend
-// (`batch_service.MAX_RECORDS`): por encima de eso el assistant no corre el
-// batch igual, así que mandar más ids es contexto pago sin uso. El `count`
-// sigue siendo el real — es lo que necesita para derivar a automatización.
-const MAX_SELECTION_IDS = 50;
+// Guard de tamaño para los ids de una selección de lista/kanban.
+//
+// Espejaba `batch_service.MAX_RECORDS` (50), con este razonamiento: por encima
+// de ese techo el assistant no corre el batch igual, así que mandar más ids es
+// contexto pago sin uso. Ese razonamiento CADUCÓ. El trabajo sobre varios
+// registros hoy va INLINE por default — una llamada a tool por registro, ahí
+// mismo en la conversación — y `run_over_selection` (el batch) es la excepción
+// cara. Lo inline no tiene techo de 50: lo limita el presupuesto del turno. Con
+// el cap viejo, una selección de 80 llegaba truncada y el assistant se negaba a
+// actuar sobre una lista parcial: correcto, pero por un límite que ya no
+// gobernaba el camino que iba a tomar.
+//
+// El cap no desaparece, cambia de dueño. Lo que hacía caro mandar muchos ids
+// era IMPRIMIRLOS: el contexto se pega al texto de cada turno, así que la lista
+// se pagaba en todos. Eso se resolvió del lado de Tuqui — la nota deja de
+// volcarlos y `get_selected_ids` los entrega a pedido. Acá queda sólo el guard
+// de transporte: un tope que evita un postMessage disparatado, alineado con el
+// tamaño por encima del cual enumerar deja de ser la respuesta (ahí la palanca
+// es el dominio, o el "seleccionar todos" de Odoo, que manda el filtro).
+//
+// El `count` sigue siendo el real, y `truncated` sigue marcando el corte: por
+// arriba de esto la lista ES parcial y nadie debe leerla como la selección.
+const MAX_SELECTION_IDS = 200;
 
 /**
  * Estado compartido + puente (bridge) entre el panel del asistente y lo que el

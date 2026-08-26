@@ -270,7 +270,14 @@ export class TuquiPanel extends Component {
                 // valores en memoria cambian (on-blur, debounced) → re-push.
                 return `record:${c.model}:${c.resId}:${c.dirty}:${c.revision}`;
             case "selection":
-                return `sel:${c.model}:${c.count}:${(c.resIds || []).length}`;
+                // Los ids, no su cantidad — misma razón que las deps del efecto en
+                // `list_controller_patch.js`. Si acá quedara la longitud, el
+                // controller re-publicaría al cambiar QUÉ está tildado y el panel
+                // lo deduplicaría igual, dejando el arreglo de allá sin efecto.
+                // Y con el cap de ids alto la clave vieja degeneraba: para toda
+                // selección que entra entera `count === resIds.length`, así que
+                // sus dos mitades eran el mismo número.
+                return `sel:${c.model}:${c.count}:${(c.resIds || []).join(",")}`;
             case "list":
                 return `list:${c.model}:${c.count}:${JSON.stringify(c.domain || [])}`;
         }
