@@ -337,6 +337,28 @@ export class TuquiPanel extends Component {
         }
     }
 
+    /**
+     * Poner la gota, y si no cae, decírselo a QUIEN PUEDE HACER ALGO.
+     *
+     * El aviso va al usuario y no de vuelta al agente, y es una decisión, no una
+     * omisión: quien está mirando la pantalla es el único que puede moverse a la
+     * vista correcta. El agente, además, ya sabe de antemano dónde está parado —
+     * el contexto de la página viaja en cada mensaje — así que lo que hay que
+     * evitar es que la persona se quede buscando una marca que nunca apareció.
+     */
+    _spotlight(payload) {
+        if (this.tuquiAssistant.spotlight(payload)) {
+            return;
+        }
+        const que = payload.label || payload.field || payload.action || "";
+        this.notification.add(
+            que
+                ? _t('Tuqui quiso señalarte "%s", pero no está en esta pantalla.', que)
+                : _t("Tuqui quiso señalarte algo, pero no está en esta pantalla."),
+            { type: "warning" }
+        );
+    }
+
     _postContext() {
         const win = this.iframeRef.el?.contentWindow;
         if (!win) {
@@ -424,6 +446,12 @@ export class TuquiPanel extends Component {
                 // El usuario pidió guardar. Odoo valida; si rechaza, el servicio
                 // lo dice en vez de cantar victoria.
                 this.tuquiAssistant.saveRecord();
+                break;
+            case "spotlight":
+                // La gota: señalar en la pantalla dónde hay que hacer algo, con
+                // el puntero de `web_tour` (el que la gente ya conoce del
+                // onboarding).
+                this._spotlight(data.payload || {});
                 break;
             case "reload":
                 // El turno escribió en Odoo por atrás: los datos de la vista
