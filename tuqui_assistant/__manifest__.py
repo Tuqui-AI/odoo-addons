@@ -8,7 +8,7 @@
     "license": "LGPL-3",
     # Requiere el connector companion `tuqui` (ADR 0001): el embed usa SSO con la
     # identidad del companion (sin login en el iframe, sin compat jsonrpc-embed).
-    "depends": ["web", "tuqui"],
+    "depends": ["web", "web_tour", "tuqui"],
     "data": [
         "security/ir.model.access.csv",
         "data/ir_cron.xml",

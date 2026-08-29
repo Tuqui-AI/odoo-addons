@@ -10,6 +10,8 @@ import {
 } from "@web/core/l10n/dates";
 import { evaluateBooleanExpr } from "@web/core/py_js/py";
 
+import { makeSpotlight } from "./spotlight";
+
 // Luxon es un global en Odoo, no un import ESM — igual que en
 // web/static/src/core/l10n/dates.js.
 const { DateTime } = luxon;
@@ -615,8 +617,8 @@ function sanitizeChatterBody(html) {
 
 export const tuquiAssistantService = {
     // `action` is needed to open the standard composer (doAction) from proposeChatter.
-    dependencies: ["notification", "orm", "action"],
-    start(env, { notification, orm, action }) {
+    dependencies: ["notification", "orm", "action", "overlay"],
+    start(env, { notification, orm, action, overlay }) {
         // Persist panel UI state across Ctrl+R, per-tab (sessionStorage is tab-scoped).
         // panelOpen / minimized / expanded survive reload; context and newChatRequest
         // are ephemeral (rebuilt from the current Odoo view on mount).
@@ -1548,6 +1550,18 @@ export const tuquiAssistantService = {
             return true;
         }
 
+        /**
+         * La gota: señalar en la pantalla dónde hay que hacer algo, con el
+         * puntero de `web_tour` (el que la gente ya conoce del onboarding).
+         *
+         * Devuelve si se pudo señalar, y ese dato VUELVE al chat. No es un
+         * detalle: si el campo no está en esta pantalla y el agente no se
+         * entera, se queda esperando un "listo" sobre una marca que nunca
+         * apareció. Con el resultado, dice "estás en otra pantalla" o navega.
+         */
+        const spotlightHandle = makeSpotlight(overlay);
+        const spotlight = (payload) => spotlightHandle.spotlight(payload);
+
         async function reloadView() {
             const viewModel = _owner?.model;
             if (!viewModel) {
@@ -1701,6 +1715,7 @@ export const tuquiAssistantService = {
             navigate,
             reloadView,
             saveRecord,
+            spotlight,
             getEmbedBootstrap,
             getSsoAuth,
             getContextPayload,
