@@ -156,6 +156,59 @@ function normalizeX2manyValue(value) {
 }
 
 /**
+ * El ESTADO de los campos del formulario abierto: cuáles se ven, cuáles se
+ * pueden escribir, cuáles son obligatorios.
+ *
+ * POR QUÉ HACE FALTA. Hasta acá el asistente recibía los VALORES de los campos y
+ * nada de su estado, así que sabía qué dice cada campo pero no cuáles están en la
+ * pantalla. De ahí salieron tres fallas distintas que son la misma: marcó un
+ * campo que la configuración de ese registro tenía oculto; dijo "te lo señalé"
+ * sobre una marca que no podía caer; y propuso escribir en campos de sólo
+ * lectura, porque el único chequeo posible era la definición ESTÁTICA del campo y
+ * la mitad de los readonly de Odoo son condicionales.
+ *
+ * Odoo ya resuelve las tres preguntas contra el registro concreto —con sus
+ * condiciones evaluadas— y lo único que faltaba era transportarlo.
+ *
+ * SÓLO VIAJAN LAS EXCEPCIONES. Un formulario tiene decenas de campos y casi todos
+ * son visibles, editables y opcionales; mandar tres booleanos por cada uno
+ * engordaría cada mensaje para no decir nada. Un campo ausente de este mapa es un
+ * campo normal.
+ *
+ * @param {Object} record  el record OWL del formulario abierto
+ * @returns {Object} `{campo: {invisible?, readonly?, required?}}`, sólo con lo anómalo
+ */
+function serializeFieldState(record) {
+    const activos = record?.activeFields || {};
+    const out = {};
+    for (const name of Object.keys(activos)) {
+        try {
+            const estado = {};
+            // Métodos internos de Odoo (`_isInvisible` y compañía). Se usan igual
+            // porque son los que EVALÚAN la condición contra este registro, que es
+            // justamente el dato que no se puede reconstruir desde afuera. Cada
+            // campo va en su propio try: si una versión los renombra, se pierde el
+            // estado de los campos y no el contexto entero.
+            if (record._isInvisible?.(name)) {
+                estado.invisible = true;
+            }
+            if (record._isReadonly?.(name)) {
+                estado.readonly = true;
+            }
+            if (record._isRequired?.(name)) {
+                estado.required = true;
+            }
+            if (Object.keys(estado).length) {
+                out[name] = estado;
+            }
+        } catch {
+            // Un campo que no se puede evaluar no tira abajo el resto.
+        }
+    }
+    return out;
+}
+
+/**
  * Normaliza una propuesta `{campo: valor}` ya validada contra los campos del
  * form: para cada campo one2many/many2many, convierte la forma amigable (lista
  * de objetos planos) a tuplas-comando que `record._update` sí aplica. Pura (sin
@@ -829,6 +882,9 @@ export const tuquiAssistantService = {
             if (ctx.kind === "record" && activeRecord) {
                 ctx.dirty = Boolean(activeRecord.dirty);
                 ctx.fields = serializeRecordFields(activeRecord);
+                // Qué se ve, qué se puede escribir y qué es obligatorio. Sin esto
+                // el asistente conoce los valores pero no la pantalla.
+                ctx.fieldState = serializeFieldState(activeRecord);
             }
             // Aplanar a JSON puro: arranca los Proxies reactivos (domain/filters/
             // resIds) que romperían el structured clone de postMessage. Los datos
@@ -877,7 +933,28 @@ export const tuquiAssistantService = {
             const known = {};
             const dropped = [];
             for (const [name, value] of Object.entries(changes)) {
-                if (!fieldDefs[name] || fieldDefs[name].readonly === true) {
+                // Primero que el campo EXISTA. Preguntarle a Odoo si un campo que
+                // no está en el formulario es de sólo lectura revienta: su
+                // evaluador lee la definición sin chequear que esté.
+                if (!fieldDefs[name]) {
+                    dropped.push(name);
+                    continue;
+                }
+                // El readonly se pregunta EVALUADO contra este registro, no en la
+                // definición del campo. La mitad de los readonly de Odoo son
+                // condicionales —"sólo lectura si el pedido está confirmado"— y la
+                // definición estática los da como editables: la propuesta pasaba el
+                // filtro y `_update` la aplicaba sobre un campo que la persona no
+                // puede tocar. Se cae al chequeo estático si el método no está.
+                let soloLectura = fieldDefs[name].readonly === true;
+                try {
+                    if (activeRecord._isReadonly) {
+                        soloLectura = activeRecord._isReadonly(name);
+                    }
+                } catch {
+                    // Queda el chequeo estático.
+                }
+                if (soloLectura) {
                     dropped.push(name);
                 } else {
                     known[name] = value;

@@ -76,6 +76,23 @@ async function mountPartnerForm() {
     return getService("tuquiAssistant");
 }
 
+/** Un formulario con los tres estados que importan, y uno de ellos CONDICIONAL:
+ *  `email` se esconde según el valor de otro campo, que es el caso que la
+ *  definición estática del campo no puede contar. */
+const FORM_ARCH_ESTADOS = `
+    <form>
+        <field name="name" required="1"/>
+        <field name="active"/>
+        <field name="email" invisible="active"/>
+        <field name="ref"/>
+        <field name="fecha"/>
+    </form>`;
+
+async function mountFormConEstados(resId = 1) {
+    await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_ESTADOS });
+    return getService("tuquiAssistant");
+}
+
 /**
  * Aplica una propuesta y espera el re-render.
  *
@@ -231,6 +248,40 @@ describe("contexto vivo", () => {
         expect(ctx.model).toBe("res.partner");
         expect(ctx.resId).toBe(1);
         expect(ctx.fields.name).toBe("Acme");
+    });
+
+    test("el contexto dice qué campos NO están en la pantalla", async () => {
+        // El caso que motivó esto: un campo que existe, tiene valor, y Odoo no lo
+        // muestra para ESTE registro. Con sólo los valores, el assistant lo daba
+        // por presente y decía haberlo señalado sobre una pantalla donde no está.
+        const assistant = await mountFormConEstados();
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fields.email).toBe("acme@example.com"); // el valor está…
+        expect(ctx.fieldState.email.invisible).toBe(true); // …y la pantalla, no
+    });
+
+    test("y qué campos no se pueden escribir, aunque la condición sea de este registro", async () => {
+        const assistant = await mountFormConEstados();
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fieldState.ref.readonly).toBe(true);
+        expect(ctx.fieldState.name.required).toBe(true);
+    });
+
+    test("los campos normales NO ocupan lugar en el mapa", async () => {
+        // Un formulario tiene decenas de campos y casi todos son comunes: mandar
+        // tres booleanos por cada uno engordaría cada mensaje para no decir nada.
+        const assistant = await mountFormConEstados();
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fieldState.fecha).toBe(undefined);
+    });
+
+    test("el estado sigue la condición: si cambia el registro, cambia lo que se ve", async () => {
+        // Lo que hace que esto no se pueda reemplazar por `fields_get`: la misma
+        // definición da distinto según el valor del registro.
+        const assistant = await mountFormConEstados();
+        expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(true);
+        await contains(".o_field_widget[name=active] input").click();
+        expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(undefined);
     });
 
     test("los valores SIN GUARDAR viajan en el contexto", async () => {
