@@ -6,7 +6,7 @@
     "author": "Tuqui-AI",
     "website": "https://tuqui.com",
     "license": "LGPL-3",
-    "depends": ["base", "web"],
+    "depends": ["base", "web", "tuqui"],
     "installable": True,
     "application": False,
     "auto_install": False,
