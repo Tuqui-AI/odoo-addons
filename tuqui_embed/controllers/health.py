@@ -38,9 +38,7 @@ class TuquiEmbedHealth(TuquiHealth):
     def health(self, **kwargs):
         response = super().health(**kwargs)
         try:
-            origins = (
-                http.request.env["ir.config_parameter"].sudo().get_param(EMBED_ORIGINS_PARAM) or ""
-            ).strip()
+            origins = (http.request.env["ir.config_parameter"].sudo().get_param(EMBED_ORIGINS_PARAM) or "").strip()
             if not origins:
                 return response
             body = json.loads(response.data)
