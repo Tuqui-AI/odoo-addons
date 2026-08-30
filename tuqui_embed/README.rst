@@ -40,6 +40,40 @@ Sin la segunda, la primera sola no sirve: el iframe se ve, pero mostrando la
 pantalla de login, porque el browser no manda una cookie ``SameSite=Lax`` en un
 frame de otro sitio.
 
+Qué se puede hacer con la cookie aflojada — medido
+==================================================
+
+Se montó el escenario completo (Odoo por HTTPS, un origen declarado que lo
+muestra en un iframe, y un sitio en otro origen) y se comprobó, primero, que el
+aflojamiento **ocurre**: después de pasar por el origen declarado, la sesión del
+navegador queda ``SameSite=None; Secure``.
+
+Con esa cookie, un sitio NO declarado consigue:
+
+===================================================  ==========================
+Intento                                              Resultado
+===================================================  ==========================
+Leer datos (``call_kw`` con ``application/json``)    **Bloqueado** — el
+                                                     navegador exige preflight
+                                                     CORS y Odoo no lo concede
+Leer la sesión (``get_session_info``)                **Bloqueado**, por lo mismo
+Escribir con POST ``form-urlencoded`` — el vector    **Rechazado: HTTP 415.**
+CSRF clásico, que NO dispara preflight               Las rutas de datos de Odoo
+                                                     son JSON-only
+===================================================  ==========================
+
+Verificado además contra la base: el ``write`` que intentó el sitio ajeno no
+escribió nada.
+
+**Lectura:** aflojar el ``SameSite`` no habilita leer ni escribir datos de
+negocio desde otro sitio. Lo que protege no es el ``SameSite`` sino la
+combinación de CORS con que las rutas de datos hablen JSON.
+
+Lo que queda expuesto, y no se midió: las rutas ``type="http"`` del backend
+(formularios como el login) sí aceptan ``form-urlencoded``. Ahí la defensa es el
+token CSRF de Odoo, que sigue en pie — el atacante no puede leerlo, porque para
+eso tendría que leer el HTML y CORS se lo impide.
+
 Lo que hay que decidir antes de encenderlo
 ==========================================
 
