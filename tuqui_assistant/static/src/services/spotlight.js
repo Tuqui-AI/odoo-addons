@@ -118,6 +118,61 @@ function afinar(el) {
 }
 
 /**
+ * Buscar el campo en las pestañas CERRADAS del formulario, abriéndolas.
+ *
+ * En un formulario de Odoo, media configuración vive en una pestaña que no es la
+ * que está abierta, y Odoo no renderiza el contenido de una pestaña cerrada: el
+ * campo no está en el DOM, así que la gota no tiene dónde caer. Medido con el
+ * caso real —"ARCA POS Number" vive en "Advanced Settings"— donde el agente hacía
+ * todo bien y la marca igual no aparecía.
+ *
+ * Se abre cada pestaña hasta encontrarlo, que es lo que haría un compañero que te
+ * muestra dónde está. Si no aparece en ninguna, **se vuelve a la que estaba
+ * abierta**: dejarle a alguien el formulario en otra pestaña, sin marca y sin
+ * explicación, es peor que no haber intentado.
+ *
+ * @returns {Promise<HTMLElement|null>}
+ */
+async function buscarEnPestanas(payload) {
+    const pestanas = [...document.querySelectorAll(".o_notebook .nav-link, .o_notebook_headers .nav-link")];
+    const original = pestanas.find((p) => p.classList.contains("active"));
+    for (const pestana of pestanas) {
+        if (pestana === original) {
+            continue;
+        }
+        pestana.click();
+        const el = await esperarA(() => findSpotlightTarget(payload));
+        if (el) {
+            return el;
+        }
+    }
+    original?.click();
+    // La vuelta también necesita su render: si no, la pestaña queda marcada como
+    // activa con el contenido de la otra a medio dibujar.
+    await esperarA(() => null);
+    return null;
+}
+
+/**
+ * Reintentar hasta que Owl termine de dibujar, o hasta rendirse.
+ *
+ * Un solo `requestAnimationFrame` no alcanza: Owl encola el render en
+ * microtasks y el DOM de la pestaña recién abierta puede llegar uno o dos
+ * frames después. Medido — con un frame, el campo no aparecía y la pestaña
+ * quedaba a medio dibujar.
+ */
+async function esperarA(buscar, intentos = 12) {
+    for (let i = 0; i < intentos; i++) {
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        const encontrado = buscar();
+        if (encontrado) {
+            return encontrado;
+        }
+    }
+    return null;
+}
+
+/**
  * La gota, atada al servicio `overlay` de Odoo.
  *
  * Se monta la primera vez que se usa: una sesión que nunca ve una gota no paga
@@ -138,11 +193,16 @@ export function makeSpotlight(overlay, deps = {}) {
     /**
      * Poner la gota sobre lo que pida el payload.
      *
-     * @returns {boolean} si se encontró dónde ponerla. Ese dato decide si hay que
-     *   avisarle a la persona que está parada en otra pantalla.
+     * @returns {Promise<boolean>} si se encontró dónde ponerla. Ese dato decide si
+     *   hay que avisarle a la persona que está parada en otra pantalla.
      */
-    function spotlight(payload) {
-        const el = findSpotlightTarget(payload || {});
+    async function spotlight(payload) {
+        let el = findSpotlightTarget(payload || {});
+        if (!el) {
+            // Puede estar en una pestaña cerrada del formulario, que Odoo no
+            // renderiza hasta que se abre.
+            el = await buscarEnPestanas(payload || {});
+        }
         if (!el) {
             return false;
         }

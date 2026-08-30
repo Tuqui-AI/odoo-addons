@@ -346,8 +346,10 @@ export class TuquiPanel extends Component {
      * el contexto de la página viaja en cada mensaje — así que lo que hay que
      * evitar es que la persona se quede buscando una marca que nunca apareció.
      */
-    _spotlight(payload) {
-        if (this.tuquiAssistant.spotlight(payload)) {
+    async _spotlight(payload) {
+        // Es `await` porque la marca puede tener que abrir una pestaña del
+        // formulario para llegar al campo, y eso pasa por un render de Owl.
+        if (await this.tuquiAssistant.spotlight(payload)) {
             return;
         }
         const que = payload.label || payload.field || payload.action || "";
