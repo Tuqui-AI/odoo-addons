@@ -1,0 +1,77 @@
+============
+Tuqui Embed
+============
+
+Permite que un origen declarado —el Tuqui de la empresa— muestre las pantallas
+de este Odoo dentro de un iframe, para que quien conversa con el asistente vea
+el registro del que están hablando al lado de la conversación.
+
+**Viene apagado.** Sin el parámetro cargado, no cambia nada.
+
+Cómo se enciende
+================
+
+En *Ajustes → Técnico → Parámetros del sistema*, crear:
+
+::
+
+    tuqui.embed_origins = https://tuqui.com
+
+Varios orígenes van separados por espacios. El valor entra tal cual en
+``frame-ancestors``, así que tiene que ser el origen completo (esquema + host +
+puerto), sin barra final.
+
+Para apagarlo: borrar el parámetro o dejarlo vacío.
+
+Qué hace exactamente
+====================
+
+Dos cosas, y las dos hacen falta:
+
+1. **Permite el frame** desde los orígenes de la lista: saca el
+   ``X-Frame-Options`` y responde ``Content-Security-Policy: frame-ancestors
+   <lista>``.
+
+2. **Deja que la sesión viaje dentro del iframe**: reemite la cookie
+   ``session_id`` con ``SameSite=None; Secure``, sólo en las respuestas cuyo
+   ``Origin``/``Referer`` está en la lista.
+
+Sin la segunda, la primera sola no sirve: el iframe se ve, pero mostrando la
+pantalla de login, porque el browser no manda una cookie ``SameSite=Lax`` en un
+frame de otro sitio.
+
+Lo que hay que decidir antes de encenderlo
+==========================================
+
+**El punto abierto es la cookie.** ``SameSite=Lax`` es hoy una protección contra
+CSRF: hace que el browser no mande la sesión en pedidos que salen de otro sitio.
+Bajarla a ``None`` la saca.
+
+Este módulo acota el alcance —sólo reemite la cookie cuando el pedido viene del
+origen declarado— pero **eso acota, no elimina**: la cookie es una sola y el
+browser la guarda con el último atributo que vio. Después de una vuelta por el
+panel, la sesión de esa persona queda ``SameSite=None`` hasta que se renueve.
+
+Qué queda en pie igual:
+
+- El origen tiene que estar en la lista, y lo declara un administrador.
+- Odoo valida CSRF por token en los formularios del backend.
+- ``httponly`` sigue puesto: el JavaScript de la página que embebe no puede leer
+  la cookie.
+
+Lo que se pierde: la red de contención para cualquier ruta que hoy dependa del
+``SameSite`` y no de un token.
+
+**La alternativa** es una cookie aparte, de vida corta, emitida sólo para las
+rutas que se muestran embebidas, dejando la sesión normal intacta. Es más
+trabajo y toca el manejo de sesión de Odoo, y por eso es una decisión y no un
+detalle de implementación.
+
+Notas
+=====
+
+- ``SameSite=None`` exige ``Secure``. Sobre ``http://`` el browser sólo lo acepta
+  en localhost; cualquier despliegue real es HTTPS, así que no cambia nada ahí.
+- El parámetro se lee en cada request, sin cachear: sacar el permiso surte
+  efecto cuando el administrador lo saca, no cuando alguien reinicie el
+  servidor.
