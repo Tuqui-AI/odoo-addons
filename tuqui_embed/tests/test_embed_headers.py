@@ -96,3 +96,39 @@ class TestEmbedHeaders(HttpCase):
         crudas = response.raw.headers.getlist("Set-Cookie")
         cookies = [v for v in crudas if v.startswith("session_id=")]
         return cookies[-1] if cookies else ""
+
+
+@tagged("post_install", "-at_install")
+class TestEmbedCapability(HttpCase):
+    """Lo que este Odoo le ANUNCIA a Tuqui sobre si se deja mostrar.
+
+    El módulo `tuqui` ya tiene un handshake donde declara lo que sabe hacer, y
+    Tuqui lo lee para decidir. Que el embed viaje por ahí en vez de que Tuqui lo
+    adivine pidiendo la página no es una preferencia de estilo: una sonda anónima
+    no lleva el origen de Tuqui, y esta política mira el origen — así que
+    adivinar da el veredicto equivocado justo cuando el módulo está encendido.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.env["ir.config_parameter"].sudo().set_param(PARAM, False)
+
+    def _caps(self):
+        return self.url_open("/tuqui/health").json().get("capabilities", [])
+
+    def test_apagado_no_se_anuncia_como_embebible(self):
+        """Instalado y sin configurar, este Odoo sigue diciendo que no. Es la
+        verdad: sin orígenes cargados no permite el frame."""
+        assert "embed.frame" not in self._caps()
+
+    def test_encendido_se_anuncia(self):
+        self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
+        assert "embed.frame" in self._caps()
+
+    def test_no_pisa_lo_que_ya_anunciaba(self):
+        """El handshake es de `tuqui`: sumamos, no reemplazamos. Perder
+        `rpc.execute_kw` dejaría a Tuqui creyendo que no puede leer nada."""
+        self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
+        caps = self._caps()
+        assert "rpc.execute_kw" in caps
+        assert "access_log" in caps
