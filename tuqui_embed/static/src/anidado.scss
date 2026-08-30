@@ -1,0 +1,10 @@
+// Odoo mostrado adentro de Tuqui es una VISTA: el botón del asistente no va,
+// porque la conversación ya está del otro lado de la pantalla. Sin esto, el
+// botón seguiría abriendo un Tuqui adentro de Tuqui — el bucle que este módulo
+// vino a cortar, sólo que a mano.
+.tuqui-anidado {
+    .o_tuqui_systray,
+    .o_tuqui_panel {
+        display: none !important;
+    }
+}
