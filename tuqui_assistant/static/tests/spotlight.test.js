@@ -127,7 +127,7 @@ describe("makeSpotlight", () => {
         return { pointer, added, handle, calls };
     }
 
-    test("apunta la gota al elemento y deja el texto listo para cuando se acerque", () => {
+    test("apunta la gota al elemento y deja el texto listo para cuando se acerque", async () => {
         // La gota queda CERRADA: un punto que dice "acá", no un cartel. Un globo
         // abierto permanente taparía los campos vecinos justo cuando la persona
         // los necesita para ubicarse.
@@ -136,7 +136,7 @@ describe("makeSpotlight", () => {
         document.body.appendChild(el);
         const { handle, calls } = harness();
 
-        expect(handle.spotlight({ field: "l10n_ar_afip_pos_number", hint: "El número que te dio ARCA" })).toBe(true);
+        expect(await handle.spotlight({ field: "l10n_ar_afip_pos_number", hint: "El número que te dio ARCA" })).toBe(true);
         expect(calls[0].anchor).toBe(el);
         expect(calls[0].step.content).toBe("El número que te dio ARCA");
         expect(calls[1]).toEqual({ showContent: false });
@@ -145,7 +145,7 @@ describe("makeSpotlight", () => {
         el.remove();
     });
 
-    test("el texto se despliega al acercarse AL CAMPO, no sólo a la gota", () => {
+    test("el texto se despliega al acercarse AL CAMPO, no sólo a la gota", async () => {
         // El gesto natural de quien ve la marca es ir al lugar señalado, no al
         // puntito. Si el texto sólo saliera sobre la gota, casi nadie lo vería.
         const el = document.createElement("div");
@@ -153,7 +153,7 @@ describe("makeSpotlight", () => {
         document.body.appendChild(el);
         const { handle, calls } = harness();
 
-        handle.spotlight({ field: "campo_con_texto", hint: "algo que explica" });
+        await handle.spotlight({ field: "campo_con_texto", hint: "algo que explica" });
         calls.length = 0;
         el.dispatchEvent(new MouseEvent("mouseenter"));
         expect(calls).toEqual([{ showContent: true }]);
@@ -164,7 +164,7 @@ describe("makeSpotlight", () => {
         el.remove();
     });
 
-    test("el campo de la gota vieja deja de abrir un texto que ya no es suyo", () => {
+    test("el campo de la gota vieja deja de abrir un texto que ya no es suyo", async () => {
         // Sin despegar los listeners, pasar por el campo marcado hace diez
         // minutos desplegaría el texto de la marca actual, que habla de otra cosa.
         const viejo = document.createElement("div");
@@ -174,8 +174,8 @@ describe("makeSpotlight", () => {
         document.body.append(viejo, nuevo);
         const { handle, calls } = harness();
 
-        handle.spotlight({ field: "campo_viejo", hint: "el de antes" });
-        handle.spotlight({ field: "campo_nuevo", hint: "el de ahora" });
+        await handle.spotlight({ field: "campo_viejo", hint: "el de antes" });
+        await handle.spotlight({ field: "campo_nuevo", hint: "el de ahora" });
         calls.length = 0;
         viejo.dispatchEvent(new MouseEvent("mouseenter"));
         expect(calls).toEqual([]);
@@ -185,13 +185,13 @@ describe("makeSpotlight", () => {
         nuevo.remove();
     });
 
-    test("sin texto, la gota no queda esperando un hover que no muestra nada", () => {
+    test("sin texto, la gota no queda esperando un hover que no muestra nada", async () => {
         const el = document.createElement("div");
         el.setAttribute("name", "campo_pelado");
         document.body.appendChild(el);
         const { handle, calls } = harness();
 
-        handle.spotlight({ field: "campo_pelado" });
+        await handle.spotlight({ field: "campo_pelado" });
         calls.length = 0;
         el.dispatchEvent(new MouseEvent("mouseenter"));
         expect(calls).toEqual([]);
@@ -200,40 +200,97 @@ describe("makeSpotlight", () => {
         el.remove();
     });
 
-    test("si no está en la pantalla, dice que no pudo y no monta nada", () => {
+    test("si no está en la pantalla, dice que no pudo y no monta nada", async () => {
         // El caso que hace que se le pueda avisar a la persona que está parada en
         // otra pantalla, en vez de dejarla buscando una marca que nunca apareció.
         // Y no montar el overlay importa: una sesión sin gotas no paga nada.
         const { added, calls, handle } = harness();
 
-        expect(handle.spotlight({ field: "no_existe_en_ningun_lado" })).toBe(false);
+        expect(await handle.spotlight({ field: "no_existe_en_ningun_lado" })).toBe(false);
         expect(added.length).toBe(0);
         expect(calls.length).toBe(0);
 
         handle.destroy();
     });
 
-    test("la gota se monta una sola vez aunque haya varias marcas", () => {
+    test("la gota se monta una sola vez aunque haya varias marcas", async () => {
         const el = document.createElement("div");
         el.setAttribute("name", "campo_x");
         document.body.appendChild(el);
         const { added, handle } = harness();
 
-        handle.spotlight({ field: "campo_x" });
-        handle.spotlight({ field: "campo_x" });
+        await handle.spotlight({ field: "campo_x" });
+        await handle.spotlight({ field: "campo_x" });
         expect(added.length).toBe(1);
 
         handle.destroy();
         el.remove();
     });
 
-    test("destroy saca la gota de la pantalla", () => {
+    test("busca el campo en las pestañas cerradas del formulario", async () => {
+        // Media configuración de Odoo vive en una pestaña que no es la abierta, y
+        // Odoo no renderiza el contenido de una cerrada. Medido con el caso real:
+        // "ARCA POS Number" vive en "Advanced Settings", el agente hacía todo bien
+        // y la marca no aparecía porque el campo no estaba en el DOM.
+        const form = document.createElement("div");
+        form.innerHTML = `
+            <div class="o_notebook">
+                <a class="nav-link active" data-p="1">Journal Entries</a>
+                <a class="nav-link" data-p="2">Advanced Settings</a>
+            </div>
+            <div class="paginas"></div>`;
+        document.body.appendChild(form);
+        const paginas = form.querySelector(".paginas");
+        // El comportamiento de Odoo: sólo la pestaña activa tiene contenido.
+        for (const tab of form.querySelectorAll(".nav-link")) {
+            tab.addEventListener("click", () => {
+                form.querySelectorAll(".nav-link").forEach((t) => t.classList.remove("active"));
+                tab.classList.add("active");
+                paginas.innerHTML =
+                    tab.dataset.p === "2" ? '<div name="l10n_ar_afip_pos_number" class="el-campo"></div>' : "";
+            });
+        }
+        const { handle, calls } = harness();
+
+        expect(await handle.spotlight({ field: "l10n_ar_afip_pos_number" })).toBe(true);
+        expect(calls[0].anchor?.className).toBe("el-campo");
+
+        handle.destroy();
+        form.remove();
+    });
+
+    test("si no está en ninguna pestaña, deja el formulario como estaba", async () => {
+        // Dejarle a alguien el formulario en otra pestaña, sin marca y sin
+        // explicación, es peor que no haber intentado.
+        const form = document.createElement("div");
+        form.innerHTML = `
+            <div class="o_notebook">
+                <a class="nav-link active" data-p="1">Primera</a>
+                <a class="nav-link" data-p="2">Segunda</a>
+            </div>`;
+        document.body.appendChild(form);
+        for (const tab of form.querySelectorAll(".nav-link")) {
+            tab.addEventListener("click", () => {
+                form.querySelectorAll(".nav-link").forEach((t) => t.classList.remove("active"));
+                tab.classList.add("active");
+            });
+        }
+        const { handle } = harness();
+
+        expect(await handle.spotlight({ field: "campo_que_no_existe" })).toBe(false);
+        expect(form.querySelector(".nav-link.active")?.dataset.p).toBe("1");
+
+        handle.destroy();
+        form.remove();
+    });
+
+    test("destroy saca la gota de la pantalla", async () => {
         const el = document.createElement("div");
         el.setAttribute("name", "campo_y");
         document.body.appendChild(el);
         const { added, calls, handle } = harness();
 
-        handle.spotlight({ field: "campo_y" });
+        await handle.spotlight({ field: "campo_y" });
         handle.destroy();
         expect(added).toInclude("removed");
         expect(calls).toInclude("destroy");

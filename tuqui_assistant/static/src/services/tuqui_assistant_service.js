@@ -1560,7 +1560,7 @@ export const tuquiAssistantService = {
          * apareció. Con el resultado, dice "estás en otra pantalla" o navega.
          */
         const spotlightHandle = makeSpotlight(overlay);
-        const spotlight = (payload) => spotlightHandle.spotlight(payload);
+        const spotlight = async (payload) => spotlightHandle.spotlight(payload);
 
         async function reloadView() {
             const viewModel = _owner?.model;
@@ -1623,13 +1623,51 @@ export const tuquiAssistantService = {
          *
          * @param {{model?: string, mode?: string, viewType?: string, domain?: any[], defaults?: object, title?: string}} payload
          */
-        async function navigate({ model, mode, viewType, domain, defaults, title } = {}) {
+        async function navigate({ model, mode, viewType, domain, defaults, title, resId } = {}) {
             if (typeof model !== "string" || !model.trim()) {
                 notification.add(
                     _t("Cannot navigate: missing Odoo model to open."),
                     { type: "danger" }
                 );
                 return false;
+            }
+            if (mode === "record") {
+                // Abrir el formulario de UN registro que ya existe.
+                //
+                // Es el modo que le faltaba al trío, y sin él no se puede guiar a
+                // nadie sobre un campo: los campos viven en el formulario, no en la
+                // lista, así que "andá al diario y te marco el punto de venta"
+                // terminaba mostrando una lista donde ese campo no existe y una
+                // marca que no tenía dónde caer.
+                const id = Number(resId);
+                if (!Number.isInteger(id) || id <= 0) {
+                    notification.add(
+                        _t("Cannot open that record: missing or invalid id."),
+                        { type: "danger" }
+                    );
+                    return false;
+                }
+                try {
+                    await action.doAction({
+                        type: "ir.actions.act_window",
+                        name: title || model,
+                        res_model: model,
+                        res_id: id,
+                        views: [[false, "form"]],
+                        target: "current",
+                        view_id: false,
+                    });
+                } catch (e) {
+                    // Odoo rechaza por sus propios permisos o porque el registro no
+                    // existe. Se lo decimos a la persona: un form que no se abre y
+                    // no explica por qué es indistinguible de una pantalla colgada.
+                    notification.add(
+                        _t("Could not open that record in Odoo: %s", e.message || e),
+                        { type: "danger" }
+                    );
+                    return false;
+                }
+                return true;
             }
             if (mode === "browse") {
                 let vt = BROWSE_VIEW_TYPES.includes(viewType) ? viewType : "list";
