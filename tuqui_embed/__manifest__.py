@@ -7,6 +7,9 @@
     "website": "https://tuqui.com",
     "license": "LGPL-3",
     "depends": ["base", "web", "tuqui"],
+    "data": [
+        "data/ir_config_parameter.xml",
+    ],
     "installable": True,
     "application": False,
     "auto_install": False,
