@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<odoo>
+<odoo noupdate="1">
     <!--
         El parámetro se crea VACÍO, con su descripción.
 
@@ -13,8 +13,9 @@
         Vacío no cambia nada: el módulo instalado y sin origen cargado es
         indistinguible de no estar instalado.
 
-        Va en `data` del manifest con la bandera `noupdate` puesta en la entrada,
-        para no pisar el valor de un cliente en cada actualización del módulo.
+        Va con `noupdate="1"` en la raíz, y no es cosmético: sin eso, cada
+        `-u tuqui_embed` reescribe el `value` con el vacío del XML y le apaga el
+        embed al cliente sin decir nada.
     -->
     <record id="param_embed_origins" model="ir.config_parameter">
         <field name="key">tuqui.embed_origins</field>

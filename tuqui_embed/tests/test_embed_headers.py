@@ -7,6 +7,7 @@ no estar instalado. Ese es el invariante que un cambio futuro podría romper sin
 que nadie lo note, porque todo seguiría funcionando igual de bien.
 """
 
+from odoo.http import get_session_max_inactivity
 from odoo.tests import HttpCase, tagged
 
 from ..controllers.health import TuquiEmbedHealth
@@ -37,7 +38,10 @@ class TestEmbedHeaders(HttpCase):
         # El XFO se saca además de poner el CSP: un browser que sólo entienda
         # XFO tiene que ver la lista, no un DENY que le gane igual.
         self.assertNotIn("X-Frame-Options", resp.headers)
-        self.assertEqual(resp.headers.get("Content-Security-Policy"), "frame-ancestors %s" % TUQUI)
+        self.assertEqual(
+            resp.headers.get("Content-Security-Policy"),
+            "frame-ancestors 'self' %s" % TUQUI,
+        )
 
     def test_un_origen_que_no_esta_en_la_lista_no_queda_habilitado(self):
         """`frame-ancestors` con la lista NO es lo mismo que permitir a
@@ -46,6 +50,45 @@ class TestEmbedHeaders(HttpCase):
         csp = self._get().headers.get("Content-Security-Policy", "")
         self.assertNotIn("*", csp)
         self.assertNotIn("https://otro.example.com", csp)
+
+    def test_odoo_sigue_pudiendo_embeberse_a_si_mismo(self):
+        """`'self'` no es cortesía: Odoo muestra sus propias páginas en iframes
+        del mismo origen —el visor de PDF y de texto, el preview de reportes— y
+        una lista sin `'self'` los deja en blanco para TODA la base en cuanto se
+        prende el switch. El default de Odoo es exactamente `frame-ancestors
+        'self'`; esto lo AMPLÍA, no lo reemplaza."""
+        self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
+        self.assertIn("'self'", self._get().headers.get("Content-Security-Policy", ""))
+
+    def test_la_csp_que_puso_odoo_no_se_pierde(self):
+        """El header no se reemplaza, se completa.
+
+        Odoo le pone `default-src 'none'` a toda respuesta `image/*`: es lo que
+        sandboxea un SVG subido como adjunto. Escribir la CSP encima dejaba ese
+        SVG ejecutando script en el origen de Odoo — un agujero que no tiene nada
+        que ver con embeber y que aparecía en todas las respuestas.
+        """
+        self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
+        resp = self.url_open("/web/binary/company_logo")
+        self.assertTrue(
+            resp.headers.get("Content-Type", "").startswith("image/"),
+            "el control no sirve si la respuesta no es una imagen: %s" % resp.headers.get("Content-Type"),
+        )
+        csp = resp.headers.get("Content-Security-Policy", "")
+        self.assertIn("default-src 'none'", csp)
+        self.assertIn("frame-ancestors", csp)
+
+    def test_la_cookie_aflojada_no_se_gana_un_ano_de_vida(self):
+        """Aflojar el SameSite no puede, de paso, desarmar la caducidad.
+
+        Sin `max_age`, el `set_cookie` de Odoo usa `expires=-1` y la cookie queda
+        con un año, reemplazando la ventana de inactividad configurada. La cuenta
+        se pide a la misma función que usa Odoo, así que si el admin la cambia el
+        test la sigue.
+        """
+        self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
+        cookie = self._cookies(self._get(headers={"Origin": TUQUI})).lower()
+        self.assertIn("max-age=%d" % get_session_max_inactivity(self.env), cookie)
 
     def test_la_cookie_se_afloja_sin_esperar_a_reconocer_el_pedido(self):
         """Por qué NO se acota al pedido que viene del panel, aunque se pueda.

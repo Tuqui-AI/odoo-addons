@@ -30,11 +30,20 @@ Dos cosas, y las dos hacen falta:
 
 1. **Permite el frame** desde los orígenes de la lista: saca el
    ``X-Frame-Options`` y responde ``Content-Security-Policy: frame-ancestors
-   <lista>``.
+   'self' <lista>``. El ``'self'`` es el default de Odoo y se conserva —lo
+   necesitan sus propios iframes, como el visor de PDF—: esto amplía la lista,
+   no la reemplaza. Las otras directivas que Odoo haya puesto también quedan.
 
 2. **Deja que la sesión viaje dentro del iframe**: reemite la cookie
-   ``session_id`` con ``SameSite=None; Secure``, sólo en las respuestas cuyo
-   ``Origin``/``Referer`` está en la lista.
+   ``session_id`` con ``SameSite=None; Secure``, en **todas** las respuestas de
+   este Odoo mientras el parámetro esté cargado — no sólo en las que vienen del
+   panel. No es comodidad: el primer pedido del iframe se puede detectar por
+   ``Referer``, pero llega **sin cookie** (la guardada es ``SameSite=Lax`` y no
+   viaja en un frame ajeno), así que acotarlo por origen es aflojarla siempre un
+   pedido tarde, cuando la navegación ya terminó en el login. Se mantienen las
+   condiciones de Odoo: no se emite si la sesión no se guarda del lado del
+   servidor (``auth="bearer"``, pedidos stateless) ni sobre respuestas cacheables
+   en público, y lleva el mismo ``max-age`` que usa Odoo.
 
 Sin la segunda, la primera sola no sirve: el iframe se ve, pero mostrando la
 pantalla de login, porque el browser no manda una cookie ``SameSite=Lax`` en un
@@ -81,10 +90,12 @@ Lo que hay que decidir antes de encenderlo
 CSRF: hace que el browser no mande la sesión en pedidos que salen de otro sitio.
 Bajarla a ``None`` la saca.
 
-Este módulo acota el alcance —sólo reemite la cookie cuando el pedido viene del
-origen declarado— pero **eso acota, no elimina**: la cookie es una sola y el
-browser la guarda con el último atributo que vio. Después de una vuelta por el
-panel, la sesión de esa persona queda ``SameSite=None`` hasta que se renueve.
+Y conviene ser preciso con el alcance, porque es lo que hay que aprobar: **la
+cookie sale ``SameSite=None`` en toda respuesta de este Odoo**, no sólo en las
+que vienen del panel (arriba está el por qué: acotarlo por origen llega tarde).
+La cookie es una sola y el browser la guarda con el último atributo que vio, así
+que basta que el parámetro esté cargado para que la sesión de cualquier usuario
+de esa base quede ``SameSite=None``.
 
 Qué queda en pie igual:
 
