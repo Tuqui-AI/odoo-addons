@@ -62,9 +62,7 @@ class TestRegistroDelInterruptor(TransactionCase):
 
     def test_otro_parametro_no_se_registra(self):
         """El módulo no tiene nada que decir sobre el resto de la configuración."""
-        otro = self.env["ir.config_parameter"].sudo().create(
-            {"key": "tuqui.otra_cosa", "value": "algo"}
-        )
+        otro = self.env["ir.config_parameter"].sudo().create({"key": "tuqui.otra_cosa", "value": "algo"})
         with self.assertNoLogs(LOGGER, logging.WARNING):
             otro._registrar_cambio_de_embed("otro valor")
 
@@ -86,6 +84,4 @@ class TestRegistroDelInterruptor(TransactionCase):
 
     def test_crear_otro_parametro_no_se_registra(self):
         with self.assertNoLogs(LOGGER, logging.WARNING):
-            self.env["ir.config_parameter"].sudo().create(
-                {"key": "tuqui.otra_cosa_mas", "value": "algo"}
-            )
+            self.env["ir.config_parameter"].sudo().create({"key": "tuqui.otra_cosa_mas", "value": "algo"})
