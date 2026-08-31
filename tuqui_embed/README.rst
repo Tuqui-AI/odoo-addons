@@ -109,3 +109,25 @@ Notas
 - El parámetro se lee en cada request, sin cachear: sacar el permiso surte
   efecto cuando el administrador lo saca, no cuando alguien reinicie el
   servidor.
+
+Por qué se afloja siempre, y no sólo para el panel
+--------------------------------------------------
+
+La versión anterior aflojaba el ``SameSite`` **sólo cuando reconocía que el
+pedido venía del origen declarado**, para acotar el alcance. No funciona, y el
+motivo es un huevo y gallina medido contra un navegador de verdad:
+
+El primer pedido que hace el iframe **sí** trae ``Referer`` del panel — se lo
+puede reconocer perfectamente. Pero llega **sin cookie de sesión**, porque la
+que está guardada en ese momento es la normal (``SameSite=Lax``), y esa no viaja
+dentro de un frame de otro sitio. Odoo lo trata como anónimo y redirige al
+login. La cookie se afloja en la respuesta… de una navegación que ya terminó
+mal, y la persona ve la pantalla de login adentro del panel.
+
+Acotar por origen era, entonces, **aflojar siempre un pedido tarde**.
+
+Lo que esto cambia en el riesgo: de "los pedidos que vienen del panel" a "todos
+los de este Odoo". Lo que NO cambia: el interruptor sigue siendo el parámetro —
+sin ``tuqui.embed_origins`` cargado, el módulo no toca ninguna cookie — y la
+medición de arriba sigue valiendo, porque no dependía de qué pedidos se
+aflojaban sino de qué puede hacer un origen ajeno con una sesión aflojada.
