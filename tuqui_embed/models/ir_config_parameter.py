@@ -14,6 +14,14 @@ VA EN EL LOG Y NO EN LA INTERFAZ, a propósito. Se evaluó dejar una nota en el
 chatter de la compañía y se descartó: a quien administra no le aporta nada y
 ensucia un lugar que se lee por otros motivos. El log lo consulta quien está
 investigando algo, que es exactamente cuando este dato importa.
+
+Y VA EN `info`, NO EN `warning`. La primera versión usaba `warning` por lo
+serio del cambio, y el runbot lo cazó: marca rojo cualquier build cuyo log
+traiga un warning, y este módulo emitía uno en cada encendido legítimo del
+interruptor —trece sólo en su propia batería de tests—. La convención de Odoo
+es la correcta: `warning` es «algo anda mal y hay que mirarlo», y esto es una
+acción deliberada de un administrador. Lo que hace auditable a la línea es que
+diga quién, cuándo y de qué a qué, no su nivel de severidad.
 """
 
 import logging
@@ -37,7 +45,7 @@ class IrConfigParameter(models.Model):
             despues = (valor_nuevo or "").strip()
             if antes == despues:
                 continue
-            _logger.warning(
+            _logger.info(
                 "tuqui_embed: %s cambiado por %s (uid=%s) — antes=%r ahora=%r. "
                 "Con un origen cargado, Odoo se deja mostrar dentro de ese sitio y "
                 "emite la sesión con SameSite=None.",
@@ -57,7 +65,7 @@ class IrConfigParameter(models.Model):
     def create(self, vals_list):
         for vals in vals_list:
             if vals.get("key") == EMBED_ORIGINS_PARAM and (vals.get("value") or "").strip():
-                _logger.warning(
+                _logger.info(
                     "tuqui_embed: %s creado por %s (uid=%s) con %r. Con un origen cargado, "
                     "Odoo se deja mostrar dentro de ese sitio y emite la sesión con "
                     "SameSite=None.",
