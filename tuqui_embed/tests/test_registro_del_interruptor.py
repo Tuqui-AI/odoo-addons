@@ -38,7 +38,7 @@ class TestRegistroDelInterruptor(TransactionCase):
 
     def test_encenderlo_queda_en_el_log_con_quien_lo_hizo(self):
         parametro = self._parametro("")
-        with self.assertLogs(LOGGER, logging.WARNING) as capturado:
+        with self.assertLogs(LOGGER, logging.INFO) as capturado:
             parametro._registrar_cambio_de_embed(TUQUI)
         registro = "\n".join(capturado.output)
         self.assertIn(PARAM, registro)
@@ -49,7 +49,7 @@ class TestRegistroDelInterruptor(TransactionCase):
     def test_apagarlo_tambien(self):
         """Importa igual: explica por qué un embed dejó de funcionar."""
         parametro = self._parametro(TUQUI)
-        with self.assertLogs(LOGGER, logging.WARNING) as capturado:
+        with self.assertLogs(LOGGER, logging.INFO) as capturado:
             parametro._registrar_cambio_de_embed("")
         self.assertIn(PARAM, "\n".join(capturado.output))
 
@@ -57,20 +57,20 @@ class TestRegistroDelInterruptor(TransactionCase):
         """Un guardado sin cambio no es una decisión: registrarlo llena el log de
         ruido y hace que deje de leerse."""
         parametro = self._parametro(TUQUI)
-        with self.assertNoLogs(LOGGER, logging.WARNING):
+        with self.assertNoLogs(LOGGER, logging.INFO):
             parametro._registrar_cambio_de_embed(TUQUI)
 
     def test_otro_parametro_no_se_registra(self):
         """El módulo no tiene nada que decir sobre el resto de la configuración."""
         otro = self.env["ir.config_parameter"].sudo().create({"key": "tuqui.otra_cosa", "value": "algo"})
-        with self.assertNoLogs(LOGGER, logging.WARNING):
+        with self.assertNoLogs(LOGGER, logging.INFO):
             otro._registrar_cambio_de_embed("otro valor")
 
     # ── Y que esté enchufado, o lo de arriba no se ejecuta nunca ──────────────
 
     def test_write_pasa_por_el_registro(self):
         parametro = self._parametro("")
-        with self.assertLogs(LOGGER, logging.WARNING) as capturado:
+        with self.assertLogs(LOGGER, logging.INFO) as capturado:
             parametro.write({"value": TUQUI})
         self.assertIn(TUQUI, "\n".join(capturado.output))
 
@@ -78,10 +78,10 @@ class TestRegistroDelInterruptor(TransactionCase):
         """El camino que `write` no cubre: en una instalación nueva el parámetro
         no existe, así que la primera vez es un `create`."""
         self.env["ir.config_parameter"].sudo().search([("key", "=", PARAM)]).unlink()
-        with self.assertLogs(LOGGER, logging.WARNING) as capturado:
+        with self.assertLogs(LOGGER, logging.INFO) as capturado:
             self.env["ir.config_parameter"].sudo().create({"key": PARAM, "value": TUQUI})
         self.assertIn(TUQUI, "\n".join(capturado.output))
 
     def test_crear_otro_parametro_no_se_registra(self):
-        with self.assertNoLogs(LOGGER, logging.WARNING):
+        with self.assertNoLogs(LOGGER, logging.INFO):
             self.env["ir.config_parameter"].sudo().create({"key": "tuqui.otra_cosa_mas", "value": "algo"})
