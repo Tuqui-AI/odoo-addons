@@ -347,9 +347,21 @@ export class TuquiPanel extends Component {
      * evitar es que la persona se quede buscando una marca que nunca apareció.
      */
     async _spotlight(payload) {
-        // Es `await` porque la marca puede tener que abrir una pestaña del
-        // formulario para llegar al campo, y eso pasa por un render de Owl.
-        if (await this.tuquiAssistant.spotlight(payload)) {
+        // El try NO es defensa por si acaso: es la única forma de que la promesa
+        // valga. A esta función se la llama sin `await` (no hay a quién
+        // devolverle el resultado), así que un throw adentro se volvía un
+        // unhandled rejection: la persona se quedaba sin marca Y sin aviso, que
+        // es exactamente lo que este método existe para evitar. Un error
+        // señalando es indistinguible, para quien mira, de una marca que no cayó.
+        let marcado = false;
+        try {
+            // Es `await` porque la marca puede tener que abrir una pestaña del
+            // formulario para llegar al campo, y eso pasa por un render de Owl.
+            marcado = await this.tuquiAssistant.spotlight(payload);
+        } catch (error) {
+            console.warn("tuqui_assistant: falló al señalar en la pantalla", error);
+        }
+        if (marcado) {
             return;
         }
         const que = payload.label || payload.field || payload.action || "";
