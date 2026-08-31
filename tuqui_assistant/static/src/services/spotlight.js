@@ -1,6 +1,26 @@
 /** @odoo-module **/
-import { createPointerState } from "@web_tour/js/tour_pointer/tour_pointer_state";
-import { Gota } from "@tuqui_assistant/spotlight/gota";
+
+/**
+ * EL PUNTERO SE CARGA CUANDO SE USA, NO AL ABRIR ODOO.
+ *
+ * Importar `@web_tour/...` arriba arrastra el bundle de tours de Odoo en cuanto
+ * se carga este archivo — aunque nadie pida nunca una marca. Fuera de un iframe
+ * eso pasa desapercibido; **con Odoo mostrado dentro del panel de Tuqui, cuelga
+ * el hilo principal de la pestaña entera** a los dos segundos de entrar al menú
+ * de aplicaciones. Reproducido, y aislado sacando este archivo del bundle.
+ *
+ * Con el import adentro de la función, el bundle de tours llega recién cuando
+ * hay una marca que dibujar. Un Odoo embebido nunca pide una —el panel del
+ * asistente no se abre ahí— así que nunca lo paga. Es, además, lo que el diseño
+ * ya prometía: "una sesión que nunca ve una gota no paga nada".
+ */
+async function cargarPuntero() {
+    const [{ createPointerState }, { obtenerGota }] = await Promise.all([
+        import("@web_tour/js/tour_pointer/tour_pointer_state"),
+        import("@tuqui_assistant/spotlight/gota"),
+    ]);
+    return { createPointerState, Gota: await obtenerGota() };
+}
 
 /**
  * La gota: señalar en la pantalla de Odoo el lugar donde hay que hacer algo.
@@ -182,8 +202,6 @@ async function esperarA(buscar, intentos = 12) {
  * @param {object} [deps] sólo para tests: reemplaza el componente real
  */
 export function makeSpotlight(overlay, deps = {}) {
-    const makePointer = deps.createPointerState || createPointerState;
-    const Pointer = deps.Gota || Gota;
     let pointer = null;
     let removeOverlay = null;
     let timer = null;
@@ -207,12 +225,17 @@ export function makeSpotlight(overlay, deps = {}) {
             return false;
         }
         if (!pointer) {
-            pointer = makePointer();
+            // Recién acá se trae el puntero de Odoo (y con él, el bundle de
+            // tours). Los tests inyectan los suyos por `deps` y no cargan nada.
+            const { createPointerState, Gota } = deps.createPointerState
+                ? { createPointerState: deps.createPointerState, Gota: deps.Gota }
+                : await cargarPuntero();
+            pointer = createPointerState();
             // Mismo `sequence` que usa el propio tour_service: la capa por encima
             // de los z-index de bootstrap, para que la marca no quede debajo de un
             // modal o de la barra de acciones.
             removeOverlay = overlay.add(
-                Pointer,
+                Gota,
                 { pointerState: pointer.state, bounce: true },
                 { sequence: 1100 }
             );
