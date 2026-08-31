@@ -93,6 +93,26 @@ async function mountFormConEstados(resId = 1) {
     return getService("tuquiAssistant");
 }
 
+/** `email` es editable o no SEGÚN el valor de otro campo del mismo formulario.
+ *  Es el caso que la definición estática del campo no puede contar: `email` no
+ *  es readonly en el modelo, así que el chequeo viejo lo dejaba pasar siempre. */
+const FORM_ARCH_READONLY_CONDICIONAL = `
+    <form>
+        <field name="active"/>
+        <field name="email" readonly="active"/>
+        <field name="name"/>
+    </form>`;
+
+async function mountFormReadonlyCondicional(resId = 1) {
+    await mountView({
+        type: "form",
+        resModel: "res.partner",
+        resId,
+        arch: FORM_ARCH_READONLY_CONDICIONAL,
+    });
+    return getService("tuquiAssistant");
+}
+
 /**
  * Aplica una propuesta y espera el re-render.
  *
@@ -237,6 +257,40 @@ describe("applyProposal — one2many", () => {
         });
         expect(ok).toBe(true);
         expect(".o_field_widget[name=child_ids] .o_data_row").toHaveCount(2);
+    });
+});
+
+describe("applyProposal — readonly condicional", () => {
+    /* La rama nueva: el readonly se pregunta EVALUADO contra este registro.
+     *
+     * Los otros tests de descarte usan `ref`, que es readonly en la DEFINICIÓN
+     * del campo — ese caso ya lo agarraba el chequeo viejo, así que pasan igual
+     * con la rama nueva borrada. Estos dos no: el par mide justo el
+     * discriminador, el mismo campo del mismo formulario en los dos sentidos.
+     */
+
+    test("con la condición cumplida NO se escribe, aunque la definición diga que sí", async () => {
+        const assistant = await mountFormReadonlyCondicional();
+        const ok = await applyAndRender(assistant, {
+            email: "nuevo@example.com",
+            name: "Acme SA",
+        });
+        // Lo aplicable se aplica igual: descartar uno no aborta la propuesta.
+        expect(ok).toBe(true);
+        expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
+        // Y el condicional quedó como estaba: nunca un "ok" silencioso sobre un
+        // cambio que no ocurrió.
+        expect(assistant.getActiveRecord().data.email).toBe("acme@example.com");
+    });
+
+    test("y con la condición falsa sí se escribe: mismo campo, mismo formulario", async () => {
+        // El otro lado del par. Sin esto, al test de arriba lo aprobaría también
+        // un chequeo que descartara `email` siempre.
+        const assistant = await mountFormReadonlyCondicional();
+        await contains(".o_field_widget[name=active] input").click();
+        const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
+        expect(ok).toBe(true);
+        expect(assistant.getActiveRecord().data.email).toBe("nuevo@example.com");
     });
 });
 

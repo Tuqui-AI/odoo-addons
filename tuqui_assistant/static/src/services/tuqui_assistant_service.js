@@ -881,10 +881,20 @@ export const tuquiAssistantService = {
             const ctx = { ...state.context };
             if (ctx.kind === "record" && activeRecord) {
                 ctx.dirty = Boolean(activeRecord.dirty);
-                ctx.fields = serializeRecordFields(activeRecord);
                 // Qué se ve, qué se puede escribir y qué es obligatorio. Sin esto
                 // el asistente conoce los valores pero no la pantalla.
+                //
+                // VA ANTES DE `fields`, Y ES A PROPÓSITO. El consumidor serializa
+                // este objeto entero y lo CORTA en 8000 caracteres (`prompts.py`,
+                // `payload_truncated`). En un account.move o un sale.order los
+                // valores solos se acercan a ese tope, así que la última clave es
+                // la primera en desaparecer — y sería justo el estado, que es lo
+                // único que no se puede reconstruir del otro lado. Puesto antes,
+                // lo que se pierde es la cola de los VALORES, igual que antes de
+                // que este mapa existiera. Ocupa poco: sólo viajan las
+                // excepciones.
                 ctx.fieldState = serializeFieldState(activeRecord);
+                ctx.fields = serializeRecordFields(activeRecord);
             }
             // Aplanar a JSON puro: arranca los Proxies reactivos (domain/filters/
             // resIds) que romperían el structured clone de postMessage. Los datos
@@ -930,13 +940,22 @@ export const tuquiAssistantService = {
             // subject} sobre un res.partner) reventaba _update con un error JS sin
             // atrapar; ahora se ignoran y, si no queda nada válido, se avisa y corta.
             const fieldDefs = activeRecord.fields || {};
+            const enPantalla = activeRecord.activeFields || {};
             const known = {};
             const dropped = [];
             for (const [name, value] of Object.entries(changes)) {
-                // Primero que el campo EXISTA. Preguntarle a Odoo si un campo que
-                // no está en el formulario es de sólo lectura revienta: su
-                // evaluador lee la definición sin chequear que esté.
-                if (!fieldDefs[name]) {
+                // Primero que el campo EXISTA Y ESTÉ EN ESTE FORMULARIO. Son dos
+                // conjuntos distintos: `fields` es el fields_get de TODAS las
+                // vistas de la acción —lista y buscador incluidos— así que trae
+                // campos que este form no muestra. Escribir uno de esos deja un
+                // cambio que la persona no puede ver ni revisar antes de guardar,
+                // que es exactamente lo que este chequeo existe para evitar.
+                //
+                // Y es lo mismo que hacía reventar al evaluador de abajo: lee
+                // `activeFields[campo]` sin chequear que exista, tiraba TypeError,
+                // el catch lo tapaba y el chequeo caía al readonly ESTÁTICO justo
+                // en los campos que no están en pantalla.
+                if (!fieldDefs[name] || !(name in enPantalla)) {
                     dropped.push(name);
                     continue;
                 }
