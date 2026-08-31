@@ -83,6 +83,11 @@ describe("findSpotlightTarget", () => {
         // superficie de ataque.
         const root = dom(`<button class="o_form_button_save">Guardar</button>`);
         expect(findSpotlightTarget({ action: "cualquier_cosa" }, root)).toBe(null);
+        // Y "no está en la lista" incluye lo que el mapa HEREDA de Object: con un
+        // acceso directo, `toString` devolvía una función y `querySelector` moría
+        // con SyntaxError. Un nombre inventado no cubre este caso.
+        expect(findSpotlightTarget({ action: "toString" }, root)).toBe(null);
+        expect(findSpotlightTarget({ action: "constructor" }, root)).toBe(null);
     });
 
     test("si el campo no está en la pantalla, devuelve null y no algo parecido", () => {
@@ -140,6 +145,27 @@ describe("makeSpotlight", () => {
         expect(calls[0].anchor).toBe(el);
         expect(calls[0].step.content).toBe("El número que te dio ARCA");
         expect(calls[1]).toEqual({ showContent: false });
+
+        handle.destroy();
+        el.remove();
+    });
+
+    test("una posición que Owl no entiende cae en 'bottom' en vez de reventar", async () => {
+        // El par: la posición válida se respeta, la inválida no llega. Cualquier
+        // valor fuera de las cuatro hace tirar a `computePosition` DENTRO del
+        // efecto de posicionamiento de Owl, fuera de cualquier try nuestro: sin
+        // marca y sin aviso, que es el peor de los dos.
+        const el = document.createElement("div");
+        el.setAttribute("name", "campo_posicion");
+        document.body.appendChild(el);
+        const { handle, calls } = harness();
+
+        await handle.spotlight({ field: "campo_posicion", position: "top" });
+        expect(calls[0].step.tooltipPosition).toBe("top");
+
+        calls.length = 0;
+        await handle.spotlight({ field: "campo_posicion", position: "arriba a la izquierda" });
+        expect(calls[0].step.tooltipPosition).toBe("bottom");
 
         handle.destroy();
         el.remove();

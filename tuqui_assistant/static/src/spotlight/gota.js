@@ -1,4 +1,5 @@
 /** @odoo-module **/
+import { TourPointer } from "@web_tour/js/tour_pointer/tour_pointer";
 
 /**
  * La gota: el puntero de Odoo, en verde y sin el botón de parar el tour.
@@ -11,33 +12,32 @@
  * El template es una copia modificada del suyo (ver gota.xml): sin "Stop Tour",
  * que fuera de un tour desactivaría los tours del usuario y recargaría la página,
  * y con una clase propia para el salvia.
- *
- * POR QUÉ ES UNA FUNCIÓN Y NO UNA CLASE SUELTA. Heredar exige tener la clase
- * padre en el momento de definir la hija, así que un `export class Gota extends
- * TourPointer` obliga a importar `@web_tour/...` arriba de todo — y ese import
- * arrastra el bundle de tours de Odoo apenas se carga el archivo, aunque nadie
- * pida nunca una marca.
- *
- * Eso, con Odoo mostrado DENTRO del panel de Tuqui, **cuelga el hilo principal
- * de la pestaña entera** a los dos segundos de entrar al menú de aplicaciones.
- * Reproducido en 5 segundos y aislado quitando este archivo del bundle: sin él
- * no se cuelga, con él sí.
- *
- * Envolviéndolo en una función, el bundle de tours llega recién cuando hay una
- * marca que dibujar. Un Odoo embebido nunca pide una —el panel del asistente no
- * se abre ahí— así que nunca lo paga. Es, además, lo que el diseño ya prometía:
- * "una sesión que nunca ve una gota no paga nada".
  */
-
-let _gota = null;
-
-/** La clase de la gota, cargando el puntero de Odoo la primera vez. */
-export async function obtenerGota() {
-    if (!_gota) {
-        const { TourPointer } = await import("@web_tour/js/tour_pointer/tour_pointer");
-        _gota = class Gota extends TourPointer {
-            static template = "tuqui_assistant.Gota";
-        };
-    }
-    return _gota;
+/*
+ * POR QUÉ EL IMPORT VA ARRIBA Y NO DIFERIDO (se probó al revés y no funciona).
+ *
+ * Hubo una versión que cargaba el puntero con `await import("@web_tour/...")`
+ * adentro de una función, para "no arrastrar el bundle de tours". Está revertida
+ * por tres razones medidas:
+ *
+ *   1. Odoo NO transpila el `import()` dinámico: corriendo
+ *      `js_transpiler.transpile_javascript` sobre el archivo, la llamada sale
+ *      literal. En el browser queda un import nativo de un especificador pelado
+ *      dentro de un script clásico — no resuelve, y la gota nunca se dibuja.
+ *      El core de Odoo no usa `await import("@...")` en ningún addon; su forma
+ *      de acceder a un módulo sin importarlo es `odoo.loader.modules.get(...)`.
+ *   2. No había nada que ahorrar: `web_tour/static/src/js/tour_pointer/**` está
+ *      en `web.assets_backend`, el mismo bundle que este addon, y `web_tour` es
+ *      `auto_install: True`. El navegador ya lo bajó, importemos o no.
+ *   3. Tampoco se ahorra la evaluación: el loader de Odoo encola y evalúa TODO
+ *      módulo definido sin `lazy` al arrancar (`module_loader.js`, `define()`),
+ *      así que `tour_pointer` se evalúa igual sin que nadie lo importe.
+ *
+ * El cuelgue del iframe que motivó aquel cambio tiene otra causa, ya aislada: un
+ * tour de onboarding pendiente cuyo puntero lee `parent.document` cross-origin.
+ * El propio commit que introdujo la carga diferida dice que el cuelgue persiste
+ * con el asistente apagado.
+ */
+export class Gota extends TourPointer {
+    static template = "tuqui_assistant.Gota";
 }

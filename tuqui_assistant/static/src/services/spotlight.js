@@ -1,26 +1,6 @@
 /** @odoo-module **/
-
-/**
- * EL PUNTERO SE CARGA CUANDO SE USA, NO AL ABRIR ODOO.
- *
- * Importar `@web_tour/...` arriba arrastra el bundle de tours de Odoo en cuanto
- * se carga este archivo — aunque nadie pida nunca una marca. Fuera de un iframe
- * eso pasa desapercibido; **con Odoo mostrado dentro del panel de Tuqui, cuelga
- * el hilo principal de la pestaña entera** a los dos segundos de entrar al menú
- * de aplicaciones. Reproducido, y aislado sacando este archivo del bundle.
- *
- * Con el import adentro de la función, el bundle de tours llega recién cuando
- * hay una marca que dibujar. Un Odoo embebido nunca pide una —el panel del
- * asistente no se abre ahí— así que nunca lo paga. Es, además, lo que el diseño
- * ya prometía: "una sesión que nunca ve una gota no paga nada".
- */
-async function cargarPuntero() {
-    const [{ createPointerState }, { obtenerGota }] = await Promise.all([
-        import("@web_tour/js/tour_pointer/tour_pointer_state"),
-        import("@tuqui_assistant/spotlight/gota"),
-    ]);
-    return { createPointerState, Gota: await obtenerGota() };
-}
+import { createPointerState } from "@web_tour/js/tour_pointer/tour_pointer_state";
+import { Gota } from "@tuqui_assistant/spotlight/gota";
 
 /**
  * La gota: señalar en la pantalla de Odoo el lugar donde hay que hacer algo.
@@ -64,6 +44,9 @@ async function cargarPuntero() {
 /** Botones señalables y su selector. Lista CERRADA: "señalá lo que yo te diga"
  *  con selector libre es un puntero teledirigido sobre la pantalla de otra
  *  persona. Eso no es una función, es una superficie. */
+/** Las cuatro que entiende `computePosition` de Owl. Cualquier otra la hace tirar. */
+const POSICIONES = new Set(["top", "right", "bottom", "left"]);
+
 const ACTION_TARGETS = {
     save: ".o_form_button_save",
     discard: ".o_form_button_cancel",
@@ -88,7 +71,12 @@ export function findSpotlightTarget(payload, root = document) {
     const { field, label, action } = payload || {};
 
     if (action) {
-        const selector = ACTION_TARGETS[String(action)];
+        // `Object.hasOwn` y no un acceso directo: el mapa hereda de Object, así
+        // que `action: "toString"` devolvía una FUNCIÓN y `querySelector` moría
+        // con SyntaxError. La lista de acciones es cerrada a propósito —el
+        // payload lo escribe el agente— y esto la cierra de verdad.
+        const clave = String(action);
+        const selector = Object.hasOwn(ACTION_TARGETS, clave) ? ACTION_TARGETS[clave] : null;
         return selector ? root.querySelector(selector) : null;
     }
 
@@ -202,6 +190,8 @@ async function esperarA(buscar, intentos = 12) {
  * @param {object} [deps] sólo para tests: reemplaza el componente real
  */
 export function makeSpotlight(overlay, deps = {}) {
+    const makePointer = deps.createPointerState || createPointerState;
+    const Pointer = deps.Gota || Gota;
     let pointer = null;
     let removeOverlay = null;
     let timer = null;
@@ -225,17 +215,12 @@ export function makeSpotlight(overlay, deps = {}) {
             return false;
         }
         if (!pointer) {
-            // Recién acá se trae el puntero de Odoo (y con él, el bundle de
-            // tours). Los tests inyectan los suyos por `deps` y no cargan nada.
-            const { createPointerState, Gota } = deps.createPointerState
-                ? { createPointerState: deps.createPointerState, Gota: deps.Gota }
-                : await cargarPuntero();
-            pointer = createPointerState();
+            pointer = makePointer();
             // Mismo `sequence` que usa el propio tour_service: la capa por encima
             // de los z-index de bootstrap, para que la marca no quede debajo de un
             // modal o de la barra de acciones.
             removeOverlay = overlay.add(
-                Gota,
+                Pointer,
                 { pointerState: pointer.state, bounce: true },
                 { sequence: 1100 }
             );
@@ -245,7 +230,12 @@ export function makeSpotlight(overlay, deps = {}) {
         const hint = payload?.hint || "";
         // Una gota nueva reemplaza a la anterior: dos marcas prendidas convierten
         // "acá" en "en algún lado de estos dos".
-        pointer.pointTo(el, { content: hint, tooltipPosition: payload?.position || "bottom" });
+        // La posición se valida como todo lo demás del payload: `computePosition`
+        // de Owl revienta con "directions is not iterable" ante cualquier valor
+        // fuera de estas cuatro, y ese throw sube por el efecto de posicionamiento
+        // —fuera de nuestro try— así que no habría marca ni aviso.
+        const donde = POSICIONES.has(String(payload?.position)) ? String(payload.position) : "bottom";
+        pointer.pointTo(el, { content: hint, tooltipPosition: donde });
         // CERRADA por defecto: la gota es un punto que dice "acá", no un cartel.
         // El texto se despliega al acercarse —al campo o a la marca—, que es
         // exactamente cuando la persona lo necesita y no antes. Un globo abierto
