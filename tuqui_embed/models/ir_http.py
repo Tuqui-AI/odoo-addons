@@ -17,9 +17,11 @@ sesión de Odoo sale ``SameSite=Lax``, que el browser NO manda en un iframe de
 otro sitio. Con sólo lo primero, el iframe se ve — pero mostrando el login.
 
 EL PUNTO A DECIDIR (ver README): aflojar el ``SameSite`` de la sesión normal
-reduce una protección contra CSRF que hoy existe. Este módulo la aplica sólo
-cuando el pedido viene del origen declarado, pero la cookie es una sola y el
-browser la guarda con el último atributo que vio. El diseño que evita eso —una
+reduce una protección contra CSRF que hoy existe. Y se aplica a TODA respuesta de
+este Odoo, no sólo a las que vienen del panel: acotarlo por origen es imposible
+sin llegar tarde —el primer pedido del iframe llega sin cookie— y la cookie es
+una sola, que el browser guarda con el último atributo que vio. El diseño que
+evita eso —una
 cookie aparte, de vida corta, sólo para las rutas del embed— es más trabajo y
 toca el manejo de sesión de Odoo.
 """
@@ -27,7 +29,7 @@ toca el manejo de sesión de Odoo.
 import logging
 
 from odoo import models
-from odoo.http import request
+from odoo.http import get_session_max_inactivity, request
 
 _logger = logging.getLogger(__name__)
 
@@ -71,7 +73,24 @@ class IrHttp(models.AbstractModel):
             #    en los browsers actuales, pero igual se saca el XFO: un browser
             #    que sólo entienda XFO tiene que ver la lista, no un DENY.
             response.headers.pop("X-Frame-Options", None)
-            response.headers["Content-Security-Policy"] = "frame-ancestors %s" % origins
+            # `'self'` VA SIEMPRE. Odoo embebe sus propias páginas en iframes del
+            # mismo origen —el visor de PDF y de texto (`file_viewer.xml`) y el
+            # preview de reportes— y una lista sin `'self'` los deja en blanco
+            # para TODA la base en cuanto se prende el switch. El default de Odoo
+            # es, justamente, `frame-ancestors 'self'`.
+            #
+            # Y la CSP se COMPLETA, no se reemplaza: `set_csp` le pone
+            # `default-src 'none'` a toda respuesta `image/*` (odoo/http.py), que
+            # es lo que sandboxea un SVG subido como adjunto. Sobrescribir el
+            # header dejaba ese SVG ejecutando script en el origen de Odoo — un
+            # agujero que no tiene nada que ver con embeber, y que aparecía en
+            # todas las respuestas, no sólo en las embebidas.
+            csp = response.headers.get("Content-Security-Policy") or ""
+            directivas = [
+                d.strip() for d in csp.split(";") if d.strip() and not d.strip().lower().startswith("frame-ancestors")
+            ]
+            directivas.append("frame-ancestors 'self' %s" % origins)
+            response.headers["Content-Security-Policy"] = "; ".join(directivas)
 
             # 2. QUE LA SESIÓN VIAJE dentro del iframe. Sin esto, el paso 1 sólo
             #    logra que se vea la pantalla de login en vez de un rectángulo en
@@ -105,11 +124,34 @@ class IrHttp(models.AbstractModel):
             # `SameSite=None` EXIGE `Secure`; sobre http:// eso sólo lo acepta el
             # browser en localhost (origen "potentially trustworthy"). Cualquier
             # despliegue real es HTTPS, así que no cambia nada ahí.
-            sid = getattr(request.session, "sid", None)
+            sess = request.session
+            # Las mismas dos condiciones que pone Odoo antes de emitir la cookie
+            # (`_save_session`), porque aflojarle el SameSite no puede además
+            # cambiar CUÁNDO se emite ni CUÁNTO vive.
+            #
+            # 1. Una sesión que el servidor no guarda no se anuncia. `can_save`
+            #    es False en los pedidos stateless —header `x-odoo-database`,
+            #    `auth="bearer"`— y ahí devolver un `session_id` inventa del lado
+            #    del cliente una sesión que del otro lado no existe.
+            if not getattr(sess, "can_save", True):
+                return
+            # 2. Una respuesta cacheable en público no lleva `Set-Cookie`. Los
+            #    assets salen `public, max-age=1 año, immutable`; un CDN o un
+            #    nginx con `proxy_ignore_headers Set-Cookie` guardaría la
+            #    respuesta CON la cookie y le serviría la sesión de una persona a
+            #    las demás.
+            if "public" in (response.headers.get("Cache-Control") or "").lower():
+                return
+            sid = getattr(sess, "sid", None)
             if sid:
                 response.set_cookie(
                     "session_id",
                     sid,
+                    # Sin `max_age`, el `set_cookie` de Odoo usa `expires=-1` y la
+                    # cookie queda con UN AÑO de vida, reemplazando la ventana de
+                    # inactividad configurada. Aflojar el SameSite no puede, de
+                    # paso, desarmar la caducidad de la sesión.
+                    max_age=get_session_max_inactivity(request.env),
                     httponly=True,
                     secure=True,
                     samesite="None",
