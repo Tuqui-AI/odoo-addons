@@ -9,6 +9,8 @@ que nadie lo note, porque todo seguiría funcionando igual de bien.
 
 from odoo.tests import HttpCase, tagged
 
+from ..controllers.health import TuquiEmbedHealth
+
 PARAM = "tuqui.embed_origins"
 TUQUI = "https://tuqui.example.com"
 
@@ -137,6 +139,28 @@ class TestEmbedCapability(HttpCase):
     def test_encendido_se_anuncia(self):
         self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
         assert "embed.frame" in self._caps()
+
+    def test_los_endpoints_heredados_estan_re_decorados(self):
+        """Un override sin `@http.route()` anda igual y pinta el build de rojo.
+
+        Odoo lo re-decora solo y avisa con un WARNING por worker; runbot toma
+        cualquier warning como resultado `warn` y eso llega a GitHub como error,
+        con la lista de checks en rojo y ningún test fallado que lo explique.
+        El test no mira el log —no lo tiene— sino lo único que lo produce: que
+        el método propio de la clase lleve su `original_routing`.
+        """
+        for cls in (TuquiEmbedHealth,):
+            for name, method in vars(cls).items():
+                if not callable(method):
+                    continue
+                hereda_una_ruta = any(
+                    hasattr(getattr(ancestro, name, None), "original_routing") for ancestro in cls.mro()[1:]
+                )
+                if not hereda_una_ruta:
+                    continue
+                assert hasattr(method, "original_routing"), (
+                    "%s.%s sobrescribe un endpoint ruteado sin re-decorarlo con @http.route()" % (cls.__name__, name)
+                )
 
     def test_no_pisa_lo_que_ya_anunciaba(self):
         """El handshake es de `tuqui`: sumamos, no reemplazamos. Perder

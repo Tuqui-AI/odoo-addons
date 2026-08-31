@@ -35,6 +35,11 @@ EMBED_CAPABILITY = "embed.frame"
 class TuquiEmbedHealth(TuquiHealth):
     """Suma `embed.frame` al anuncio del companion cuando el embed está encendido."""
 
+    # Odoo EXIGE re-decorar un endpoint heredado, aunque el decorador vaya
+    # vacío: el routing del padre se conserva. Sin esto arranca igual —
+    # auto-decora y escribe un WARNING por cada worker— y ese warning deja el
+    # build de runbot en amarillo, que llega a GitHub como rojo.
+    @http.route()
     def health(self, **kwargs):
         response = super().health(**kwargs)
         try:
