@@ -13,13 +13,11 @@
         Vacío no cambia nada: el módulo instalado y sin origen cargado es
         indistinguible de no estar instalado.
 
-        `noupdate="1"` para no pisar el valor de un cliente en cada actualización
-        del módulo.
+        Va en `data` del manifest con la bandera `noupdate` puesta en la entrada,
+        para no pisar el valor de un cliente en cada actualización del módulo.
     -->
-    <data noupdate="1">
-        <record id="param_embed_origins" model="ir.config_parameter">
-            <field name="key">tuqui.embed_origins</field>
-            <field name="value"></field>
-        </record>
-    </data>
+    <record id="param_embed_origins" model="ir.config_parameter">
+        <field name="key">tuqui.embed_origins</field>
+        <field name="value"></field>
+    </record>
 </odoo>
