@@ -61,26 +61,6 @@ class IrHttp(models.AbstractModel):
         return value or None
 
     @classmethod
-    def _tuqui_embed_requested(cls, origins):
-        """¿Este pedido viene de una pantalla embebida por un origen declarado?
-
-        Se mira el ``Origin``/``Referer`` del pedido contra la lista. Sirve para
-        no aflojarle la cookie a TODA la navegación normal de Odoo — sólo a la
-        que efectivamente ocurre dentro del iframe autorizado.
-
-        No es una defensa por sí sola: los dos headers los manda el browser y un
-        atacante puede omitirlos (nunca falsificarlos hacia un valor de la
-        lista). Por eso el módulo no toma decisiones de PERMISO con esto; sólo lo
-        usa para acotar dónde aplica el cambio de cookie.
-        """
-        permitidos = origins.split()
-        origin = request.httprequest.headers.get("Origin")
-        if origin and origin in permitidos:
-            return True
-        referer = request.httprequest.headers.get("Referer") or ""
-        return any(referer.startswith(o.rstrip("/") + "/") or referer == o for o in permitidos)
-
-    @classmethod
     def _post_dispatch(cls, response):
         super()._post_dispatch(response)
         origins = cls._tuqui_embed_origins()
@@ -98,12 +78,25 @@ class IrHttp(models.AbstractModel):
             #    blanco: el browser no manda una cookie `SameSite=Lax` en un
             #    frame de otro sitio.
             #
-            #    Sólo cuando el pedido viene del origen declarado, para no
-            #    aflojarle el SameSite a la navegación normal de quien nunca
-            #    abrió el panel. Ver el README: la cookie es una sola, así que
-            #    esto acota el alcance pero no lo elimina.
-            if not cls._tuqui_embed_requested(origins):
-                return
+            #    SE APLICA A TODA RESPUESTA, no sólo a las que se detectan como
+            #    embebidas, y no por comodidad: **detectarlo llega tarde**.
+            #
+            #    Es un huevo y gallina, medido contra un navegador de verdad. El
+            #    primer pedido que hace el iframe llega con `Referer` del panel
+            #    —o sea, se lo puede detectar perfectamente— pero llega SIN
+            #    COOKIE, porque la que estaba guardada en ese momento era la
+            #    normal (`SameSite=Lax`) y esa no viaja dentro de un frame ajeno.
+            #    Odoo lo trata como anónimo y redirige al login. La cookie se
+            #    afloja en la respuesta… de una navegación que ya terminó mal.
+            #
+            #    Aflojarla sólo "cuando hace falta" es, entonces, aflojarla
+            #    siempre un pedido tarde. Ver el README: el riesgo de que la
+            #    sesión salga `SameSite=None` está medido —desde otro origen no
+            #    se puede leer (CORS) ni escribir (rutas JSON-only)— y esto lo
+            #    amplía de "los pedidos que vienen del panel" a "todos los de
+            #    este Odoo". Sigue gobernado por el parámetro: **sin
+            #    `tuqui.embed_origins` cargado, este método ya salió arriba y no
+            #    toca ninguna cookie.**
 
             # `response.headers` de Odoo es un proxy sin `__delitem__`, así que la
             # cookie no se reescribe a mano: se vuelve a setear con los flags que

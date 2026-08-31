@@ -45,25 +45,38 @@ class TestEmbedHeaders(HttpCase):
         self.assertNotIn("*", csp)
         self.assertNotIn("https://otro.example.com", csp)
 
-    def test_la_cookie_solo_se_afloja_para_el_pedido_que_viene_del_iframe(self):
-        """El punto sensible del módulo.
+    def test_la_cookie_se_afloja_sin_esperar_a_reconocer_el_pedido(self):
+        """Por qué NO se acota al pedido que viene del panel, aunque se pueda.
 
-        Bajar el `SameSite` de la sesión saca una protección contra CSRF. Que
-        ocurra sólo cuando el pedido viene del origen declarado es lo que acota
-        el alcance; si esto se rompiera, TODA la navegación normal de Odoo
-        pasaría a emitir la sesión con `SameSite=None` sin que nadie se entere.
+        Es un huevo y gallina, medido contra un navegador de verdad. El primer
+        pedido del iframe llega con `Referer` del panel —se lo puede detectar
+        perfectamente— pero llega SIN COOKIE: la guardada en ese momento es la
+        normal (`SameSite=Lax`), que no viaja dentro de un frame ajeno. Odoo lo
+        toma como anónimo y redirige al login. La cookie se afloja en la
+        respuesta de una navegación que ya terminó mal, y el usuario ve la
+        pantalla de login adentro del panel.
+
+        Acotar por origen era, entonces, aflojar siempre un pedido tarde.
         """
         self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
 
-        de_afuera = self._cookies(self._get(headers={"Origin": "https://cualquier-otro.example.com"}))
-        # Que HAYA cookie de sesión se afirma aparte: sin esto, una respuesta sin
-        # cookie ninguna pasaría el test como si la protección funcionara.
-        self.assertTrue(de_afuera, "la respuesta no trajo cookie de sesión")
-        self.assertNotIn("samesite=none", de_afuera.lower())
+        # Como llega la navegación inicial del iframe: puede traer Referer, pero
+        # el módulo ya no depende de eso.
+        sin_pistas = self._cookies(self._get())
+        self.assertTrue(sin_pistas, "la respuesta no trajo cookie de sesión")
+        self.assertIn("samesite=none", sin_pistas.lower())
 
-        del_iframe = self._cookies(self._get(headers={"Origin": TUQUI}))
-        self.assertTrue(del_iframe, "la respuesta no trajo cookie de sesión")
-        self.assertIn("samesite=none", del_iframe.lower())
+        del_panel = self._cookies(self._get(headers={"Origin": TUQUI}))
+        self.assertTrue(del_panel, "la respuesta no trajo cookie de sesión")
+        self.assertIn("samesite=none", del_panel.lower())
+
+    def test_apagado_la_cookie_no_se_toca(self):
+        """El límite real, y el que importa: sin el parámetro cargado, la sesión
+        sale como siempre. Ese es el interruptor — no el origen del pedido."""
+        self.env["ir.config_parameter"].sudo().set_param(PARAM, "")
+        cookies = self._cookies(self._get(headers={"Origin": TUQUI}))
+        self.assertTrue(cookies, "la respuesta no trajo cookie de sesión")
+        self.assertNotIn("samesite=none", cookies.lower())
 
     def test_la_cookie_aflojada_sigue_siendo_httponly(self):
         """Lo que NO se resigna: la página que embebe no puede leer la sesión.
