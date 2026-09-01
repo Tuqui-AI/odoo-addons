@@ -37,6 +37,9 @@
                             <button name="action_tuqui_open_access_log" type="object"
                                     string="View access log" icon="fa-list-ul"
                                     class="btn-link p-0"/>
+                            <button name="action_tuqui_open_events" type="object"
+                                    string="View event queue" icon="fa-paper-plane-o"
+                                    class="btn-link p-0"/>
                             <button name="action_tuqui_disconnect" type="object"
                                     string="Disconnect" icon="fa-chain-broken"
                                     class="btn-link p-0"
