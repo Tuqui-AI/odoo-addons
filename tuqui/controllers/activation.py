@@ -240,6 +240,11 @@ class TuquiActivation(http.Controller):
         payload = {
             "client_id": client_id,
             "client_secret": client_secret,
+            # The other half of the pair: Tuqui verifies event signatures with
+            # it. Travels the same one-shot channel as the secret, and for the
+            # same reason \u2014 this is the only moment both sides are in contact
+            # with a human who authorised the connection.
+            "event_signing_key": oauth_client.sudo().event_signing_key if oauth_client else None,
             "companion_url": companion_url,
             "acting_user_login": acting_user_login,
             "module_version": _module_version(env),

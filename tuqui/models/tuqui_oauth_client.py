@@ -61,6 +61,18 @@ class TuquiOAuthClient(models.Model):
         compute="_compute_access_count_7d",
         help="Total RPC calls logged in tuqui.access.log during the last 7 days.",
     )
+    event_signing_key = fields.Char(
+        readonly=True,
+        copy=False,
+        groups="base.group_system",
+        help=(
+            "Shared key this Odoo signs outgoing events with (tuqui.event). "
+            "Stored in plaintext because signing requires the key itself \u2014 a hash "
+            "cannot produce a signature. Handed to Tuqui once, in the same "
+            "activation exchange as the client secret, and replaced whenever that "
+            "secret is rotated."
+        ),
+    )
     read_only = fields.Boolean(
         string="Read-only mode",
         default=True,
@@ -112,6 +124,31 @@ class TuquiOAuthClient(models.Model):
     def _hash_secret(plain, salt):
         return hashlib.sha256(f"{salt}::{plain}".encode()).hexdigest()
 
+    def _outbound_signing_key(self) -> str:
+        """The key this database signs outgoing events with.
+
+        Note the deliberate asymmetry with ``client_secret``. For calls coming
+        *in* (Tuqui to Odoo) this database keeps only a salted hash, because
+        verifying needs nothing more. For calls going *out* it must keep the key
+        itself: there is no way to produce an HMAC from a hash.
+
+        Returns:
+            The shared signing key agreed with Tuqui at activation.
+
+        Raises:
+            ValueError: if this Odoo was activated before the key existed. The
+                key is half of a shared secret, so it cannot be minted here on
+                the fly \u2014 Tuqui would have no way to verify it. Re-running the
+                activation hands both sides a matching pair.
+        """
+        self.ensure_one()
+        key = self.sudo().event_signing_key
+        if not key:
+            raise ValueError(
+                "This Odoo has no Tuqui event signing key. Reconnect it to Tuqui " "so both sides agree on one."
+            )
+        return key
+
     def verify_secret(self, plain):
         self.ensure_one()
         if not plain or not self.client_secret_hash:
@@ -137,6 +174,10 @@ class TuquiOAuthClient(models.Model):
             {
                 "client_secret_hash": self._hash_secret(plain_secret, salt),
                 "client_secret_salt": salt,
+                # Minted here so the two credentials can never drift: whatever
+                # Tuqui receives in the exchange is exactly what this database
+                # holds. Rotating the secret rotates the signing key with it.
+                "event_signing_key": secrets.token_urlsafe(48),
             }
         )
         return plain_secret
