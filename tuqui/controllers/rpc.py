@@ -80,6 +80,14 @@ _READ_METHODS = frozenset(
         "fields_get",
         "default_get",
         "formatted_read_group",
+        # View metadata. It reads no records — Odoo's own `get_view` starts by
+        # checking read access on the model and returns the arch already pruned
+        # to the acting user's groups. Left out of this set it classified as
+        # `execute`, which is not just a wrong audit label: it made the call
+        # refused on both restricted paths, so the search-view field ranking
+        # silently degraded on every read-only companion (the default right
+        # after activation) and on the connection path.
+        "get_view",
     }
 )
 _READ_PREFIXES = ("search", "read")
