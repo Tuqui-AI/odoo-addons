@@ -229,6 +229,22 @@ class TestTuquiRpcGateway(HttpCase):
         )
         self.assertTrue(resp.json()["ok"])
 
+    def test_read_only_paths_allow_the_view_metadata_read(self):
+        """``get_view`` is a read, and both restricted paths must let it through.
+
+        It reads no records: Odoo checks read access on the model and hands back
+        the arch already pruned to the acting user's groups. Classified as
+        ``execute`` it was refused on the two paths that only allow reads — a
+        read-only companion (the default right after activation) and the
+        connection path — which silently degraded the search-view field ranking
+        Tuqui derives from that arch.
+        """
+        self.client.write({"read_only": True})
+        resp = self._rpc("res.partner", "get_view", args=[False, "search"], expect_status=200)
+        self.assertIn("arch", resp.json()["data"])
+        resp = self._rpc("res.partner", "get_view", args=[False, "search"], connection=True, expect_status=200)
+        self.assertIn("arch", resp.json()["data"])
+
     def test_read_only_mode_still_hard_blocks_private_and_escape_hatches(self):
         """The unconditional blocks take precedence over the read_only reason."""
         self.client.write({"read_only": True})
@@ -243,7 +259,15 @@ class TestTuquiRpcGateway(HttpCase):
         tuqui_core/integrations/odoo/transports/companion.py — when its method
         surface changes, update this list and _READ_METHODS/_WRITE_METHODS
         together. A read that slips to 'execute' is refused on read_only."""
-        reads = ("search_read", "read", "read_group", "formatted_read_group", "search_count", "fields_get")
+        reads = (
+            "search_read",
+            "read",
+            "read_group",
+            "formatted_read_group",
+            "search_count",
+            "fields_get",
+            "get_view",
+        )
         writes = ("create", "write", "unlink", "copy")
         for method in reads:
             self.assertEqual(_classify(method), "read", f"{method} must classify as a read")
