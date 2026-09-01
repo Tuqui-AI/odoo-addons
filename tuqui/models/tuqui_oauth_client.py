@@ -124,6 +124,24 @@ class TuquiOAuthClient(models.Model):
     def _hash_secret(plain, salt):
         return hashlib.sha256(f"{salt}::{plain}".encode()).hexdigest()
 
+    def _sign_outbound(self, body: str, timestamp: int) -> str:
+        """HMAC-SHA256 over ``timestamp.body`` with this database's signing key.
+
+        One implementation for every signed call this module makes — the event
+        queue and the agent lookup — because two would be two things to keep
+        byte-identical with Tuqui instead of one.
+
+        The timestamp is inside the signed material rather than beside it:
+        signing only the body would leave every captured request replayable
+        forever.
+        """
+        self.ensure_one()
+        return hmac.new(
+            self._outbound_signing_key().encode(),
+            f"{timestamp}.{body}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+
     def _outbound_signing_key(self) -> str:
         """The key this database signs outgoing events with.
 

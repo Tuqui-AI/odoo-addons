@@ -157,13 +157,18 @@ class TestTuquiEvent(TransactionCase):
         """Signing only the body would make every captured request replayable
         forever; Tuqui refuses anything older than five minutes."""
         body = '{"a":1}'
-        first = self.Event._sign(body, 1000, "k")
-        second = self.Event._sign(body, 1001, "k")
+        first = self.client._sign_outbound(body, 1000)
+        second = self.client._sign_outbound(body, 1001)
         self.assertNotEqual(first, second)
 
     def test_the_signature_depends_on_the_key(self):
         body = '{"a":1}'
-        self.assertNotEqual(self.Event._sign(body, 1000, "k1"), self.Event._sign(body, 1000, "k2"))
+        with_first = self.client._sign_outbound(body, 1000)
+        self.client.write({"event_signing_key": "a-different-key"})
+        try:
+            self.assertNotEqual(with_first, self.client._sign_outbound(body, 1000))
+        finally:
+            self.client.write({"event_signing_key": "test-signing-key"})
 
     def test_an_odoo_without_a_key_says_so_instead_of_signing_with_nothing(self):
         self.client.write({"event_signing_key": False})
