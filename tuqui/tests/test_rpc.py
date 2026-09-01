@@ -583,9 +583,9 @@ class TestTuquiRpcGateway(HttpCase):
         )
         self.assertTrue(resp.json()["ok"])
 
-    def test_read_only_paths_allow_the_access_check(self):
+    def test_read_only_member_allows_the_access_check(self):
         """``check_access_rights`` answers "may this user do X" and reads no
-        records, so both restricted paths must let it through.
+        records, so a read-only member must get through.
 
         Classified as ``execute`` it was refused, and this one fails loudly:
         its only caller is ``open_odoo_view`` in ``mode='new'``, an embed-only
@@ -593,12 +593,37 @@ class TestTuquiRpcGateway(HttpCase):
         (the default right after activation) asking the embedded chat to create
         a record answered "Could not verify Odoo access rights", blaming the
         user's permissions for a refusal of ours.
+
+        The connection path is the opposite case — see the next test.
         """
         self.client.write({"read_only": True})
         resp = self._rpc("res.partner", "check_access_rights", args=["read"], expect_status=200)
         self.assertTrue(resp.json()["ok"])
-        resp = self._rpc("res.partner", "check_access_rights", args=["read"], connection=True, expect_status=200)
-        self.assertTrue(resp.json()["ok"])
+
+    def test_connection_path_refuses_the_questions_about_the_caller(self):
+        """An access check run as superuser answers about nobody, and answers YES.
+
+        ``has_access`` is literally ``self.env.su or not self._check_access(op)``:
+        on the connection path that is an unconditional True, for any operation,
+        ``unlink`` included — a caller would read "allowed" and act on it. Same
+        shape for ``has_group``, whose cross-user question ``res.users`` only
+        permits when ``env.su``.
+
+        So they stay classified as reads (the honest audit label) and are still
+        refused here, with a reason that says why instead of handing back an
+        answer that means nothing.
+        """
+        for method, args in (
+            ("check_access_rights", ["read"]),
+            ("has_access", [[], "unlink"]),
+            ("has_group", [[], "base.group_system"]),
+        ):
+            resp = self._rpc("res.partner", method, args=args, connection=True, expect_status=403)
+            self.assertEqual(
+                resp.json()["error"]["code"],
+                "requires_acting_user",
+                f"{method} answers about the caller; as superuser it must be refused",
+            )
 
     def test_read_only_paths_allow_the_view_metadata_read(self):
         """``get_view`` is a read, and both restricted paths must let it through.
