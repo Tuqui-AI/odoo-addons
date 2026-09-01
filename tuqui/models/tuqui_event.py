@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import json
 import logging
 import time
@@ -281,20 +279,6 @@ class TuquiEvent(models.Model):
             },
         }
 
-    @api.model
-    def _sign(self, body, timestamp, key):
-        """HMAC-SHA256 over ``timestamp.body``.
-
-        The timestamp is inside the signed material, not beside it: signing only
-        the body would let anyone who captured one request replay it forever,
-        and Tuqui refuses anything older than five minutes.
-        """
-        return hmac.new(
-            key.encode(),
-            f"{timestamp}.{body}".encode(),
-            hashlib.sha256,
-        ).hexdigest()
-
     def _post(self):
         """Deliver one event. Raises on anything that is not a 2xx."""
         self.ensure_one()
@@ -302,7 +286,6 @@ class TuquiEvent(models.Model):
         if not client:
             raise ValueError("This Odoo is not connected to Tuqui")
 
-        key = client._outbound_signing_key()
         body = json.dumps(self._payload(), separators=(",", ":"), sort_keys=True)
         timestamp = int(time.time())
         url = f"{client._get_tuqui_base_url()}/v1/companion/events"
@@ -316,7 +299,7 @@ class TuquiEvent(models.Model):
                 # Same shape Stripe uses, for the same reason: one header that
                 # carries both halves, so a verifier cannot accidentally check
                 # the signature without checking its age.
-                "X-Tuqui-Signature": f"t={timestamp},v1={self._sign(body, timestamp, key)}",
+                "X-Tuqui-Signature": f"t={timestamp},v1={client._sign_outbound(body, timestamp)}",
             },
             timeout=_TIMEOUT_SECONDS,
         )
