@@ -61,13 +61,18 @@ def _is_absolutely_blocked(method: str) -> bool:
 # explicit write set, or the read prefix family. Business methods and
 # actions land in `execute` and only get bouncing by explicit rules.
 
-# These sets mirror the typed method names Tuqui's CompanionTransport posts to
-# this gateway — see tuqui_core/integrations/odoo/transports/companion.py and
-# the contract test ``test_classify_covers_companion_transport_surface``. Keep
-# all three in sync. Asymmetry to remember when the transport gains a method:
-#   * a READ it sends but not recognized here → ``execute`` → wrongly refused on
-#     a read_only connection (that was the formatted_read_group bug).
-#   * a WRITE not listed → also ``execute`` → still blocked under read_only
+# These sets mirror the method names Tuqui posts to this gateway — both the
+# typed surface of CompanionTransport (see
+# tuqui_core/integrations/odoo/transports/companion.py) and the untyped call
+# sites that go through its generic `execute()` / `execute_method()`. THE
+# UNTYPED ONES ARE THE TRAP: the contract test used to mirror only the typed
+# surface, which is exactly how `get_view` and `check_access_rights` slipped
+# through. Keep all three in sync. Asymmetry to remember when a method is added:
+#   * a READ not recognized here → ``execute`` → REFUSED on the two restricted
+#     paths (read-only member, connection), and mislabelled in the audit log.
+#     Refused is the part that bites: `get_view` degraded silently and
+#     `check_access_rights` broke the embedded "create a record" flow outright.
+#   * a WRITE not listed → also ``execute`` → still gated the same way, so only
 #     (safe); only its audit row gets mislabelled.
 # This classifier is the coarse read_only edge gate + audit label, NOT the
 # authorization boundary: writes are really gated by the backend whitelist
@@ -81,14 +86,35 @@ _READ_METHODS = frozenset(
         "fields_get",
         "default_get",
         "formatted_read_group",
-        # View metadata. It reads no records — Odoo's own `get_view` starts by
-        # checking read access on the model and returns the arch already pruned
-        # to the acting user's groups. Left out of this set it classified as
-        # `execute`, which is not just a wrong audit label: it made the call
-        # refused on both restricted paths, so the search-view field ranking
-        # silently degraded on every read-only companion (the default right
-        # after activation) and on the connection path.
+        # ── Metadata ──────────────────────────────────────────────────────
+        # None of these read records. They answer "what does this model look
+        # like / may this user do X", and Odoo already scopes each answer to
+        # the acting user: `get_view` returns the arch pruned to their groups,
+        # the access helpers answer about them.
+        #
+        # Falling into `execute` is not just a wrong audit label — it makes the
+        # call REFUSED on the two paths that only allow reads (a read-only
+        # companion, which is the default right after activation, and the
+        # connection path). `get_view` was found that way: the search-view
+        # field ranking degraded silently on every read-only companion.
+        # `check_access_rights` was found the same way and fails loudly: the
+        # embedded chat could not offer to create a record and told the user
+        # their permissions could not be verified.
         "get_view",
+        "check_access_rights",  # deprecated in 18 in favour of has_access
+        "get_views",
+        "has_access",
+        "has_group",
+        "has_groups",
+        "get_metadata",
+        "get_property_definition",
+        "get_formview_id",
+        "get_formview_action",
+        # web_* are the web client's read entrypoints; they don't match the
+        # search/read prefix because of that prefix of their own.
+        "web_read",
+        "web_search_read",
+        "web_read_group",
     }
 )
 _READ_PREFIXES = ("search", "read")
