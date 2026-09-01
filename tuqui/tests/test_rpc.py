@@ -221,7 +221,21 @@ class TestTuquiRpcGateway(HttpCase):
             "check_access_rights",  # integrations/odoo/adapter.py ← open_odoo_view
             "has_group",  # workspaces/service.py
         )
-        for method in reads + untyped_reads:
+        # Not called yet, but on the list because they are the natural vector of
+        # the view-metadata work (#73440). Asserted one by one on purpose: a
+        # tuple that lists three of thirteen is a guard that does not guard —
+        # dropping any of the others would leave the suite green.
+        untyped_reads_ahead = (
+            "get_views",
+            "has_access",
+            "has_groups",
+            "get_metadata",
+            "get_property_definition",
+            "web_read",
+            "web_search_read",
+            "web_read_group",
+        )
+        for method in reads + untyped_reads + untyped_reads_ahead:
             self.assertEqual(_classify(method), "read", f"{method} must classify as a read")
         for method in writes:
             self.assertEqual(_classify(method), "write", f"{method} must classify as a write")
