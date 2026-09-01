@@ -88,9 +88,12 @@ _READ_METHODS = frozenset(
         "formatted_read_group",
         # ── Metadata ──────────────────────────────────────────────────────
         # None of these read records. They answer "what does this model look
-        # like / may this user do X", and Odoo already scopes each answer to
-        # the acting user: `get_view` returns the arch pruned to their groups,
-        # the access helpers answer about them.
+        # like / may this user do X", and Odoo scopes the view ones to the
+        # acting user: `get_view` returns the arch pruned to their groups.
+        #
+        # The access helpers are a different animal and get their own gate
+        # below (`_ONLY_AS_A_USER`): they answer ABOUT the caller, so as
+        # superuser they answer about nobody.
         #
         # Falling into `execute` is not just a wrong audit label — it makes the
         # call REFUSED on the two paths that only allow reads (a read-only
@@ -101,15 +104,17 @@ _READ_METHODS = frozenset(
         # embedded chat could not offer to create a record and told the user
         # their permissions could not be verified.
         "get_view",
-        "check_access_rights",  # deprecated in 18 in favour of has_access
+        # NOTE `check_access_rights` is @api.deprecated in 19, so every call
+        # logs a warning. Migrating the caller (adapter.py) to `has_access` is
+        # NOT a rename: `has_access` is a RECORD method, so `_dispatch` pops
+        # args[0] as ids — it needs `[[], "read"]`, not `["read"]`.
+        "check_access_rights",
         "get_views",
         "has_access",
         "has_group",
         "has_groups",
         "get_metadata",
         "get_property_definition",
-        "get_formview_id",
-        "get_formview_action",
         # web_* are the web client's read entrypoints; they don't match the
         # search/read prefix because of that prefix of their own.
         "web_read",
@@ -118,6 +123,22 @@ _READ_METHODS = frozenset(
     }
 )
 _READ_PREFIXES = ("search", "read")
+
+# Reads that only mean something when there IS an acting user. They answer
+# about `env.user`, and the connection path runs as SUPERUSER — where the
+# answer is not just useless, it is WRONG in the dangerous direction:
+#
+#     def has_access(self, operation):
+#         return self.env.su or not self._check_access(operation)
+#
+# As superuser that is an unconditional True, for any operation, `unlink`
+# included. A caller would read "yes, allowed" and act on it. `has_group`
+# is the same shape: `res.users` only allows the cross-user question when
+# `env.su`, so on that path a token holder could enumerate anyone's groups.
+#
+# So they classify as `read` (which is the honest audit label) and are still
+# refused on the connection path, with a reason of their own that says why.
+_ONLY_AS_A_USER = frozenset({"check_access_rights", "has_access", "has_group", "has_groups"})
 
 
 # L1: read_only is enforced by method-NAME classification, not at the cursor
@@ -165,6 +186,10 @@ def _evaluate_policy(read_only: bool, method: str, op_type: str, *, is_connectio
         # (write / execute) is refused here — sudo must never mutate.
         if op_type != "read":
             return False, "connection_read_only"
+        # …and not even every read: the ones that answer about the caller
+        # answer about nobody here. See `_ONLY_AS_A_USER`.
+        if method in _ONLY_AS_A_USER:
+            return False, "requires_acting_user"
         return True, None
     if read_only and op_type in ("write", "execute"):
         return False, "read_only_mode"
@@ -395,7 +420,15 @@ def _bind_logger(env, *, method, model_name, operation_type, acting_user):
 
 # Policy-deny reasons that should surface as HTTP 403. Anything else
 # from the gate (currently nothing) would surface as 400.
-_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "connection_read_only", "read_only_mode"})
+_POLICY_DENY_403 = frozenset(
+    {
+        "method_blocked",
+        "private_method_blocked",
+        "connection_read_only",
+        "read_only_mode",
+        "requires_acting_user",
+    }
+)
 
 
 class TuquiRpc(http.Controller):
