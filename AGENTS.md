@@ -34,6 +34,15 @@ fix aplica a más de una, va una branch y un PR por rama de versión.
 
 ## Convenciones
 
+- **El código va en inglés — TODO el código.** Comentarios, docstrings y también
+  **nombres de funciones, variables, clases y archivos**. El español queda para lo
+  que lee una persona: commits, descripción del PR, comentarios de review, chatter.
+  **Por qué:** quien revisa lee decenas de PRs y no tiene que hacer un switch de
+  idioma en medio de la lectura — el costo lo paga el revisor, no quien escribe. Y
+  un identificador mezclado (`_registrar_cambio_de_embed`) ya nació intraducible.
+  Si un archivo ya viene con comentarios en español, no los traduzcas de prepo —
+  pero lo que agregás vos va en inglés. (Pedido de joa, 31/08/2026, después de
+  tener que traducir una pila entera para poder revisarla.)
 - **Commits**: español, prefijo conventional con módulo entre paréntesis —
   `fix(tuqui_assistant): …`, `feat(tuqui): …`, `test(tuqui): …`. Cuando el
   cambio sale de una tarea, el número va al final: `(#71708)`.
