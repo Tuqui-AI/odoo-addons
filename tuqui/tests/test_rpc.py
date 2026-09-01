@@ -191,11 +191,19 @@ class TestTuquiRpcGateway(HttpCase):
             )
 
     def test_classify_covers_companion_transport_surface(self):
-        """Contract guard: every typed method CompanionTransport posts to
-        /tuqui/rpc must classify as intended. Mirror of
+        """Contract guard: every method Tuqui posts to /tuqui/rpc must classify
+        as intended. Mirror of
         tuqui_core/integrations/odoo/transports/companion.py — when its method
         surface changes, update this list and _READ_METHODS/_WRITE_METHODS
-        together."""
+        together.
+
+        The ``untyped`` group is the one that matters: those calls go through
+        the transport's generic ``execute()`` / ``execute_method()`` instead of
+        a method of their own, so nothing about them is greppable from the
+        transport's signatures. This guard only mirrored the typed surface, and
+        that is precisely how ``get_view`` and ``check_access_rights`` reached
+        production classified as ``execute`` — refused on every read-only
+        companion. Add the method here when a new call site appears."""
         reads = (
             "search_read",
             "read",
@@ -206,7 +214,14 @@ class TestTuquiRpcGateway(HttpCase):
             "get_view",
         )
         writes = ("create", "write", "unlink", "copy")
-        for method in reads:
+        # Reached through the generic execute()/execute_method(), not through a
+        # typed method — see the docstring.
+        untyped_reads = (
+            "get_view",  # integrations/odoo/search_view.py
+            "check_access_rights",  # integrations/odoo/adapter.py ← open_odoo_view
+            "has_group",  # workspaces/service.py
+        )
+        for method in reads + untyped_reads:
             self.assertEqual(_classify(method), "read", f"{method} must classify as a read")
         for method in writes:
             self.assertEqual(_classify(method), "write", f"{method} must classify as a write")
@@ -566,6 +581,23 @@ class TestTuquiRpcGateway(HttpCase):
             kwargs={"fields": ["name"], "limit": 2},
             expect_status=200,
         )
+        self.assertTrue(resp.json()["ok"])
+
+    def test_read_only_paths_allow_the_access_check(self):
+        """``check_access_rights`` answers "may this user do X" and reads no
+        records, so both restricted paths must let it through.
+
+        Classified as ``execute`` it was refused, and this one fails loudly:
+        its only caller is ``open_odoo_view`` in ``mode='new'``, an embed-only
+        tool — so it runs exclusively over the companion. On a read-only one
+        (the default right after activation) asking the embedded chat to create
+        a record answered "Could not verify Odoo access rights", blaming the
+        user's permissions for a refusal of ours.
+        """
+        self.client.write({"read_only": True})
+        resp = self._rpc("res.partner", "check_access_rights", args=["read"], expect_status=200)
+        self.assertTrue(resp.json()["ok"])
+        resp = self._rpc("res.partner", "check_access_rights", args=["read"], connection=True, expect_status=200)
         self.assertTrue(resp.json()["ok"])
 
     def test_read_only_paths_allow_the_view_metadata_read(self):
