@@ -142,6 +142,25 @@ class TuquiOAuthClient(models.Model):
             hashlib.sha256,
         ).hexdigest()
 
+    def _ensure_signing_key(self) -> str:
+        """Return the outbound signing key, minting one if there is none yet.
+
+        Mints, never rotates. A database that connected before signed events
+        existed has no key and no way to agree on one without tearing the
+        connection down (activation refuses to run while it is live), so the
+        key is created on first demand and handed to Tuqui over the channel it
+        already authenticates on — see ``controllers/signing_key.py``.
+
+        Rotating an existing one instead would invalidate whatever is sitting
+        in ``tuqui.event`` unsent, which is precisely what the queue exists to
+        protect.
+        """
+        self.ensure_one()
+        record = self.sudo()
+        if not record.event_signing_key:
+            record.write({"event_signing_key": secrets.token_urlsafe(48)})
+        return record.event_signing_key
+
     def _outbound_signing_key(self) -> str:
         """The key this database signs outgoing events with.
 

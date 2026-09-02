@@ -7,3 +7,4 @@ from . import test_health
 from . import test_res_config_settings
 from . import test_tuqui_event
 from . import test_tuqui_notify_action
+from . import test_signing_key_route
