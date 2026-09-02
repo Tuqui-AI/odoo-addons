@@ -219,7 +219,21 @@ export function findSpotlightTarget(payload, root = document) {
  * lo correcto porque es todo lo que hay.
  */
 function afinar(el) {
-    return el?.querySelector?.("input, textarea, select") || el;
+    const control = el?.querySelector?.("input, textarea, select");
+    if (control) {
+        return control;
+    }
+    // Sin control no significa "apuntá al contenedor". Un campo en modo lectura
+    // —un teléfono ya cargado, un m2o, un link— muestra su valor en un hijo, y el
+    // contenedor ocupa media columna: la gota terminaba flotando a la derecha del
+    // dato, señalando una zona. Se baja al primer hijo que tenga texto visible.
+    for (const hijo of el?.children || []) {
+        const r = hijo.getBoundingClientRect?.();
+        if (r && r.width > 0 && r.height > 0 && (hijo.textContent || "").trim()) {
+            return hijo;
+        }
+    }
+    return el;
 }
 
 /**
