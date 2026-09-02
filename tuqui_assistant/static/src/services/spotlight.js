@@ -84,6 +84,20 @@ export const SPOTLIGHT_MS = 15000;
 const SCROLL_DEBOUNCE_MS = 50;
 
 /**
+ * Desde qué ancho un campo deja de ser "un lugar" y pasa a ser "una zona".
+ *
+ * En un formulario de Odoo el control de un campo ocupa toda la columna: medido,
+ * 505 px el teléfono y 514 px el CUIT en una ventana de 1280. La gota se centra
+ * sobre lo que se le apunte, así que caía **238 a 249 px a la derecha del lugar
+ * donde la persona hace clic** — señalando el renglón, no el campo. Un botón, en
+ * cambio, mide 51 px: centrarse ahí es exactamente lo correcto.
+ */
+const ANCHO_QUE_YA_ES_UNA_ZONA = 120;
+
+/** Cuánto del principio del campo se toma como "el lugar del clic". */
+const ANCHO_DEL_PUNTO_DE_CLIC = 24;
+
+/**
  * El texto de un elemento, comparable.
  *
  * MISMA SEMÁNTICA QUE EL `:contains` DE ODOO, y no es un detalle de estilo: los
@@ -306,6 +320,43 @@ async function esperarA(buscar, intentos = 3) {
 }
 
 /**
+ * Un ancla angosta al principio del campo: donde se hace clic para escribir.
+ *
+ * Es la misma técnica que usa el propio `tour_pointer_state` de Odoo cuando el
+ * objetivo está fuera de la pantalla — se crea un div `position: fixed` y se
+ * apunta a él— y acá resuelve lo contrario: un objetivo demasiado ANCHO. No
+ * reemplaza al campo para nada más: el hover sigue atado al campo de verdad, así
+ * que acercarse a cualquier parte del renglón despliega el texto.
+ *
+ * @param {HTMLElement} proxy  el div reutilizable
+ * @param {HTMLElement} campo  el control real
+ * @returns {HTMLElement} a qué apuntar
+ */
+function alPuntoDeClic(proxy, campo) {
+    const r = campo?.getBoundingClientRect?.();
+    if (!r || r.width <= ANCHO_QUE_YA_ES_UNA_ZONA) {
+        return campo;
+    }
+    const css =
+        "position:fixed;pointer-events:none;z-index:-1;" +
+        `left:${Math.round(r.left)}px;top:${Math.round(r.top)}px;` +
+        `width:${ANCHO_DEL_PUNTO_DE_CLIC}px;height:${Math.round(r.height)}px;`;
+    // SÓLO SE ESCRIBE SI CAMBIÓ, y no es una optimización: escribir el estilo es
+    // una mutación del DOM, el loop escucha mutaciones, y el loop vuelve a
+    // llamar acá. Escribir siempre era un ciclo infinito que giraba mientras la
+    // marca viviera — se colgó la suite de tests, que es la forma barata de que
+    // aparezca. Con la guarda, la primera vuelta acomoda el ancla, la segunda no
+    // muta nada y el ciclo se corta.
+    if (proxy.style.cssText !== css) {
+        proxy.style.cssText = css;
+    }
+    if (!proxy.isConnected) {
+        document.body.appendChild(proxy);
+    }
+    return proxy;
+}
+
+/**
  * La gota, atada al servicio `overlay` de Odoo.
  *
  * Se monta la primera vez que se usa: una sesión que nunca ve una gota no paga
@@ -353,6 +404,8 @@ export function makeSpotlight(overlay, deps = {}) {
      * frame después — el hover no llegaba a servir para nada.
      */
     let abierto = false;
+    /** El ancla angosta, una por gota. Ver `alPuntoDeClic`. */
+    const proxy = deps.proxy || document.createElement("div");
 
     function apagarVigilancia() {
         vigilancia?.();
@@ -395,7 +448,22 @@ export function makeSpotlight(overlay, deps = {}) {
             }
             marcar(el);
         };
-        const observer = new MacroMutationObserver(() => revisar());
+        // EL ANCLA NO CUENTA COMO UN CAMBIO DE PANTALLA. Acomodarla escribe su
+        // `style` y la primera vez la agrega al `body`: las dos son mutaciones
+        // del DOM, y este observador escucha mutaciones. Sin este filtro, el
+        // ancla se alimenta a sí misma — y no alcanza con escribir "sólo si
+        // cambió", porque basta que el campo se mueva un píxel por otra razón
+        // para reanudar el ciclo. Colgó la suite de tests dos veces, que es la
+        // forma barata de que aparezca: en la pantalla de una persona habría sido
+        // la pestaña al palo mientras la marca viva.
+        const esDelAncla = (m) =>
+            m.target === proxy || (m.addedNodes && [...m.addedNodes].includes(proxy));
+        const observer = new MacroMutationObserver((mutaciones) => {
+            if (Array.isArray(mutaciones) && mutaciones.length && mutaciones.every(esDelAncla)) {
+                return;
+            }
+            revisar();
+        });
         observer.observe(document.body);
         const alScrollear = debounce(revisar, SCROLL_DEBOUNCE_MS);
         const scrollEl = getScrollParent(findSpotlightTarget(payload || {}));
@@ -457,7 +525,7 @@ export function makeSpotlight(overlay, deps = {}) {
         // Una gota nueva reemplaza a la anterior: dos marcas prendidas convierten
         // "acá" en "en algún lado de estos dos".
         const marcar = (target) => {
-            pointer.pointTo(target, { content: hint, tooltipPosition: donde });
+            pointer.pointTo(alPuntoDeClic(proxy, target), { content: hint, tooltipPosition: donde });
             // CERRADA por defecto: la gota es un punto que dice "acá", no un
             // cartel. El texto se despliega al acercarse —al campo o a la marca—,
             // que es exactamente cuando la persona lo necesita y no antes. Un
@@ -505,6 +573,7 @@ export function makeSpotlight(overlay, deps = {}) {
         desatar?.();
         desatar = null;
         pointer?.hide?.();
+        proxy.remove();
         removeOverlay?.();
         pointer?.destroy?.();
         pointer = null;
