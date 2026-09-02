@@ -119,6 +119,41 @@ const FORM_ARCH_ANCESTRO = `
         </group>
     </form>`;
 
+/** El mismo campo DOS VECES, en dos ramas mutuamente excluyentes.
+ *
+ *  Es un patrón común en los formularios de Odoo: dos `<div>`/`<group>` con
+ *  condiciones opuestas y el mismo campo en cada uno. Con `active` en true, la
+ *  primera rama está escondida y la segunda visible — así que el campo SE VE. */
+const FORM_ARCH_DOS_RAMAS = `
+    <form>
+        <field name="active"/>
+        <group invisible="active">
+            <field name="email"/>
+            <field name="fecha"/>
+        </group>
+        <group invisible="not active">
+            <field name="email"/>
+        </group>
+    </form>`;
+
+async function mountFormDosRamas(resId = 1) {
+    await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_DOS_RAMAS });
+    return getService("tuquiAssistant");
+}
+
+/** Un campo que se esconde a SÍ MISMO, no por su grupo. */
+const FORM_ARCH_INVISIBLE_PROPIO = `
+    <form>
+        <field name="active"/>
+        <field name="email" invisible="active"/>
+        <field name="fecha"/>
+    </form>`;
+
+async function mountFormInvisiblePropio(resId = 1) {
+    await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_INVISIBLE_PROPIO });
+    return getService("tuquiAssistant");
+}
+
 async function mountFormConAncestro(resId = 1) {
     await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_ANCESTRO });
     return getService("tuquiAssistant");
@@ -409,6 +444,40 @@ describe("contexto vivo", () => {
         // Mismo argumento que un campo de otra vista: escribirlo deja un cambio
         // que la persona no puede ver ni revisar antes de guardar.
         const assistant = await mountFormConAncestro();
+        const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
+        expect(ok).toBe(false);
+        expect(assistant.getActiveRecord().data.email).toBe("acme@example.com");
+    });
+
+    test("un campo que aparece en DOS ramas está oculto sólo si las dos lo esconden", async () => {
+        // El patrón de dos ramas mutuamente excluyentes. Marcar el campo con que
+        // UNA esté escondida lo daba por invisible mientras la persona lo tiene
+        // delante en la otra — y de paso hacía descartar una propuesta legítima.
+        // Es la misma regla que usa Odoo al fusionar dos nodos del mismo campo:
+        // `patchActiveFields` combina el `invisible` con AND.
+        const assistant = await mountFormDosRamas();
+        const ctx = assistant.getContextPayload();
+        // `email` está en las dos ramas: la escondida y la visible.
+        expect(ctx.fieldState.email).toBe(undefined);
+        // `fecha` está SÓLO en la rama escondida: ésa sí está oculta.
+        expect(ctx.fieldState.fecha.invisible).toBe(true);
+    });
+
+    test("y una propuesta sobre el campo de las dos ramas se aplica", async () => {
+        // El otro lado del par: no alcanza con reportarlo bien en el contexto si
+        // el camino de escritura lo descarta igual.
+        const assistant = await mountFormDosRamas();
+        const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
+        expect(ok).toBe(true);
+        expect(assistant.getActiveRecord().data.email).toBe("nuevo@example.com");
+    });
+
+    test("un campo que se esconde a SÍ MISMO tampoco se escribe", async () => {
+        // El chequeo era inconsistente: rechazaba lo que esconde un ancestro y
+        // dejaba pasar lo que se esconde a sí mismo. En los dos casos la persona
+        // no lo tiene delante y no puede revisar el cambio antes de guardar.
+        const assistant = await mountFormInvisiblePropio();
+        expect(assistant.getContextPayload().fieldState.email.invisible).toBe(true);
         const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
         expect(ok).toBe(false);
         expect(assistant.getActiveRecord().data.email).toBe("acme@example.com");

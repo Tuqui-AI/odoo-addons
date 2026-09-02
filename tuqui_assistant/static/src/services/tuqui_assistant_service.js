@@ -186,24 +186,45 @@ function camposOcultosPorUnAncestro(xmlDoc, record) {
         return ocultos;
     }
     const ctx = record.evalContextWithVirtualIds || {};
+    /** Por campo: cuántas veces aparece en el arch y cuántas están escondidas. */
+    const cuenta = new Map();
     for (const nodo of xmlDoc.querySelectorAll("field:not(field field)")) {
         const nombre = nodo.getAttribute?.("name");
-        if (!nombre || ocultos.has(nombre)) {
+        if (!nombre) {
             continue;
         }
+        let escondida = false;
         let ancestro = nodo.parentElement;
-        while (ancestro) {
+        while (ancestro && !escondida) {
             const expr = ancestro.getAttribute?.("invisible");
             try {
                 if (expr && evaluateBooleanExpr(expr, ctx)) {
-                    ocultos.add(nombre);
-                    break;
+                    escondida = true;
                 }
             } catch {
                 // Una condición que no se puede evaluar no esconde nada: el
                 // default es dejar pasar, como antes de este chequeo.
             }
             ancestro = ancestro.parentElement;
+        }
+        const previo = cuenta.get(nombre) || { veces: 0, escondidas: 0 };
+        cuenta.set(nombre, {
+            veces: previo.veces + 1,
+            escondidas: previo.escondidas + (escondida ? 1 : 0),
+        });
+    }
+    // UN CAMPO QUE APARECE DOS VECES ESTÁ OCULTO SÓLO SI LAS DOS ESTÁN OCULTAS,
+    // y esto no es un detalle: el patrón de dos ramas mutuamente excluyentes
+    // —el mismo campo en dos `<div>` con condiciones opuestas— es común en los
+    // formularios de Odoo. Marcarlo con que UNA esté escondida daba el campo por
+    // invisible cuando la persona lo tiene delante en la otra rama, y de paso
+    // hacía descartar una propuesta legítima.
+    //
+    // Es la misma regla que usa Odoo al fusionar dos nodos del mismo campo:
+    // `patchActiveFields` combina el `invisible` con AND (utils.js:174).
+    for (const [nombre, { veces, escondidas }] of cuenta) {
+        if (veces > 0 && escondidas === veces) {
+            ocultos.add(nombre);
         }
     }
     return ocultos;
@@ -1041,7 +1062,18 @@ export const tuquiAssistantService = {
                 // `activeFields[campo]` sin chequear que exista, tiraba TypeError,
                 // el catch lo tapaba y el chequeo caía al readonly ESTÁTICO justo
                 // en los campos que no están en pantalla.
-                if (!fieldDefs[name] || !(name in enPantalla) || ocultosPorUnAncestro.has(name)) {
+                // El `invisible` PROPIO del campo cuenta igual que el del grupo
+                // que lo contiene: en los dos casos la persona no lo tiene
+                // delante, y escribirlo deja un cambio que no puede revisar. Sin
+                // esto, el chequeo era inconsistente — rechazaba lo que esconde
+                // un ancestro y dejaba pasar lo que se esconde a sí mismo.
+                let fueraDeLaVista = ocultosPorUnAncestro.has(name);
+                try {
+                    fueraDeLaVista = fueraDeLaVista || Boolean(activeRecord._isInvisible?.(name));
+                } catch {
+                    // Un campo que no se puede evaluar no se descarta por eso.
+                }
+                if (!fieldDefs[name] || !(name in enPantalla) || fueraDeLaVista) {
                     dropped.push(name);
                     continue;
                 }
