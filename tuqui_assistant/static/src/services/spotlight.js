@@ -324,36 +324,59 @@ async function esperarA(buscar, intentos = 3) {
  *
  * Es la misma técnica que usa el propio `tour_pointer_state` de Odoo cuando el
  * objetivo está fuera de la pantalla — se crea un div `position: fixed` y se
- * apunta a él— y acá resuelve lo contrario: un objetivo demasiado ANCHO. No
- * reemplaza al campo para nada más: el hover sigue atado al campo de verdad, así
- * que acercarse a cualquier parte del renglón despliega el texto.
+ * apunta a él— y acá resuelve lo contrario: un objetivo demasiado ANCHO. En Odoo
+ * el control ocupa la columna entera, así que centrarse en él deja la marca en
+ * el medio del renglón, lejos del lugar donde la persona hace clic. Un objetivo
+ * chico —un botón— se cubre entero, que es donde centrarse ya era lo correcto.
  *
- * @param {HTMLElement} proxy  el div reutilizable
+ * El ancla es SIEMPRE LA MISMA mientras la marca viva, y se acomoda en su lugar
+ * cuando el campo se mueve. Eso es lo que hacen los tours: su ancla es un
+ * elemento del formulario, que se mueve con el scroll. Y el puntero cuenta con
+ * eso — mientras el ancla no se mueva, se auto-bloquea (`tour_pointer.js`), y
+ * ese bloqueo es lo que sostiene la flecha del globo sobre el campo cuando el
+ * texto se despliega. Crear un ancla nueva en cada apuntado lo mantenía suelto,
+ * y el globo se re-centraba al abrirse mandando la flecha 117 px a la izquierda.
+ *
+ * @param {Set<HTMLElement>} anclas  las anclas vivas (una, o ninguna)
  * @param {HTMLElement} campo  el control real
  * @returns {HTMLElement} a qué apuntar
  */
 function alPuntoDeClic(anclas, campo) {
     const r = campo?.getBoundingClientRect?.();
-    if (!r || r.width <= ANCHO_QUE_YA_ES_UNA_ZONA) {
+    if (!r) {
         soltarAnclas(anclas);
         return campo;
     }
-    // UN ELEMENTO NUEVO EN CADA APUNTADO, y esto no es derroche: el puntero de
-    // Odoo se AUTO-BLOQUEA cuando el ancla es la misma y no se movió más de 1px
-    // (`tour_pointer.js`), y un ancla fija nunca se mueve. Con un ancla
-    // reutilizada, el bloqueo congelaba la posición calculada en la primera
-    // pasada — cuando el globo todavía estaba expandido midiendo su texto— y la
-    // gota quedaba 120 px a la izquierda del campo. Medido: `left: 85.9px` para
-    // un ancla en 208. Un elemento distinto hace que el puntero lo trate como
-    // otro ancla, libere el bloqueo y recalcule con el tamaño ya colapsado.
+    const angosto = r.width <= ANCHO_QUE_YA_ES_UNA_ZONA;
+    const caja = {
+        left: Math.round(r.left),
+        top: Math.round(r.top),
+        width: Math.round(angosto ? r.width : ANCHO_DEL_PUNTO_DE_CLIC),
+        height: Math.round(r.height),
+    };
+    const ancla = [...anclas][0] || nuevaAncla(anclas);
+    // Sólo se escribe si cambió: acomodar el ancla es una mutación del DOM, y el
+    // loop escucha mutaciones. Ver `esDeUnAncla`.
+    if (
+        ancla.style.left !== `${caja.left}px` ||
+        ancla.style.top !== `${caja.top}px` ||
+        ancla.style.width !== `${caja.width}px` ||
+        ancla.style.height !== `${caja.height}px`
+    ) {
+        ancla.style.left = `${caja.left}px`;
+        ancla.style.top = `${caja.top}px`;
+        ancla.style.width = `${caja.width}px`;
+        ancla.style.height = `${caja.height}px`;
+    }
+    return ancla;
+}
+
+/** El div al que apunta la gota. Invisible y sin capturar el mouse. */
+function nuevaAncla(anclas) {
     const ancla = document.createElement("div");
     ancla.dataset.tuquiAncla = "1";
-    ancla.style.cssText =
-        "position:fixed;pointer-events:none;z-index:-1;" +
-        `left:${Math.round(r.left)}px;top:${Math.round(r.top)}px;` +
-        `width:${ANCHO_DEL_PUNTO_DE_CLIC}px;height:${Math.round(r.height)}px;`;
+    ancla.style.cssText = "position:fixed;pointer-events:none;z-index:-1;";
     document.body.appendChild(ancla);
-    soltarAnclas(anclas);
     anclas.add(ancla);
     return ancla;
 }
@@ -431,6 +454,13 @@ export function makeSpotlight(overlay, deps = {}) {
      * frame después — el hover no llegaba a servir para nada.
      */
     let abierto = false;
+    /**
+     * Si la gota ya se dibujó una vez.
+     *
+     * Mientras sea `false`, se apunta SIN texto: el primer dibujo con el cartel
+     * puesto sale corrido. Ver el comentario en `marcar`.
+     */
+    let dibujada = false;
     /** Las anclas angostas vivas. Ver `alPuntoDeClic`. */
     const anclas = new Set();
 
@@ -544,7 +574,18 @@ export function makeSpotlight(overlay, deps = {}) {
         // Una gota nueva reemplaza a la anterior: dos marcas prendidas convierten
         // "acá" en "en algún lado de estos dos".
         const marcar = (target) => {
-            pointer.pointTo(alPuntoDeClic(anclas, target), { content: hint, tooltipPosition: donde });
+            pointer.pointTo(alPuntoDeClic(anclas, target), {
+                // EL PRIMER DIBUJO VA SIN TEXTO. Su `usePosition` corre ANTES del
+                // efecto que colapsa el globo a 28 px (así están declarados los
+                // hooks en `tour_pointer.js`), así que con el texto puesto la
+                // posición se calcula con el ancho del CARTEL y la gota queda
+                // `(ancho − 28) / 2` a la izquierda del campo: 120 px medidos con
+                // un texto largo, 26 con uno corto. Sin texto el globo ya nace de
+                // 28 px, la posición sale bien, y el texto entra en el dibujo
+                // siguiente — cuando el ancho inline ya es 28 y no la cambia.
+                content: dibujada ? hint : "",
+                tooltipPosition: donde,
+            });
             // CERRADA por defecto: la gota es un punto que dice "acá", no un
             // cartel. El texto se despliega al acercarse —al campo o a la marca—,
             // que es exactamente cuando la persona lo necesita y no antes. Un
@@ -555,6 +596,7 @@ export function makeSpotlight(overlay, deps = {}) {
             pointer.showContent(abierto);
         };
         abierto = false;
+        dibujada = false;
         marcar(el);
         if (hint) {
             desatar = atarHover(pointer, el, (v) => (abierto = v));
@@ -562,15 +604,28 @@ export function makeSpotlight(overlay, deps = {}) {
             desatar = null;
         }
         vigilancia = vigilar(payload, marcar, claveInicial);
-        // El segundo apuntado, un frame después, es el que ve la clasificación
-        // del IntersectionObserver — ver `vigilar`. Sin esto, un campo abajo del
-        // fold se marca fuera de pantalla y se declara éxito.
-        requestAnimationFrame(() => {
-            if (mia === generacion && pointer && claveDelRegistro() === claveInicial) {
-                const actual = findSpotlightTarget(payload || {});
-                if (actual) {
-                    marcar(actual);
-                }
+        // EL SEGUNDO APUNTADO, ya con la gota dibujada. Hace dos cosas, y las dos
+        // son bugs medidos:
+        //
+        //  1. Es el que ve la clasificación del IntersectionObserver, que es
+        //     asincrónico — ver `vigilar`. Sin esto, un campo abajo del fold se
+        //     marcaba fuera de pantalla y se declaraba éxito.
+        //  2. Corrige la posición. En el PRIMER dibujo el `usePosition` del
+        //     puntero corre ANTES del efecto que colapsa el globo a 28 px (así
+        //     está declarado en `tour_pointer.js`), así que la posición se
+        //     calcula con el ancho del texto y la gota queda
+        //     `(ancho_del_texto − 28) / 2` a la izquierda del campo: 26 px
+        //     medidos. Con el ancla quieta no hay segundo dibujo que lo corrija,
+        //     porque `setState` con los mismos valores no invalida nada. Por eso
+        //     este apuntado es también el que trae el TEXTO: ver `marcar`.
+        esperarA(() => document.querySelector(".o_tour_pointer"), 5).then(() => {
+            if (mia !== generacion || !pointer || claveDelRegistro() !== claveInicial) {
+                return;
+            }
+            dibujada = true;
+            const actual = findSpotlightTarget(payload || {});
+            if (actual) {
+                marcar(actual);
             }
         });
         timer = setTimeout(apagar, SPOTLIGHT_MS);
@@ -617,6 +672,14 @@ function atarHover(pointer, anchor, anotar = () => {}) {
     const abrir = () => {
         anotar(true);
         pointer.showContent(true);
+        // NO se re-apunta al abrir, y es a propósito. La flecha del puntero va
+        // pegada a su borde IZQUIERDO (`tour_pointer.scss`: el `tip` en
+        // `left: arrow-size/2`), así que el diseño de Odoo es que el globo se
+        // expanda hacia la derecha desde donde estaba la gota, con la flecha
+        // quedándose sobre el campo. Recalcular al abrir lo re-centra sobre el
+        // ancla y manda la flecha 130 px a la izquierda — medido. El auto-bloqueo
+        // del puntero, que en otro momento nos molestó, acá es justamente lo que
+        // sostiene la flecha en su lugar.
     };
     const cerrar = () => {
         anotar(false);
