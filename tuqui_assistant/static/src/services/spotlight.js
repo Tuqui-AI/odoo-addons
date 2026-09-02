@@ -332,28 +332,55 @@ async function esperarA(buscar, intentos = 3) {
  * @param {HTMLElement} campo  el control real
  * @returns {HTMLElement} a qué apuntar
  */
-function alPuntoDeClic(proxy, campo) {
+function alPuntoDeClic(anclas, campo) {
     const r = campo?.getBoundingClientRect?.();
     if (!r || r.width <= ANCHO_QUE_YA_ES_UNA_ZONA) {
+        soltarAnclas(anclas);
         return campo;
     }
-    const css =
+    // UN ELEMENTO NUEVO EN CADA APUNTADO, y esto no es derroche: el puntero de
+    // Odoo se AUTO-BLOQUEA cuando el ancla es la misma y no se movió más de 1px
+    // (`tour_pointer.js`), y un ancla fija nunca se mueve. Con un ancla
+    // reutilizada, el bloqueo congelaba la posición calculada en la primera
+    // pasada — cuando el globo todavía estaba expandido midiendo su texto— y la
+    // gota quedaba 120 px a la izquierda del campo. Medido: `left: 85.9px` para
+    // un ancla en 208. Un elemento distinto hace que el puntero lo trate como
+    // otro ancla, libere el bloqueo y recalcule con el tamaño ya colapsado.
+    const ancla = document.createElement("div");
+    ancla.dataset.tuquiAncla = "1";
+    ancla.style.cssText =
         "position:fixed;pointer-events:none;z-index:-1;" +
         `left:${Math.round(r.left)}px;top:${Math.round(r.top)}px;` +
         `width:${ANCHO_DEL_PUNTO_DE_CLIC}px;height:${Math.round(r.height)}px;`;
-    // SÓLO SE ESCRIBE SI CAMBIÓ, y no es una optimización: escribir el estilo es
-    // una mutación del DOM, el loop escucha mutaciones, y el loop vuelve a
-    // llamar acá. Escribir siempre era un ciclo infinito que giraba mientras la
-    // marca viviera — se colgó la suite de tests, que es la forma barata de que
-    // aparezca. Con la guarda, la primera vuelta acomoda el ancla, la segunda no
-    // muta nada y el ciclo se corta.
-    if (proxy.style.cssText !== css) {
-        proxy.style.cssText = css;
+    document.body.appendChild(ancla);
+    soltarAnclas(anclas);
+    anclas.add(ancla);
+    return ancla;
+}
+
+/** Sacar del DOM las anclas anteriores. */
+function soltarAnclas(anclas) {
+    for (const vieja of anclas) {
+        vieja.remove();
     }
-    if (!proxy.isConnected) {
-        document.body.appendChild(proxy);
+    anclas.clear();
+}
+
+/** ¿Esta mutación la provocamos nosotros acomodando el ancla?
+ *
+ *  Sin este filtro el ancla se alimenta a sí misma: acomodarla es una mutación
+ *  del DOM, el loop escucha mutaciones, y el loop vuelve a acomodarla. Giraba
+ *  mientras la marca viviera — colgó la suite tres corridas seguidas, que es la
+ *  forma barata de que aparezca; en la pantalla de una persona habría sido la
+ *  pestaña al palo 15 segundos. Nuestra propia contabilidad no es un cambio de
+ *  pantalla. */
+function esDeUnAncla(m) {
+    const nuestro = (n) => n?.dataset?.tuquiAncla === "1";
+    if (nuestro(m.target)) {
+        return true;
     }
-    return proxy;
+    const tocados = [...(m.addedNodes || []), ...(m.removedNodes || [])];
+    return tocados.length > 0 && tocados.every(nuestro);
 }
 
 /**
@@ -404,8 +431,8 @@ export function makeSpotlight(overlay, deps = {}) {
      * frame después — el hover no llegaba a servir para nada.
      */
     let abierto = false;
-    /** El ancla angosta, una por gota. Ver `alPuntoDeClic`. */
-    const proxy = deps.proxy || document.createElement("div");
+    /** Las anclas angostas vivas. Ver `alPuntoDeClic`. */
+    const anclas = new Set();
 
     function apagarVigilancia() {
         vigilancia?.();
@@ -448,18 +475,10 @@ export function makeSpotlight(overlay, deps = {}) {
             }
             marcar(el);
         };
-        // EL ANCLA NO CUENTA COMO UN CAMBIO DE PANTALLA. Acomodarla escribe su
-        // `style` y la primera vez la agrega al `body`: las dos son mutaciones
-        // del DOM, y este observador escucha mutaciones. Sin este filtro, el
-        // ancla se alimenta a sí misma — y no alcanza con escribir "sólo si
-        // cambió", porque basta que el campo se mueva un píxel por otra razón
-        // para reanudar el ciclo. Colgó la suite de tests dos veces, que es la
-        // forma barata de que aparezca: en la pantalla de una persona habría sido
-        // la pestaña al palo mientras la marca viva.
-        const esDelAncla = (m) =>
-            m.target === proxy || (m.addedNodes && [...m.addedNodes].includes(proxy));
         const observer = new MacroMutationObserver((mutaciones) => {
-            if (Array.isArray(mutaciones) && mutaciones.length && mutaciones.every(esDelAncla)) {
+            // Lo que provocamos nosotros acomodando el ancla no cuenta como un
+            // cambio de pantalla. Ver `esDeUnAncla`.
+            if (Array.isArray(mutaciones) && mutaciones.length && mutaciones.every(esDeUnAncla)) {
                 return;
             }
             revisar();
@@ -525,7 +544,7 @@ export function makeSpotlight(overlay, deps = {}) {
         // Una gota nueva reemplaza a la anterior: dos marcas prendidas convierten
         // "acá" en "en algún lado de estos dos".
         const marcar = (target) => {
-            pointer.pointTo(alPuntoDeClic(proxy, target), { content: hint, tooltipPosition: donde });
+            pointer.pointTo(alPuntoDeClic(anclas, target), { content: hint, tooltipPosition: donde });
             // CERRADA por defecto: la gota es un punto que dice "acá", no un
             // cartel. El texto se despliega al acercarse —al campo o a la marca—,
             // que es exactamente cuando la persona lo necesita y no antes. Un
@@ -573,7 +592,7 @@ export function makeSpotlight(overlay, deps = {}) {
         desatar?.();
         desatar = null;
         pointer?.hide?.();
-        proxy.remove();
+        soltarAnclas(anclas);
         removeOverlay?.();
         pointer?.destroy?.();
         pointer = null;
