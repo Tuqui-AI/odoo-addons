@@ -34,12 +34,33 @@ _logger = logging.getLogger(__name__)
 
 EMBED_ORIGINS_PARAM = "tuqui.embed_origins"
 
-#: `http://` is only trustworthy on a machine's own loopback — anywhere else
-#: it means the frame permission is handed to a host nobody can authenticate.
-_LOCAL_HTTP_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
+#: Loopback names and addresses, where `http://` is always fine because the
+#: traffic never leaves the machine. `.localhost` is reserved for loopback by
+#: RFC 6761, so any subdomain of it counts.
+_LOOPBACK_HTTP_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
 
 
-def _validate_embed_origin_token(token):
+def _is_loopback_host(host):
+    if not host:
+        return False
+    host = host.lower()
+    return host in _LOOPBACK_HTTP_HOSTS or host == "localhost" or host.endswith(".localhost") or host.startswith("127.")
+
+
+def _deployment_is_plain_http(env):
+    """¿Este Odoo se sirve por http, o sea es un entorno de desarrollo?
+
+    Se mira `web.base.url` —la identidad que el administrador le declaró al
+    deployment, y la que Odoo usa para sus propios links— y no el esquema del
+    request, que detrás de un proxy depende de que `X-Forwarded-Proto` y
+    `ProxyFix` estén bien puestos. Si no está seteada, se asume producción y
+    se es estricto.
+    """
+    base_url = (env["ir.config_parameter"].sudo().get_param("web.base.url") or "").strip().lower()
+    return base_url.startswith("http://")
+
+
+def _validate_embed_origin_token(token, allow_plain_http=False):
     """Return an error message for one invalid origin, or None if it's fine.
 
     `token` ends up verbatim inside `frame-ancestors` (see ir_http.py), so it
@@ -57,20 +78,34 @@ def _validate_embed_origin_token(token):
         return "no se aceptan comodines: %r" % token
     parsed = urlsplit(token)
     if parsed.scheme not in ("http", "https"):
-        return "tiene que empezar con https:// (o http://localhost para desarrollo local): %r" % token
+        return "tiene que empezar con https:// (o http:// en desarrollo local): %r" % token
     if not parsed.netloc:
         return "le falta el host: %r" % token
-    if parsed.scheme == "http" and parsed.hostname not in _LOCAL_HTTP_HOSTS:
-        return "tiene que ser https:// — http:// sólo se acepta en localhost: %r" % token
+    if parsed.scheme == "http" and not (allow_plain_http or _is_loopback_host(parsed.hostname)):
+        return (
+            "tiene que ser https:// — http:// sólo se acepta en loopback, o si este "
+            "Odoo también se sirve por http (web.base.url): %r" % token
+        )
     if parsed.path or parsed.query or parsed.fragment:
         return "tiene que ser sólo esquema y host, sin barra ni ruta al final: %r" % token
     return None
 
 
-def _validate_embed_origins(value):
-    """Raise if `value` (space-separated origins) has an invalid entry."""
+def _validate_embed_origins(env, value):
+    """Raise if `value` (space-separated origins) has an invalid entry.
+
+    `http://` fuera de loopback se acepta SÓLO si este Odoo también se sirve
+    por http, y eso no es una excepción de comodidad: si la sesión ya viaja en
+    claro, exigirle https al embebedor no protege nada. Y hace falta, porque el
+    diseño nuevo pide que el panel sea del MISMO SITIO que Odoo — o sea dos
+    nombres bajo un dominio común—, y eso en local no se puede armar sólo con
+    `localhost`: los subdominios de `.localhost` el browser los trata como
+    sitios distintos (medido). Sin esta cláusula, desarrollar la propia feature
+    exigiría TLS local, que a su vez exige el proxy que todavía no existe.
+    """
+    allow_plain_http = _deployment_is_plain_http(env)
     for token in (value or "").split():
-        error = _validate_embed_origin_token(token)
+        error = _validate_embed_origin_token(token, allow_plain_http=allow_plain_http)
         if error:
             raise ValidationError("tuqui.embed_origins: %s" % error)
 
@@ -102,7 +137,7 @@ class IrConfigParameter(models.Model):
         if "value" in vals:
             for parametro in self:
                 if parametro.key == EMBED_ORIGINS_PARAM:
-                    _validate_embed_origins(vals["value"])
+                    _validate_embed_origins(self.env, vals["value"])
             self._registrar_cambio_de_embed(vals["value"])
         return super().write(vals)
 
@@ -110,7 +145,7 @@ class IrConfigParameter(models.Model):
     def create(self, vals_list):
         for vals in vals_list:
             if vals.get("key") == EMBED_ORIGINS_PARAM:
-                _validate_embed_origins(vals.get("value"))
+                _validate_embed_origins(self.env, vals.get("value"))
             if vals.get("key") == EMBED_ORIGINS_PARAM and (vals.get("value") or "").strip():
                 _logger.info(
                     "tuqui_embed: %s creado por %s (uid=%s) con %r. Con un origen cargado, "
