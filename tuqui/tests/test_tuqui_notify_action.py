@@ -145,6 +145,66 @@ class TestTuquiNotifyAction(TransactionCase):
         finally:
             self.client.write({"state": "active"})
 
+    # ─── Por qué la lista vino vacía ─────────────────────────────────────────
+
+    def test_a_database_not_connected_says_so(self):
+        """The message an admin actually needs: connect the database. Saying
+        "could not be loaded" here sends them to look for a network problem
+        that does not exist."""
+        self.client.write({"state": "pending"})
+        try:
+            assert self.Action._tuqui_agent_problem() == action_mod._NOT_CONNECTED
+        finally:
+            self.client.write({"state": "active"})
+
+    def test_a_database_without_a_signing_key_says_so(self):
+        """Every database that connected before signed events existed is here."""
+        self.client.write({"event_signing_key": False})
+        try:
+            with patch("odoo.addons.tuqui.models.ir_actions_server.requests.get") as get:
+                assert self.Action._tuqui_agent_problem() == action_mod._NO_SIGNING_KEY
+            get.assert_not_called()
+        finally:
+            self.client.write({"event_signing_key": "test-signing-key"})
+
+    @mute_logger("odoo.addons.tuqui.models.ir_actions_server")
+    def test_a_tuqui_that_does_not_answer_says_so(self):
+        with patch(
+            "odoo.addons.tuqui.models.ir_actions_server.requests.get",
+            side_effect=OSError("connection refused"),
+        ):
+            assert self.Action._tuqui_agent_problem() == action_mod._UNREACHABLE
+
+    def test_a_workspace_without_agents_says_so(self):
+        """Nothing is broken here — the workspace is simply empty, which is how
+        every new one starts. It was the most misleading of the four."""
+        with patch(
+            "odoo.addons.tuqui.models.ir_actions_server.requests.get",
+            return_value=_Response({"agents": []}),
+        ):
+            assert self.Action._tuqui_agent_problem() == action_mod._NO_AGENTS
+
+    def test_a_working_list_has_no_problem(self):
+        with patch(
+            "odoo.addons.tuqui.models.ir_actions_server.requests.get",
+            return_value=_Response(_AGENTS),
+        ):
+            assert self.Action._tuqui_agent_problem() is None
+
+    def test_each_problem_has_its_own_message(self):
+        """Four causes, four things to do about them. One message for all of
+        them read as "something broke" even in the two cases where nothing did."""
+        problems = [
+            action_mod._NOT_CONNECTED,
+            action_mod._NO_SIGNING_KEY,
+            action_mod._UNREACHABLE,
+            action_mod._NO_AGENTS,
+        ]
+        messages = {self.Action._tuqui_problem_message(p) for p in problems}
+        titles = {self.Action._tuqui_problem_title(p) for p in problems}
+        assert len(messages) == 4
+        assert len(titles) == 4
+
     # ─── Running ─────────────────────────────────────────────────────────────
 
     def test_running_queues_one_event_per_record_without_http(self):
