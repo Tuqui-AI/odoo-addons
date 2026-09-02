@@ -104,10 +104,17 @@ _READ_METHODS = frozenset(
         # embedded chat could not offer to create a record and told the user
         # their permissions could not be verified.
         "get_view",
-        # NOTE `check_access_rights` is @api.deprecated in 19, so every call
-        # logs a warning. Migrating the caller (adapter.py) to `has_access` is
-        # NOT a rename: `has_access` is a RECORD method, so `_dispatch` pops
-        # args[0] as ids — it needs `[[], "read"]`, not `["read"]`.
+        # `check_access_rights` is @api.deprecated in 19 — it stays here because
+        # the deployed backend still calls it, but the caller should move to
+        # `has_access`. Two traps in that migration:
+        #   * Odoo's own deprecation message says "use check_access() instead",
+        #     and that is bad advice for an RPC client: `check_access` is
+        #     @api.private in 19, so `get_public_method` refuses it. Verified.
+        #   * It is not a rename either. `has_access` is a RECORD method, so
+        #     `_dispatch` pops args[0] as ids: it takes `[[], "read"]`, not
+        #     `["read"]`. On an empty recordset it answers the model-level
+        #     question — measured identical to `check_access_rights` for
+        #     read/create on 18 and 19.
         "check_access_rights",
         "get_views",
         "has_access",
