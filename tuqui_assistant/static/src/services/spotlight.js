@@ -344,6 +344,15 @@ export function makeSpotlight(overlay, deps = {}) {
     let generacion = 0;
     /** El loop de la marca vigente, o null si no hay marca. */
     let vigilancia = null;
+    /**
+     * Si el globo está desplegado ahora.
+     *
+     * Lo lleva la marca y no cada apuntado, y el motivo salió de mirar un video:
+     * el loop re-apunta en cada cambio del DOM, y si cada re-apuntado forzaba
+     * "cerrado", el texto se abría al acercarse el mouse y **se cerraba solo** un
+     * frame después — el hover no llegaba a servir para nada.
+     */
+    let abierto = false;
 
     function apagarVigilancia() {
         vigilancia?.();
@@ -453,11 +462,15 @@ export function makeSpotlight(overlay, deps = {}) {
             // cartel. El texto se despliega al acercarse —al campo o a la marca—,
             // que es exactamente cuando la persona lo necesita y no antes. Un
             // globo abierto permanente taparía los campos vecinos.
-            pointer.showContent(false);
+            //
+            // Se respeta el estado en curso: si la persona tiene el mouse encima,
+            // un re-apuntado del loop no le cierra el texto en la cara.
+            pointer.showContent(abierto);
         };
+        abierto = false;
         marcar(el);
         if (hint) {
-            desatar = atarHover(pointer, el);
+            desatar = atarHover(pointer, el, (v) => (abierto = v));
         } else {
             desatar = null;
         }
@@ -512,9 +525,15 @@ export function makeSpotlight(overlay, deps = {}) {
  *   apaga. Sin esto, el campo de la marca anterior seguiría abriendo un texto que
  *   ya no le corresponde.
  */
-function atarHover(pointer, anchor) {
-    const abrir = () => pointer.showContent(true);
-    const cerrar = () => pointer.showContent(false);
+function atarHover(pointer, anchor, anotar = () => {}) {
+    const abrir = () => {
+        anotar(true);
+        pointer.showContent(true);
+    };
+    const cerrar = () => {
+        anotar(false);
+        pointer.showContent(false);
+    };
     pointer.setState({ onMouseEnter: abrir, onMouseLeave: cerrar });
     anchor.addEventListener("mouseenter", abrir);
     anchor.addEventListener("mouseleave", cerrar);
