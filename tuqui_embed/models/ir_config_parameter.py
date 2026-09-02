@@ -25,12 +25,55 @@ diga quién, cuándo y de qué a qué, no su nivel de severidad.
 """
 
 import logging
+from urllib.parse import urlsplit
 
 from odoo import api, models
+from odoo.exceptions import ValidationError
 
 _logger = logging.getLogger(__name__)
 
 EMBED_ORIGINS_PARAM = "tuqui.embed_origins"
+
+#: `http://` is only trustworthy on a machine's own loopback — anywhere else
+#: it means the cookie (and the frame permission) travel in the clear.
+_LOCAL_HTTP_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
+
+
+def _validate_embed_origin_token(token):
+    """Return an error message for one invalid origin, or None if it's fine.
+
+    `token` ends up verbatim inside `frame-ancestors` (see ir_http.py) and
+    governs which sites get the loosened, `SameSite=None` session cookie —
+    it's not a display string, it's an access-control entry. A wildcard, a
+    bare scheme, or a plain-http host would open the frame (and the cookie)
+    to more than whoever typed the value meant to.
+
+    Plain strings, not `odoo._()`: this runs on every `write`/`create`,
+    including from plain `TransactionCase` tests with no request/lang in
+    context, and `_()` logs a WARNING there ("no translation language
+    detected") — the exact kind of noise this module already learned to
+    keep out of its own test run (see `_registrar_cambio_de_embed` above).
+    """
+    if "*" in token:
+        return "no se aceptan comodines: %r" % token
+    parsed = urlsplit(token)
+    if parsed.scheme not in ("http", "https"):
+        return "tiene que empezar con https:// (o http://localhost para desarrollo local): %r" % token
+    if not parsed.netloc:
+        return "le falta el host: %r" % token
+    if parsed.scheme == "http" and parsed.hostname not in _LOCAL_HTTP_HOSTS:
+        return "tiene que ser https:// — http:// sólo se acepta en localhost: %r" % token
+    if parsed.path or parsed.query or parsed.fragment:
+        return "tiene que ser sólo esquema y host, sin barra ni ruta al final: %r" % token
+    return None
+
+
+def _validate_embed_origins(value):
+    """Raise if `value` (space-separated origins) has an invalid entry."""
+    for token in (value or "").split():
+        error = _validate_embed_origin_token(token)
+        if error:
+            raise ValidationError("tuqui.embed_origins: %s" % error)
 
 
 class IrConfigParameter(models.Model):
@@ -58,12 +101,17 @@ class IrConfigParameter(models.Model):
 
     def write(self, vals):
         if "value" in vals:
+            for parametro in self:
+                if parametro.key == EMBED_ORIGINS_PARAM:
+                    _validate_embed_origins(vals["value"])
             self._registrar_cambio_de_embed(vals["value"])
         return super().write(vals)
 
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
+            if vals.get("key") == EMBED_ORIGINS_PARAM:
+                _validate_embed_origins(vals.get("value"))
             if vals.get("key") == EMBED_ORIGINS_PARAM and (vals.get("value") or "").strip():
                 _logger.info(
                     "tuqui_embed: %s creado por %s (uid=%s) con %r. Con un origen cargado, "

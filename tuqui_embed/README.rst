@@ -19,7 +19,10 @@ En *Ajustes → Técnico → Parámetros del sistema*, crear:
 
 Varios orígenes van separados por espacios. El valor entra tal cual en
 ``frame-ancestors``, así que tiene que ser el origen completo (esquema + host +
-puerto), sin barra final.
+puerto), sin barra final. Se valida al guardar: no se aceptan comodines, un
+esquema sin host, ni ``http://`` fuera de ``localhost``/``127.0.0.1`` — un
+origen que no cumple esto no llega a guardarse, en vez de aceptarse tal cual y
+entrar verbatim en ``frame-ancestors``.
 
 Para apagarlo: borrar el parámetro o dejarlo vacío.
 
@@ -35,15 +38,16 @@ Dos cosas, y las dos hacen falta:
    no la reemplaza. Las otras directivas que Odoo haya puesto también quedan.
 
 2. **Deja que la sesión viaje dentro del iframe**: reemite la cookie
-   ``session_id`` con ``SameSite=None; Secure``, en **todas** las respuestas de
-   este Odoo mientras el parámetro esté cargado — no sólo en las que vienen del
-   panel. No es comodidad: el primer pedido del iframe se puede detectar por
-   ``Referer``, pero llega **sin cookie** (la guardada es ``SameSite=Lax`` y no
-   viaja en un frame ajeno), así que acotarlo por origen es aflojarla siempre un
-   pedido tarde, cuando la navegación ya terminó en el login. Se mantienen las
-   condiciones de Odoo: no se emite si la sesión no se guarda del lado del
-   servidor (``auth="bearer"``, pedidos stateless) ni sobre respuestas cacheables
-   en público, y lleva el mismo ``max-age`` que usa Odoo.
+   ``session_id`` con ``SameSite=None; Secure; Partitioned``, en **todas** las
+   respuestas de este Odoo mientras el parámetro esté cargado — no sólo en las
+   que vienen del panel. No es comodidad: el primer pedido del iframe se puede
+   detectar por ``Referer``, pero llega **sin cookie** (la guardada es
+   ``SameSite=Lax`` y no viaja en un frame ajeno), así que acotarlo por origen
+   es aflojarla siempre un pedido tarde, cuando la navegación ya terminó en el
+   login. Se mantienen las condiciones de Odoo: no se emite si la sesión no se
+   guarda del lado del servidor (``auth="bearer"``, pedidos stateless) ni sobre
+   respuestas cacheables en público, y lleva el mismo ``max-age`` que usa Odoo.
+   El ``Partitioned`` es CHIPS — ver más abajo por qué se sumó y qué cierra.
 
 Sin la segunda, la primera sola no sirve: el iframe se ve, pero mostrando la
 pantalla de login, porque el browser no manda una cookie ``SameSite=Lax`` en un
@@ -74,14 +78,50 @@ CSRF clásico, que NO dispara preflight               Las rutas de datos de Odoo
 Verificado además contra la base: el ``write`` que intentó el sitio ajeno no
 escribió nada.
 
-**Lectura:** aflojar el ``SameSite`` no habilita leer ni escribir datos de
-negocio desde otro sitio. Lo que protege no es el ``SameSite`` sino la
-combinación de CORS con que las rutas de datos hablen JSON.
+**Lectura, acotada tras la revisión de abajo:** aflojar el ``SameSite`` no
+habilita leer ni escribir datos de negocio **por** ``fetch`` **ni por**
+``<form>`` — eso lo protege la combinación de CORS con que las rutas de datos
+hablen JSON. Pero CORS no es la única puerta: no se aplica a un WebSocket ni a
+una navegación top-level, y ahí el ``SameSite`` sí era la última línea. Ver
+"Dos canales que CORS no cubre" más abajo — es la razón por la que se sumó
+``Partitioned``.
 
 Lo que queda expuesto, y no se midió: las rutas ``type="http"`` del backend
 (formularios como el login) sí aceptan ``form-urlencoded``. Ahí la defensa es el
 token CSRF de Odoo, que sigue en pie — el atacante no puede leerlo, porque para
 eso tendría que leer el HTML y CORS se lo impide.
+
+Dos canales que CORS no cubre — medido en vivo, y por qué se sumó CHIPS
+=========================================================================
+
+La medición de arriba cubre ``fetch`` y ``<form>``, que es donde CORS actúa.
+Pero CORS no aplica a un WebSocket ni a una navegación top-level (``<img>``,
+``<script>``), y ahí el ``SameSite`` aflojado era la última línea. Probado
+contra el Odoo 19 de dev, con la cookie de un administrador y
+``Origin: https://evil.example.com``:
+
+- **WebSocket cross-origin.** ``/websocket`` es ``auth="public", cors="*"``
+  (``addons/bus/controllers/websocket.py``); el downgrade de sesión que
+  protegería de esto sólo actúa si ``ODOO_BUS_PUBLIC_SAMESITE_WS`` está
+  seteada, y no lo está ni por default. Handshake OK, y el socket recibe el
+  bus en vivo del usuario — un WebSocket es legible por JS cross-origin, sin
+  preflight ni gate de credenciales.
+- **``/web/become``: escalada a superusuario zero-click.**
+  ``web/controllers/home.py`` — ``auth='user'``, **GET**, sin token, y para un
+  usuario que ya es ``_is_system()`` hace ``session.uid = SUPERUSER_ID``.
+  Probado: ``303 → /odoo`` sólo con la cookie. Con ``SameSite=None``, un
+  ``<img src=".../web/become">`` en cualquier página que visite un admin
+  logueado lo escala sin un clic. Misma familia: ``/mail/unfollow``,
+  ``/web/hook``.
+
+**Por qué ``Partitioned`` (CHIPS) y no un ajuste a estos dos endpoints.** Ambos
+son de Odoo core, no de este módulo, y arreglarlos ahí sería un parche sobre un
+síntoma distinto cada vez que aparezca uno nuevo. ``Partitioned`` ataca la causa
+común: ata la cookie al par (sitio top-level, este origen) en vez de sólo a este
+origen, así que una página en OTRO sitio top-level recibe una partición vacía —
+ni el WebSocket ni el ``<img>`` ven esta sesión, sin importar qué diga
+``embed_origins``. Soporte de browsers amplio (Chrome 114+, Firefox 141+); en
+Safari conviene chequear la versión puntual del despliegue, no asumirlo.
 
 Lo que hay que decidir antes de encenderlo
 ==========================================
@@ -105,7 +145,9 @@ Qué queda en pie igual:
   la cookie.
 
 Lo que se pierde: la red de contención para cualquier ruta que hoy dependa del
-``SameSite`` y no de un token.
+``SameSite`` y no de un token — acotado por ``Partitioned``: una ventana en
+OTRO sitio top-level ya no ve esta sesión, así que esa red sigue en pie para
+cualquiera que no sea el origen declarado.
 
 **La alternativa** es una cookie aparte, de vida corta, emitida sólo para las
 rutas que se muestran embebidas, dejando la sesión normal intacta. Es más
@@ -117,6 +159,11 @@ Notas
 
 - ``SameSite=None`` exige ``Secure``. Sobre ``http://`` el browser sólo lo acepta
   en localhost; cualquier despliegue real es HTTPS, así que no cambia nada ahí.
+- ``Partitioned`` viaja atado al mismo ``Set-Cookie`` de la sesión aflojada —
+  no es un cambio de sesión aparte. La primera vez que alguien abre el panel en
+  un navegador dado, el particionado hace que esa ventana no vea una sesión que
+  ya tenía abierta afuera (pide loguearse una vez); logueado adentro del panel,
+  esa sesión particionada queda para las siguientes visitas.
 - El parámetro se lee en cada request, sin cachear: sacar el permiso surte
   efecto cuando el administrador lo saca, no cuando alguien reinicie el
   servidor.
