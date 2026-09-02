@@ -1,10 +1,9 @@
 """`tuqui.embed_origins` is an access-control list, not free text.
 
-Each entry ends up verbatim inside `frame-ancestors` (see ir_http.py) and
-decides which sites get the session cookie with `SameSite=None`. Before this,
-the field accepted whatever was typed — a wildcard, a bare scheme, a typo'd
-`http://` — and any of those would have opened the frame, and the cookie, to
-more than whoever wrote the value meant to.
+Each entry ends up verbatim inside `frame-ancestors` (see ir_http.py), so it
+decides who may frame this Odoo. Before this, the field accepted whatever was
+typed — a wildcard, a bare scheme, a typo'd `http://` — and any of those would
+have opened the frame to more than whoever wrote the value meant to.
 """
 
 from odoo.exceptions import ValidationError

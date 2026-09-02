@@ -8,6 +8,11 @@ el registro del que están hablando al lado de la conversación.
 
 **Viene apagado.** Sin el parámetro cargado, no cambia nada.
 
+**Hace una sola cosa: permite el frame.** No toca la cookie de sesión, no toca
+el manejo de sesión de Odoo, no agrega rutas. Que la sesión del usuario aparezca
+adentro del iframe no es trabajo de este módulo — es consecuencia de cómo se
+sirve el panel, y eso está en "La precondición" más abajo.
+
 Cómo se enciende
 ================
 
@@ -15,186 +20,149 @@ En *Ajustes → Técnico → Parámetros del sistema*, crear:
 
 ::
 
-    tuqui.embed_origins = https://tuqui.com
+    tuqui.embed_origins = https://odoo-acme.tuqui.com
 
 Varios orígenes van separados por espacios. El valor entra tal cual en
 ``frame-ancestors``, así que tiene que ser el origen completo (esquema + host +
 puerto), sin barra final. Se valida al guardar: no se aceptan comodines, un
-esquema sin host, ni ``http://`` fuera de ``localhost``/``127.0.0.1`` — un
-origen que no cumple esto no llega a guardarse, en vez de aceptarse tal cual y
-entrar verbatim en ``frame-ancestors``.
+esquema sin host, ni ``http://`` fuera de ``localhost``/``127.0.0.1``.
 
 Para apagarlo: borrar el parámetro o dejarlo vacío.
 
 Qué hace exactamente
 ====================
 
-Dos cosas, y las dos hacen falta:
+**Permite el frame** desde los orígenes de la lista: saca el ``X-Frame-Options``
+y responde ``Content-Security-Policy: frame-ancestors 'self' <lista>``.
 
-1. **Permite el frame** desde los orígenes de la lista: saca el
-   ``X-Frame-Options`` y responde ``Content-Security-Policy: frame-ancestors
-   'self' <lista>``. El ``'self'`` es el default de Odoo y se conserva —lo
-   necesitan sus propios iframes, como el visor de PDF—: esto amplía la lista,
-   no la reemplaza. Las otras directivas que Odoo haya puesto también quedan.
+El ``'self'`` VA SIEMPRE. Odoo embebe sus propias páginas en iframes del mismo
+origen —el visor de PDF y de texto, el preview de reportes— y una lista sin
+``'self'`` los deja en blanco para TODA la base en cuanto se prende el switch.
+El default de Odoo es, justamente, ``frame-ancestors 'self'``: esto amplía la
+lista, no la reemplaza.
 
-2. **Deja que la sesión viaje dentro del iframe**: reemite la cookie
-   ``session_id`` con ``SameSite=None; Secure``, en **todas** las respuestas de
-   este Odoo mientras el parámetro esté cargado — no sólo en las que vienen del
-   panel. No es comodidad: el primer pedido del iframe se puede detectar por
-   ``Referer``, pero llega **sin cookie** (la guardada es ``SameSite=Lax`` y no
-   viaja en un frame ajeno), así que acotarlo por origen es aflojarla siempre un
-   pedido tarde, cuando la navegación ya terminó en el login. Se mantienen las
-   condiciones de Odoo: no se emite si la sesión no se guarda del lado del
-   servidor (``auth="bearer"``, pedidos stateless) ni sobre respuestas cacheables
-   en público, y lleva el mismo ``max-age`` que usa Odoo.
+Y la CSP se **completa**, no se reemplaza. ``set_csp`` le pone
+``default-src 'none'`` a toda respuesta ``image/*`` (``odoo/http.py``), que es lo
+que sandboxea un SVG subido como adjunto. Sobrescribir el header dejaba ese SVG
+ejecutando script en el origen de Odoo — un agujero que no tiene nada que ver
+con embeber, y que aparecía en todas las respuestas.
 
-Sin la segunda, la primera sola no sirve: el iframe se ve, pero mostrando la
-pantalla de login, porque el browser no manda una cookie ``SameSite=Lax`` en un
-frame de otro sitio.
+La precondición: el panel tiene que servirse en el MISMO SITIO
+==============================================================
 
-Qué se puede hacer con la cookie aflojada — medido
-==================================================
+Permitir el frame no alcanza por sí solo: si el panel está en otro **sitio**, la
+cookie de sesión de Odoo (``SameSite=Lax``) no viaja adentro del iframe, y el
+usuario ve la pantalla de login aunque ya esté logueado en Odoo.
 
-Se montó el escenario completo (Odoo por HTTPS, un origen declarado que lo
-muestra en un iframe, y un sitio en otro origen) y se comprobó, primero, que el
-aflojamiento **ocurre**: después de pasar por el origen declarado, la sesión del
-navegador queda ``SameSite=None; Secure``.
+La salida **no** es aflojar la cookie (ver la sección siguiente): es que el panel
+y este Odoo compartan sitio. ``SameSite`` se define por **sitio** (dominio
+registrable), no por origen, así que ``https://tuqui.com`` y
+``https://odoo-acme.tuqui.com`` son el mismo sitio y la cookie normal entra al
+iframe sola.
 
-Con esa cookie, un sitio NO declarado consigue:
+En la práctica eso significa que Tuqui sirve este Odoo bajo un host propio
+—``odoo-<workspace>.tuqui.com``, reenviando al Odoo del cliente— y el navegador
+sólo habla con ese host.
 
-===================================================  ==========================
-Intento                                              Resultado
-===================================================  ==========================
-Leer datos (``call_kw`` con ``application/json``)    **Bloqueado** — el
-                                                     navegador exige preflight
-                                                     CORS y Odoo no lo concede
-Leer la sesión (``get_session_info``)                **Bloqueado**, por lo mismo
-Escribir con POST ``form-urlencoded`` — el vector    **Rechazado: HTTP 415.**
-CSRF clásico, que NO dispara preflight               Las rutas de datos de Odoo
-                                                     son JSON-only
-===================================================  ==========================
+**Medido** (Chrome real, con la cookie por default de Odoo: ``SameSite=Lax``,
+sin ``Secure``, sin partición):
 
-Verificado además contra la base: el ``write`` que intentó el sitio ajeno no
-escribió nada.
+======================================================  ==================
+Caso                                                    Resultado
+======================================================  ==================
+Abrir el panel estando ya logueado en Odoo              Entra logueado
+Reabrirlo en una pestaña nueva                          Entra logueado
+Después de cerrar y reabrir el navegador                Entra logueado
+Bucles de redirección                                   Ninguno
+======================================================  ==================
 
-**Lectura, acotada tras la revisión de abajo:** aflojar el ``SameSite`` no
-habilita leer ni escribir datos de negocio **por** ``fetch`` **ni por**
-``<form>`` — eso lo protege la combinación de CORS con que las rutas de datos
-hablen JSON. Pero CORS no es la única puerta: no se aplica a un WebSocket ni a
-una navegación top-level, y ahí el ``SameSite`` sí era la última línea. Ver
-"Dos canales que CORS no cubre" más abajo — **siguen abiertos, sin mitigar.**
+Lo que ese ensayo NO cubre: el proxy en sí. Se montaron los dos hosts en el
+mismo sitio para aislar la pregunta de la cookie; la reescritura de host, el
+upgrade del WebSocket del bus y el tráfico de assets a través de Tuqui siguen
+sin probarse punta a punta.
 
-Lo que queda expuesto, y no se midió: las rutas ``type="http"`` del backend
-(formularios como el login) sí aceptan ``form-urlencoded``. Ahí la defensa es el
-token CSRF de Odoo, que sigue en pie — el atacante no puede leerlo, porque para
-eso tendría que leer el HTML y CORS se lo impide.
+Por qué NO se afloja la cookie — dos vectores medidos
+=====================================================
 
-Dos canales que CORS no cubre — medido en vivo, y todavía sin mitigar
-=====================================================================
+Una versión anterior de este módulo reemitía la sesión con ``SameSite=None``
+para que viajara a un panel de otro sitio. Se descartó, y conviene que quede
+escrito por qué, porque es el camino al que uno vuelve solo.
 
-La medición de arriba cubre ``fetch`` y ``<form>``, que es donde CORS actúa.
-Pero CORS no aplica a un WebSocket ni a una navegación top-level (``<img>``,
-``<script>``), y ahí el ``SameSite`` aflojado era la última línea. Probado
-contra el Odoo 19 de dev, con la cookie de un administrador y
-``Origin: https://evil.example.com``:
+Aflojar el ``SameSite`` abre dos canales que **CORS no cubre** (probado en vivo
+contra el Odoo 19 de dev, con cookie de administrador y
+``Origin: https://evil.example.com``):
 
 - **WebSocket cross-origin.** ``/websocket`` es ``auth="public", cors="*"``
   (``addons/bus/controllers/websocket.py``); el downgrade de sesión que
   protegería de esto sólo actúa si ``ODOO_BUS_PUBLIC_SAMESITE_WS`` está
-  seteada, y no lo está ni por default. Handshake OK, y el socket recibe el
-  bus en vivo del usuario — un WebSocket es legible por JS cross-origin, sin
+  seteada, y no lo está ni por default. Handshake OK, y el socket recibe el bus
+  en vivo del usuario — un WebSocket es legible por JS cross-origin, sin
   preflight ni gate de credenciales.
 - **``/web/become``: escalada a superusuario zero-click.**
   ``web/controllers/home.py`` — ``auth='user'``, **GET**, sin token, y para un
-  usuario que ya es ``_is_system()`` hace ``session.uid = SUPERUSER_ID``.
-  Probado: ``303 → /odoo`` sólo con la cookie. Con ``SameSite=None``, un
-  ``<img src=".../web/become">`` en cualquier página que visite un admin
-  logueado lo escala sin un clic. Misma familia: ``/mail/unfollow``,
-  ``/web/hook``.
+  usuario que ya es ``_is_system()`` hace ``session.uid = SUPERUSER_ID``. Con
+  ``SameSite=None``, un ``<img src=".../web/become">`` en cualquier página que
+  visite un admin logueado lo escala sin un clic. Reproducido en Chrome real,
+  comparando el ``session_id`` del admin y no su mera presencia: **antes del
+  mitigante el sitio ajeno se llevaba la sesión real**. Misma familia:
+  ``/mail/unfollow``, ``/web/hook``.
 
-**``Partitioned`` (CHIPS) se probó como mitigante y NO sirve para este diseño.**
-La idea era atacar la causa común en vez de parchear cada endpoint de Odoo core:
-atar la cookie al par (sitio top-level, este origen), con lo cual una página en
-OTRO sitio top-level recibe una partición vacía. Cierra el ``<img>`` —medido
-antes/después contra Chrome real, con comparación del ``session_id`` del admin,
-no sólo de su presencia—, pero **rompe el panel**: al reabrirlo en una pestaña
-nueva, Odoo entra en un bucle infinito entre la pantalla pedida y
-``/web/login`` (``ERR_TOO_MANY_REDIRECTS``). Discriminador medido en las dos
-direcciones: sin ``Partitioned`` esa misma navegación devuelve 200 y entra
-logueada; con ``Partitioned`` cicla siempre.
+``Partitioned`` (CHIPS) se probó como mitigante y **no sirve para este diseño**.
+Cierra el ``<img>`` (medido antes/después), pero **rompe el panel**: al
+reabrirlo en una pestaña nueva, Odoo entra en un bucle infinito entre la
+pantalla pedida y ``/web/login`` (``ERR_TOO_MANY_REDIRECTS``). Discriminador
+medido en las dos direcciones — sin ``Partitioned`` esa misma navegación
+devuelve 200 y entra logueada. El mecanismo del bucle quedó **sin explicar**: la
+traza sugiere que el navegador manda la cookie a una ruta y no a la otra, pero
+esa lectura viene de una introspección de headers que en la misma corrida
+devolvió vacío para uno de los dos pedidos, así que es hipótesis, no medición.
 
-El mecanismo del bucle **no quedó explicado**: en la traza, el navegador manda
-la cookie a ``/web/login`` y no a la pantalla pedida, pero esa lectura viene de
-una introspección de headers que en esa misma corrida devolvió vacío para uno
-de los dos pedidos — así que el "por qué" es hipótesis, no medición. Lo que sí
-está medido es el antes/después del bucle.
+Con el panel same-site no hay nada que aflojar, así que ninguno de los dos
+vectores se abre. Eso es lo que hace que este módulo no tenga una decisión de
+seguridad pendiente.
 
-Queda entonces la decisión de fondo (abajo) sin mitigante aplicado. Nota para
-quien la retome: CHIPS tampoco alcanzaba solo, porque el panel de Tuqui reusa el
-login first-party en vez de establecer sesión propia — con la cookie
-particionada, el panel pide login de nuevo.
+El riesgo que sí queda, y es mucho más chico
+============================================
 
-Lo que hay que decidir antes de encenderlo
-==========================================
+Con el panel en el mismo sitio, ``SameSite=Lax`` viaja entre páginas de ese
+sitio. O sea: el riesgo se mudó de "cualquier sitio de internet" a "cualquier
+página bajo nuestro propio dominio" — un subdominio comprometido o mal
+apuntado. Bajo nuestro control, pero no cero.
 
-**El punto abierto es la cookie.** ``SameSite=Lax`` es hoy una protección contra
-CSRF: hace que el browser no mande la sesión en pedidos que salen de otro sitio.
-Bajarla a ``None`` la saca.
+Lo que lo contiene:
 
-Y conviene ser preciso con el alcance, porque es lo que hay que aprobar: **la
-cookie sale ``SameSite=None`` en toda respuesta de este Odoo**, no sólo en las
-que vienen del panel (arriba está el por qué: acotarlo por origen llega tarde).
-La cookie es una sola y el browser la guarda con el último atributo que vio, así
-que basta que el parámetro esté cargado para que la sesión de cualquier usuario
-de esa base quede ``SameSite=None``.
+- ``frame-ancestors`` sigue acotando **quién** puede embeber: no alcanza con ser
+  del mismo sitio, hay que estar en la lista que declaró el administrador.
+- Las rutas de datos de Odoo son JSON-only, así que un ``<form>`` POST no
+  escribe. Eso está fijado en ``tests/test_csrf_invariante.py``, porque es una
+  propiedad de Odoo de la que dependemos y podría cambiar sin que nada se
+  ponga rojo.
+- ``httponly`` sigue puesto (Odoo lo pone; este módulo no lo toca).
 
-Qué queda en pie igual:
+Lo que queda abierto para el review
+===================================
 
-- El origen tiene que estar en la lista, y lo declara un administrador.
-- Odoo valida CSRF por token en los formularios del backend.
-- ``httponly`` sigue puesto: el JavaScript de la página que embebe no puede leer
-  la cookie.
-
-Lo que se pierde: la red de contención para cualquier ruta que hoy dependa del
-``SameSite`` y no de un token. Los dos canales de arriba (WebSocket y
-``/web/become``) caen en esa bolsa y **no tienen mitigante aplicado** — el que
-se probó (``Partitioned``) rompe el panel, ver esa sección.
-
-**La alternativa** es una cookie aparte, de vida corta, emitida sólo para las
-rutas que se muestran embebidas, dejando la sesión normal intacta. Es más
-trabajo y toca el manejo de sesión de Odoo, y por eso es una decisión y no un
-detalle de implementación.
+- **¿Hace falta este módulo, o el header lo saca el proxy?** Siendo Tuqui el que
+  proxea, podría sacar el ``X-Frame-Options`` y reescribir la CSP al pasar, sin
+  instalar nada en el Odoo del cliente. A favor de este módulo: el
+  administrador del cliente **declara** explícitamente quién puede embeber su
+  Odoo, y ese consentimiento vive con el dueño del dato en vez de decidirlo
+  Tuqui por su cuenta. Es una decisión de producto, no de código.
+- **Validar que el origen declarado sea same-site** con este Odoo sería un
+  buen guardarraíl (hoy se puede declarar un origen de otro sitio y el panel va
+  a mostrar el login sin explicar por qué). No se implementó a propósito:
+  saber si dos hosts comparten dominio registrable exige la Public Suffix List,
+  y una aproximación naíf del tipo "comparar las dos últimas etiquetas" da mal
+  justo en los dominios que más usamos (``.com.ar``).
 
 Notas
 =====
 
-- ``SameSite=None`` exige ``Secure``. Sobre ``http://`` el browser sólo lo acepta
-  en localhost; cualquier despliegue real es HTTPS, así que no cambia nada ahí.
 - El parámetro se lee en cada request, pero ``get_param`` está ormcacheado, así
   que en un despliegue multi-worker sacar el permiso puede tardar en surtir
   efecto en los workers que ya lo tenían cacheado. Medido: con el valor cambiado
   por otro proceso, este módulo siguió respondiendo con el anterior hasta
   reiniciar. Si la revocación tiene que ser inmediata, hay que forzar la
   invalidación.
-
-Por qué se afloja siempre, y no sólo para el panel
---------------------------------------------------
-
-La versión anterior aflojaba el ``SameSite`` **sólo cuando reconocía que el
-pedido venía del origen declarado**, para acotar el alcance. No funciona, y el
-motivo es un huevo y gallina medido contra un navegador de verdad:
-
-El primer pedido que hace el iframe **sí** trae ``Referer`` del panel — se lo
-puede reconocer perfectamente. Pero llega **sin cookie de sesión**, porque la
-que está guardada en ese momento es la normal (``SameSite=Lax``), y esa no viaja
-dentro de un frame de otro sitio. Odoo lo trata como anónimo y redirige al
-login. La cookie se afloja en la respuesta… de una navegación que ya terminó
-mal, y la persona ve la pantalla de login adentro del panel.
-
-Acotar por origen era, entonces, **aflojar siempre un pedido tarde**.
-
-Lo que esto cambia en el riesgo: de "los pedidos que vienen del panel" a "todos
-los de este Odoo". Lo que NO cambia: el interruptor sigue siendo el parámetro —
-sin ``tuqui.embed_origins`` cargado, el módulo no toca ninguna cookie — y la
-medición de arriba sigue valiendo, porque no dependía de qué pedidos se
-aflojaban sino de qué puede hacer un origen ajeno con una sesión aflojada.
+- Un ``frame-ancestors`` con la lista NO es lo mismo que permitir a cualquiera:
+  es lo único que distingue esto de sacar la protección de clickjacking.

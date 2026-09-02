@@ -1,9 +1,15 @@
-"""Lo único que frena el CSRF con la cookie aflojada: las rutas son JSON-only.
+"""Lo que frena un CSRF desde el mismo sitio: las rutas de datos son JSON-only.
 
-POR QUÉ ESTE TEST EXISTE. Este módulo baja el `SameSite` de la sesión, y eso
-resigna una protección real: un sitio ajeno puede hacer que el browser mande la
-cookie de la víctima. Leer no puede (CORS lo frena), pero **un form POST no lo
-frena CORS** — es el CSRF clásico, y el browser lo manda igual.
+POR QUÉ SIGUE EXISTIENDO, con la premisa corregida. Este módulo **ya no afloja
+el `SameSite`** —eso se sacó, ver `test_cookie_is_never_touched.py`—, así que
+un sitio cualquiera de internet ya no logra que el browser mande la sesión.
+
+Pero el diseño nuevo apoya la sesión en que el panel se sirva en el **mismo
+sitio** que este Odoo, y `SameSite=Lax` **sí** viaja entre páginas del mismo
+sitio. O sea: el riesgo se mudó de "cualquier sitio" a "cualquier página bajo
+nuestro propio dominio" — un subdominio comprometido o mal apuntado. Es una
+superficie mucho más chica y bajo nuestro control, pero no es cero, y un
+`<form>` POST sigue siendo el vector que CORS no frena.
 
 Lo que lo detiene es que las rutas de datos de Odoo **sólo aceptan JSON**, y un
 `<form>` no puede emitir `application/json`: sólo `form-urlencoded`,
@@ -14,7 +20,7 @@ ningún test se ponga rojo**. Este lo pone.
 
 No prueba nuestro código: prueba una propiedad de Odoo de la que dependemos. Es
 deliberado — es exactamente la clase de suposición que hay que fijar cuando se
-resigna una defensa a cambio de ella.
+apoya una defensa en ella.
 """
 
 import json
