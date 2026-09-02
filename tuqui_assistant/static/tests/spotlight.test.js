@@ -442,6 +442,18 @@ describe("la Gota real (template heredado de Odoo)", () => {
     });
 });
 
+/**
+ * Las llamadas a `pointTo` de una lista de llamadas.
+ *
+ * `typeof c !== "string"` no es defensa por si acaso: `"hide".anchor` EXISTE —
+ * es `String.prototype.anchor`, el método legacy de HTML— así que un filtro por
+ * `c.anchor` cuenta también los `"hide"` y los `"destroy"`. Costó un rato de
+ * diagnóstico creyendo que el código estaba mal cuando el test estaba mal.
+ */
+function apuntados(calls) {
+    return calls.filter((c) => typeof c !== "string" && c.anchor);
+}
+
 describe("mientras la marca vive", () => {
     /** El mismo puntero de mentira que arriba, para poder mirar QUÉ se le pide. */
     function harnessConCampo(html = '<div name="campo_vivo" class="el-campo"></div>') {
@@ -477,11 +489,10 @@ describe("mientras la marca vive", () => {
         const { form, handle, calls } = harnessConCampo();
 
         expect(await handle.spotlight({ field: "campo_vivo" })).toBe(true);
-        const primeros = calls.filter((c) => c.anchor).length;
-        expect(primeros).toBe(1);
+        expect(apuntados(calls).length).toBe(1);
 
         await animationFrame();
-        expect(calls.filter((c) => c.anchor).length).toBe(2);
+        expect(apuntados(calls).length).toBe(2);
 
         handle.destroy();
         form.remove();
@@ -519,9 +530,8 @@ describe("mientras la marca vive", () => {
         await animationFrame();
         await animationFrame();
 
-        const apuntados = calls.filter((c) => c.anchor);
-        expect(apuntados.length > 0).toBe(true);
-        expect(apuntados.at(-1).anchor.className).toBe("el-campo-nuevo");
+        expect(apuntados(calls).length > 0).toBe(true);
+        expect(apuntados(calls).at(-1).anchor.className).toBe("el-campo-nuevo");
         expect(calls.includes("hide")).toBe(false);
 
         handle.destroy();
@@ -544,6 +554,73 @@ describe("mientras la marca vive", () => {
 
         expect(calls.length).toBe(0);
 
+        form.remove();
+    });
+});
+
+describe("la marca es de UN registro", () => {
+    /** Como el harness de arriba, pero con la clave del registro bajo control. */
+    function harnessConRegistro(clave = "account.journal:7") {
+        const form = document.createElement("div");
+        form.className = "o_form_view";
+        form.innerHTML = '<div name="campo_vivo" class="el-campo"></div>';
+        document.body.appendChild(form);
+
+        const estado = { clave };
+        const calls = [];
+        const pointer = {
+            calls,
+            state: {},
+            pointTo: (anchor, step) => calls.push({ anchor, step }),
+            showContent: (open) => calls.push({ showContent: open }),
+            setState: (st) => calls.push({ setState: st }),
+            hide: () => calls.push("hide"),
+            destroy: () => calls.push("destroy"),
+        };
+        const handle = makeSpotlight(
+            { add: () => () => {} },
+            { createPointerState: () => pointer, Gota: "FakeGota", recordKey: () => estado.clave },
+        );
+        return { form, handle, calls, estado };
+    }
+
+    test("si la persona se va a otro registro, la marca se apaga", async () => {
+        // El modo de falla más caro de todos: el campo se llama igual en el
+        // registro nuevo, así que el loop lo volvería a apuntar — señalando con
+        // confianza el lugar correcto del registro equivocado. Un turno largo
+        // entrega la marca justo así.
+        const { form, handle, calls, estado } = harnessConRegistro();
+        expect(await handle.spotlight({ field: "campo_vivo" })).toBe(true);
+        await animationFrame();
+        calls.length = 0;
+
+        estado.clave = "account.journal:8";
+        form.innerHTML = '<div name="campo_vivo" class="el-campo-del-otro"></div>';
+        await animationFrame();
+        await animationFrame();
+
+        expect(apuntados(calls).length).toBe(0);
+        expect(calls.includes("hide")).toBe(true);
+
+        handle.destroy();
+        form.remove();
+    });
+
+    test("y si sigue en el mismo, la sigue apuntando", async () => {
+        // El otro lado del par: sin esto, el fix de arriba lo aprobaría también
+        // un cambio que apagara la gota ante cualquier cosa.
+        const { form, handle, calls } = harnessConRegistro();
+        await handle.spotlight({ field: "campo_vivo" });
+        await animationFrame();
+        calls.length = 0;
+
+        form.innerHTML = '<div name="campo_vivo" class="el-campo-nuevo"></div>';
+        await animationFrame();
+        await animationFrame();
+
+        expect(apuntados(calls).length > 0).toBe(true);
+
+        handle.destroy();
         form.remove();
     });
 });

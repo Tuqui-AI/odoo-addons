@@ -303,6 +303,16 @@ async function esperarA(buscar, intentos = 3) {
 export function makeSpotlight(overlay, deps = {}) {
     const makePointer = deps.createPointerState || createPointerState;
     const Pointer = deps.Gota || Gota;
+    /**
+     * Qué registro está abierto, para saber si sigue siendo el mismo.
+     *
+     * Un turno largo entrega la marca sobre un formulario que la persona ya dejó:
+     * el campo se llama igual en el registro nuevo, así que el loop la volvería a
+     * apuntar ahí — señalando con confianza el lugar correcto del registro
+     * equivocado, que es el modo de falla más caro de todos. Con la clave, la
+     * marca es de ESE registro y de ningún otro.
+     */
+    const claveDelRegistro = deps.recordKey || (() => null);
     let pointer = null;
     let removeOverlay = null;
     let timer = null;
@@ -346,8 +356,13 @@ export function makeSpotlight(overlay, deps = {}) {
      *
      * @returns {() => void} para apagarlo
      */
-    function vigilar(payload, marcar) {
+    function vigilar(payload, marcar, claveInicial) {
         const revisar = () => {
+            if (claveDelRegistro() !== claveInicial) {
+                // Otro registro: la marca era para el anterior.
+                apagar();
+                return;
+            }
             const el = findSpotlightTarget(payload || {});
             if (!el) {
                 // El campo se fue de la pantalla: esconderse es lo honesto. Una
@@ -378,6 +393,7 @@ export function makeSpotlight(overlay, deps = {}) {
      */
     async function spotlight(payload) {
         const mia = ++generacion;
+        const claveInicial = claveDelRegistro();
         let el = findSpotlightTarget(payload || {});
         if (!el) {
             // Puede estar en una pestaña cerrada del formulario, que Odoo no
@@ -386,6 +402,10 @@ export function makeSpotlight(overlay, deps = {}) {
         }
         if (mia !== generacion) {
             // Llegó otra marca mientras buscábamos: esta ya no manda.
+            return false;
+        }
+        if (claveDelRegistro() !== claveInicial) {
+            // La persona cambió de registro mientras se buscaba el campo.
             return false;
         }
         if (!el) {
@@ -427,12 +447,12 @@ export function makeSpotlight(overlay, deps = {}) {
         } else {
             desatar = null;
         }
-        vigilancia = vigilar(payload, marcar);
+        vigilancia = vigilar(payload, marcar, claveInicial);
         // El segundo apuntado, un frame después, es el que ve la clasificación
         // del IntersectionObserver — ver `vigilar`. Sin esto, un campo abajo del
         // fold se marca fuera de pantalla y se declara éxito.
         requestAnimationFrame(() => {
-            if (mia === generacion && pointer) {
+            if (mia === generacion && pointer && claveDelRegistro() === claveInicial) {
                 const actual = findSpotlightTarget(payload || {});
                 if (actual) {
                     marcar(actual);
