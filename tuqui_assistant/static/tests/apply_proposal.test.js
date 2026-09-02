@@ -93,6 +93,37 @@ async function mountFormConEstados(resId = 1) {
     return getService("tuquiAssistant");
 }
 
+/** Un formulario donde el que se esconde es el ANCESTRO, no el campo.
+ *
+ *  `email` no tiene modificador propio: el `invisible` está en el `<group>` que
+ *  lo contiene. Es el caso que el evaluador de Odoo no reporta, porque ese
+ *  `invisible` se compila a un `t-if` del template y nunca toca `activeFields`.
+ *
+ *  `fecha` es el CONTROL NEGATIVO: mismo formulario, un group sin condición.
+ *  Y el `<field name="child_ids">` con su lista adentro es el borde: los campos
+ *  de una vista embebida no son campos de este formulario. */
+const FORM_ARCH_ANCESTRO = `
+    <form>
+        <field name="active"/>
+        <field name="name"/>
+        <group invisible="active">
+            <field name="email"/>
+            <field name="child_ids">
+                <list editable="bottom">
+                    <field name="name"/>
+                </list>
+            </field>
+        </group>
+        <group>
+            <field name="fecha"/>
+        </group>
+    </form>`;
+
+async function mountFormConAncestro(resId = 1) {
+    await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_ANCESTRO });
+    return getService("tuquiAssistant");
+}
+
 /** `email` es editable o no SEGÚN el valor de otro campo del mismo formulario.
  *  Es el caso que la definición estática del campo no puede contar: `email` no
  *  es readonly en el modelo, así que el chequeo viejo lo dejaba pasar siempre. */
@@ -336,6 +367,51 @@ describe("contexto vivo", () => {
         expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(true);
         await contains(".o_field_widget[name=active] input").click();
         expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(undefined);
+    });
+
+    test("un campo que esconde su ANCESTRO también viaja como oculto", async () => {
+        // El agujero que este chequeo cierra: el evaluador de Odoo mira sólo el
+        // modificador del propio `<field>`, así que un campo dentro de un
+        // `<group invisible="…">` se reportaba como normal — el valor viajaba y
+        // el modelo lo leía visible sobre algo que no está en la pantalla.
+        const assistant = await mountFormConAncestro();
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fields.email).toBe("acme@example.com"); // el valor está…
+        expect(ctx.fieldState.email.invisible).toBe(true); // …y la pantalla, no
+        // Control negativo: el mismo formulario, un group SIN condición.
+        expect(ctx.fieldState.fecha).toBe(undefined);
+    });
+
+    test("y sigue la condición del ancestro: si cambia el registro, cambia", async () => {
+        // El otro lado del par. Sin esto, al test de arriba lo aprobaría también
+        // un cambio que marcara como oculto todo lo que esté dentro de un group.
+        const assistant = await mountFormConAncestro();
+        expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(true);
+        await contains(".o_field_widget[name=active] input").click();
+        expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(undefined);
+    });
+
+    test("los campos de una vista embebida NO son campos de este formulario", async () => {
+        // El borde que hay que medir, y está armado para que pueda fallar: `name`
+        // aparece DOS veces en el arch — arriba, visible, como campo del
+        // formulario; y adentro de la lista del x2many, que está en el group
+        // escondido. Un barrido que no distinga las dos cosas marca el `name` del
+        // formulario como oculto y el modelo deja de ver un campo que la persona
+        // sí tiene delante.
+        const assistant = await mountFormConAncestro();
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fieldState.email.invisible).toBe(true); // el x2many y su vecino sí
+        expect(ctx.fieldState.child_ids.invisible).toBe(true);
+        expect(ctx.fieldState.name).toBe(undefined); // el de arriba, NO
+    });
+
+    test("una propuesta sobre un campo que esconde su ancestro se descarta", async () => {
+        // Mismo argumento que un campo de otra vista: escribirlo deja un cambio
+        // que la persona no puede ver ni revisar antes de guardar.
+        const assistant = await mountFormConAncestro();
+        const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
+        expect(ok).toBe(false);
+        expect(assistant.getActiveRecord().data.email).toBe("acme@example.com");
     });
 
     test("los valores SIN GUARDAR viajan en el contexto", async () => {

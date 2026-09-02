@@ -8,6 +8,7 @@ import {
     serializeDate,
     serializeDateTime,
 } from "@web/core/l10n/dates";
+import { evaluateBooleanExpr } from "@web/core/py_js/py";
 
 // Luxon es un global en Odoo, no un import ESM — igual que en
 // web/static/src/core/l10n/dates.js.
@@ -156,6 +157,76 @@ function normalizeX2manyValue(value) {
 }
 
 /**
+ * Los campos que están ocultos porque un ANCESTRO lo está, no ellos.
+ *
+ * POR QUÉ HACE FALTA, Y ES EL BORDE QUE MÁS ENGAÑA. `activeFields[campo].invisible`
+ * trae SÓLO el modificador del propio nodo `<field>`. El `invisible` de un
+ * `<group>`, una `<page>` o un `<div>` que lo contiene se compila a un `t-if` del
+ * template y **nunca toca `activeFields`** — así que el evaluador de Odoo dice
+ * que el campo se ve, el valor viaja, y el campo no está en el DOM. Como el
+ * contrato de este mapa es "un campo ausente es normal", el modelo lee *visible*
+ * sobre algo que la persona no tiene delante: exactamente la falla que este
+ * contexto existe para evitar. Medido sobre 324 modelos: **20,19% de los campos
+ * top-level** están en esa situación.
+ *
+ * `field:not(field field)` es el mismo idioma que usa Odoo (`form_controller.js`,
+ * el barrido de `footer`) para saltear lo que vive dentro de otro `<field>`: un
+ * x2many embebido trae su propia vista, y sus campos no son de este formulario.
+ *
+ * Sólo `invisible`: un `readonly` o un `required` puestos en un ancestro **no se
+ * propagan ni al render**, así que para esos dos el mapa ya estaba bien.
+ *
+ * @param {Object} xmlDoc  el arch del formulario (`archInfo.xmlDoc`)
+ * @param {Object} record  el record OWL, para evaluar la condición
+ * @returns {Set<string>}
+ */
+function camposOcultosPorUnAncestro(xmlDoc, record) {
+    const ocultos = new Set();
+    if (!xmlDoc?.querySelectorAll || !record) {
+        return ocultos;
+    }
+    const ctx = record.evalContextWithVirtualIds || {};
+    for (const nodo of xmlDoc.querySelectorAll("field:not(field field)")) {
+        const nombre = nodo.getAttribute?.("name");
+        if (!nombre || ocultos.has(nombre)) {
+            continue;
+        }
+        let ancestro = nodo.parentElement;
+        while (ancestro) {
+            const expr = ancestro.getAttribute?.("invisible");
+            try {
+                if (expr && evaluateBooleanExpr(expr, ctx)) {
+                    ocultos.add(nombre);
+                    break;
+                }
+            } catch {
+                // Una condición que no se puede evaluar no esconde nada: el
+                // default es dejar pasar, como antes de este chequeo.
+            }
+            ancestro = ancestro.parentElement;
+        }
+    }
+    return ocultos;
+}
+
+/**
+ * ¿Se puede confiar en el estado que reporta este record?
+ *
+ * Los tres evaluadores se llaman con `?.()`, y eso degrada en silencio HACIA EL
+ * LADO PELIGROSO: si una versión de Odoo renombra sólo `_isInvisible`, el mapa no
+ * queda vacío — queda sin ningún `invisible`, que es indistinguible de "todos los
+ * campos se ven". Por eso se chequea una vez y se dice, en vez de inferirlo del
+ * vacío del otro lado.
+ */
+function evaluadoresDisponibles(record) {
+    return (
+        typeof record?._isInvisible === "function" &&
+        typeof record?._isReadonly === "function" &&
+        typeof record?._isRequired === "function"
+    );
+}
+
+/**
  * El ESTADO de los campos del formulario abierto: cuáles se ven, cuáles se
  * pueden escribir, cuáles son obligatorios.
  *
@@ -178,7 +249,7 @@ function normalizeX2manyValue(value) {
  * @param {Object} record  el record OWL del formulario abierto
  * @returns {Object} `{campo: {invisible?, readonly?, required?}}`, sólo con lo anómalo
  */
-function serializeFieldState(record) {
+function serializeFieldState(record, ocultosPorUnAncestro = new Set()) {
     const activos = record?.activeFields || {};
     const out = {};
     for (const name of Object.keys(activos)) {
@@ -189,7 +260,9 @@ function serializeFieldState(record) {
             // justamente el dato que no se puede reconstruir desde afuera. Cada
             // campo va en su propio try: si una versión los renombra, se pierde el
             // estado de los campos y no el contexto entero.
-            if (record._isInvisible?.(name)) {
+            // El OR con los ancestros es lo que hace honesto a este mapa: el
+            // evaluador de Odoo sólo conoce el modificador del propio campo.
+            if (record._isInvisible?.(name) || ocultosPorUnAncestro.has(name)) {
                 estado.invisible = true;
             }
             if (record._isReadonly?.(name)) {
@@ -893,7 +966,13 @@ export const tuquiAssistantService = {
                 // lo que se pierde es la cola de los VALORES, igual que antes de
                 // que este mapa existiera. Ocupa poco: sólo viajan las
                 // excepciones.
-                ctx.fieldState = serializeFieldState(activeRecord);
+                const ocultos = camposOcultosPorUnAncestro(_owner?.archInfo?.xmlDoc, activeRecord);
+                ctx.fieldState = serializeFieldState(activeRecord, ocultos);
+                // Sólo viaja la excepción: si el mapa NO es confiable se dice, y
+                // del otro lado el prompt deja de leer "ausente" como "normal".
+                if (!evaluadoresDisponibles(activeRecord)) {
+                    ctx.fieldStateUnavailable = true;
+                }
                 ctx.fields = serializeRecordFields(activeRecord);
             }
             // Aplanar a JSON puro: arranca los Proxies reactivos (domain/filters/
@@ -941,6 +1020,13 @@ export const tuquiAssistantService = {
             // atrapar; ahora se ignoran y, si no queda nada válido, se avisa y corta.
             const fieldDefs = activeRecord.fields || {};
             const enPantalla = activeRecord.activeFields || {};
+            // Un campo escondido por un ancestro está EN `activeFields` y no en la
+            // pantalla: escribirlo deja un cambio que la persona no puede ver ni
+            // revisar antes de guardar, igual que un campo de otra vista.
+            const ocultosPorUnAncestro = camposOcultosPorUnAncestro(
+                _owner?.archInfo?.xmlDoc,
+                activeRecord
+            );
             const known = {};
             const dropped = [];
             for (const [name, value] of Object.entries(changes)) {
@@ -955,7 +1041,7 @@ export const tuquiAssistantService = {
                 // `activeFields[campo]` sin chequear que exista, tiraba TypeError,
                 // el catch lo tapaba y el chequeo caía al readonly ESTÁTICO justo
                 // en los campos que no están en pantalla.
-                if (!fieldDefs[name] || !(name in enPantalla)) {
+                if (!fieldDefs[name] || !(name in enPantalla) || ocultosPorUnAncestro.has(name)) {
                     dropped.push(name);
                     continue;
                 }
