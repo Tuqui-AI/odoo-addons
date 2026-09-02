@@ -1,11 +1,11 @@
 """Dejar rastro de cuándo se enciende el embed, y de quién lo encendió.
 
 POR QUÉ. Cargar `tuqui.embed_origins` no es configurar una preferencia: es el
-interruptor entre «Odoo normal» y «Odoo que se deja mostrar dentro de otro sitio
-y afloja el SameSite de su sesión». Vacío, este módulo es indistinguible de no
-estar instalado; con una dirección adentro, se resigna una protección contra
-CSRF (acotada y medida — ver el README, y el invariante en
-`tests/test_csrf_invariante.py`).
+interruptor entre «Odoo normal» y «Odoo que se deja mostrar dentro de otro
+sitio». Vacío, este módulo es indistinguible de no estar instalado; con una
+dirección adentro, se resigna la protección contra clickjacking para ese
+origen. La cookie de sesión NO se toca — ver el README y el invariante en
+`tests/test_cookie_is_never_touched.py`.
 
 Una decisión así tiene que dejar rastro. Si mañana aparece un problema, la
 primera pregunta es quién habilitó ese origen y cuándo.
@@ -35,18 +35,17 @@ _logger = logging.getLogger(__name__)
 EMBED_ORIGINS_PARAM = "tuqui.embed_origins"
 
 #: `http://` is only trustworthy on a machine's own loopback — anywhere else
-#: it means the cookie (and the frame permission) travel in the clear.
+#: it means the frame permission is handed to a host nobody can authenticate.
 _LOCAL_HTTP_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 
 
 def _validate_embed_origin_token(token):
     """Return an error message for one invalid origin, or None if it's fine.
 
-    `token` ends up verbatim inside `frame-ancestors` (see ir_http.py) and
-    governs which sites get the loosened, `SameSite=None` session cookie —
-    it's not a display string, it's an access-control entry. A wildcard, a
-    bare scheme, or a plain-http host would open the frame (and the cookie)
-    to more than whoever typed the value meant to.
+    `token` ends up verbatim inside `frame-ancestors` (see ir_http.py), so it
+    decides who may frame this Odoo — it's not a display string, it's an
+    access-control entry. A wildcard, a bare scheme, or a plain-http host
+    would open the frame to more than whoever typed the value meant to.
 
     Plain strings, not `odoo._()`: this runs on every `write`/`create`,
     including from plain `TransactionCase` tests with no request/lang in
@@ -90,8 +89,8 @@ class IrConfigParameter(models.Model):
                 continue
             _logger.info(
                 "tuqui_embed: %s cambiado por %s (uid=%s) — antes=%r ahora=%r. "
-                "Con un origen cargado, Odoo se deja mostrar dentro de ese sitio y "
-                "emite la sesión con SameSite=None.",
+                "Con un origen cargado, Odoo se deja mostrar dentro de ese sitio "
+                "(la cookie de sesión no se toca).",
                 EMBED_ORIGINS_PARAM,
                 self.env.user.display_name,
                 self.env.uid,
@@ -115,8 +114,8 @@ class IrConfigParameter(models.Model):
             if vals.get("key") == EMBED_ORIGINS_PARAM and (vals.get("value") or "").strip():
                 _logger.info(
                     "tuqui_embed: %s creado por %s (uid=%s) con %r. Con un origen cargado, "
-                    "Odoo se deja mostrar dentro de ese sitio y emite la sesión con "
-                    "SameSite=None.",
+                    "Odoo se deja mostrar dentro de ese sitio (la cookie de sesión "
+                    "no se toca).",
                     EMBED_ORIGINS_PARAM,
                     self.env.user.display_name,
                     self.env.uid,

@@ -12,24 +12,30 @@ algo que no ve (clickjacking). El default de Odoo protege de eso, y este módulo
 NO lo saca: lo cambia por una lista de orígenes que el administrador declara. Sin
 esa lista cargada, no cambia nada.
 
-QUÉ HACE FALTA, Y SON DOS COSAS. Permitir el frame no alcanza: la cookie de
-sesión de Odoo sale ``SameSite=Lax``, que el browser NO manda en un iframe de
-otro sitio. Con sólo lo primero, el iframe se ve — pero mostrando el login.
+HACE UNA SOLA COSA, Y ESO ES EL DISEÑO. Permite el frame, y NADA MÁS: no toca
+la cookie de sesión. Que la sesión viaje adentro del iframe no es trabajo de
+este módulo — es consecuencia de servir el panel en el MISMO SITIO que este
+Odoo (mismo dominio registrable, aunque sea otro host). ``SameSite`` se define
+por sitio, no por origen, así que la cookie normal de Odoo entra al iframe sola.
 
-EL PUNTO A DECIDIR (ver README): aflojar el ``SameSite`` de la sesión normal
-reduce una protección contra CSRF que hoy existe. Y se aplica a TODA respuesta de
-este Odoo, no sólo a las que vienen del panel: acotarlo por origen es imposible
-sin llegar tarde —el primer pedido del iframe llega sin cookie— y la cookie es
-una sola, que el browser guarda con el último atributo que vio. El diseño que
-evita eso —una
-cookie aparte, de vida corta, sólo para las rutas del embed— es más trabajo y
-toca el manejo de sesión de Odoo.
+POR QUÉ ESTO NO AFLOJA LA COOKIE, Y POR QUÉ IMPORTA. Una versión anterior
+reemitía la sesión con ``SameSite=None`` para que viajara a un panel de OTRO
+sitio. Medido: eso abría dos canales que CORS no cubre —un WebSocket
+cross-origin que lee el bus en vivo del usuario, y un ``<img>`` a
+``/web/become`` que escala a superusuario sin un clic—. Se probó
+``Partitioned`` (CHIPS) como mitigante y cierra el ``<img>``, pero rompe el
+panel: al reabrirlo en otra pestaña, Odoo entra en bucle infinito contra
+``/web/login``. Ambas cosas están medidas antes/después contra Chrome real.
+
+La salida no fue un mitigante mejor: fue sacarle el problema de encima. Con el
+panel servido same-site, no hay nada que aflojar, así que esos dos vectores
+nunca se abren. El README tiene el detalle y la precondición de despliegue.
 """
 
 import logging
 
 from odoo import models
-from odoo.http import get_session_max_inactivity, request
+from odoo.http import request
 
 _logger = logging.getLogger(__name__)
 
@@ -92,70 +98,11 @@ class IrHttp(models.AbstractModel):
             directivas.append("frame-ancestors 'self' %s" % origins)
             response.headers["Content-Security-Policy"] = "; ".join(directivas)
 
-            # 2. QUE LA SESIÓN VIAJE dentro del iframe. Sin esto, el paso 1 sólo
-            #    logra que se vea la pantalla de login en vez de un rectángulo en
-            #    blanco: el browser no manda una cookie `SameSite=Lax` en un
-            #    frame de otro sitio.
-            #
-            #    SE APLICA A TODA RESPUESTA, no sólo a las que se detectan como
-            #    embebidas, y no por comodidad: **detectarlo llega tarde**.
-            #
-            #    Es un huevo y gallina, medido contra un navegador de verdad. El
-            #    primer pedido que hace el iframe llega con `Referer` del panel
-            #    —o sea, se lo puede detectar perfectamente— pero llega SIN
-            #    COOKIE, porque la que estaba guardada en ese momento era la
-            #    normal (`SameSite=Lax`) y esa no viaja dentro de un frame ajeno.
-            #    Odoo lo trata como anónimo y redirige al login. La cookie se
-            #    afloja en la respuesta… de una navegación que ya terminó mal.
-            #
-            #    Aflojarla sólo "cuando hace falta" es, entonces, aflojarla
-            #    siempre un pedido tarde. Ver el README: el riesgo de que la
-            #    sesión salga `SameSite=None` está medido —desde otro origen no
-            #    se puede leer (CORS) ni escribir (rutas JSON-only)— y esto lo
-            #    amplía de "los pedidos que vienen del panel" a "todos los de
-            #    este Odoo". Sigue gobernado por el parámetro: **sin
-            #    `tuqui.embed_origins` cargado, este método ya salió arriba y no
-            #    toca ninguna cookie.**
-
-            # `response.headers` de Odoo es un proxy sin `__delitem__`, así que la
-            # cookie no se reescribe a mano: se vuelve a setear con los flags que
-            # hacen falta, y un `Set-Cookie` posterior para la misma clave gana.
-            #
-            # `SameSite=None` EXIGE `Secure`; sobre http:// eso sólo lo acepta el
-            # browser en localhost (origen "potentially trustworthy"). Cualquier
-            # despliegue real es HTTPS, así que no cambia nada ahí.
-            sess = request.session
-            # Las mismas dos condiciones que pone Odoo antes de emitir la cookie
-            # (`_save_session`), porque aflojarle el SameSite no puede además
-            # cambiar CUÁNDO se emite ni CUÁNTO vive.
-            #
-            # 1. Una sesión que el servidor no guarda no se anuncia. `can_save`
-            #    es False en los pedidos stateless —header `x-odoo-database`,
-            #    `auth="bearer"`— y ahí devolver un `session_id` inventa del lado
-            #    del cliente una sesión que del otro lado no existe.
-            if not getattr(sess, "can_save", True):
-                return
-            # 2. Una respuesta cacheable en público no lleva `Set-Cookie`. Los
-            #    assets salen `public, max-age=1 año, immutable`; un CDN o un
-            #    nginx con `proxy_ignore_headers Set-Cookie` guardaría la
-            #    respuesta CON la cookie y le serviría la sesión de una persona a
-            #    las demás.
-            if "public" in (response.headers.get("Cache-Control") or "").lower():
-                return
-            sid = getattr(sess, "sid", None)
-            if sid:
-                response.set_cookie(
-                    "session_id",
-                    sid,
-                    # Sin `max_age`, el `set_cookie` de Odoo usa `expires=-1` y la
-                    # cookie queda con UN AÑO de vida, reemplazando la ventana de
-                    # inactividad configurada. Aflojar el SameSite no puede, de
-                    # paso, desarmar la caducidad de la sesión.
-                    max_age=get_session_max_inactivity(request.env),
-                    httponly=True,
-                    secure=True,
-                    samesite="None",
-                )
+            # Y LA COOKIE NO SE TOCA. Ver el docstring del módulo: la sesión
+            # viaja porque el panel se sirve en el MISMO SITIO que este Odoo, no
+            # porque acá se afloje nada. `tests/test_cookie_is_never_touched.py`
+            # fija ese invariante, y está calibrado por mutación: reintroducir
+            # la reemisión pone en rojo sus tres tests, y sólo esos.
         except Exception:
             # Un módulo de conveniencia no puede tumbar una respuesta de Odoo.
             # Tampoco fallar callado: sin el log, "el panel se ve en blanco" no

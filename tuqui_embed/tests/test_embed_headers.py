@@ -1,13 +1,12 @@
 """Qué responde Odoo cuando el embed está apagado, encendido, y desde dónde.
 
 Lo que hay que fijar acá no es que el header se escriba: es que **apagado sea
-apagado**. Un módulo que afloja el framing y la cookie de sesión, instalado en el
-Odoo de un cliente que nunca pidió embeber nada, tiene que ser indistinguible de
-no estar instalado. Ese es el invariante que un cambio futuro podría romper sin
-que nadie lo note, porque todo seguiría funcionando igual de bien.
+apagado**. Un módulo que afloja el framing, instalado en el Odoo de un cliente
+que nunca pidió embeber nada, tiene que ser indistinguible de no estar
+instalado. Ese es el invariante que un cambio futuro podría romper sin que
+nadie lo note, porque todo seguiría funcionando igual de bien.
 """
 
-from odoo.http import get_session_max_inactivity
 from odoo.tests import HttpCase, tagged
 
 from ..controllers.health import TuquiEmbedHealth
@@ -78,82 +77,9 @@ class TestEmbedHeaders(HttpCase):
         self.assertIn("default-src 'none'", csp)
         self.assertIn("frame-ancestors", csp)
 
-    def test_la_cookie_aflojada_no_se_gana_un_ano_de_vida(self):
-        """Aflojar el SameSite no puede, de paso, desarmar la caducidad.
-
-        Sin `max_age`, el `set_cookie` de Odoo usa `expires=-1` y la cookie queda
-        con un año, reemplazando la ventana de inactividad configurada. La cuenta
-        se pide a la misma función que usa Odoo, así que si el admin la cambia el
-        test la sigue.
-        """
-        self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
-        cookie = self._cookies(self._get(headers={"Origin": TUQUI})).lower()
-        self.assertIn("max-age=%d" % get_session_max_inactivity(self.env), cookie)
-
-    def test_la_cookie_se_afloja_sin_esperar_a_reconocer_el_pedido(self):
-        """Por qué NO se acota al pedido que viene del panel, aunque se pueda.
-
-        Es un huevo y gallina, medido contra un navegador de verdad. El primer
-        pedido del iframe llega con `Referer` del panel —se lo puede detectar
-        perfectamente— pero llega SIN COOKIE: la guardada en ese momento es la
-        normal (`SameSite=Lax`), que no viaja dentro de un frame ajeno. Odoo lo
-        toma como anónimo y redirige al login. La cookie se afloja en la
-        respuesta de una navegación que ya terminó mal, y el usuario ve la
-        pantalla de login adentro del panel.
-
-        Acotar por origen era, entonces, aflojar siempre un pedido tarde.
-        """
-        self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
-
-        # Como llega la navegación inicial del iframe: puede traer Referer, pero
-        # el módulo ya no depende de eso.
-        sin_pistas = self._cookies(self._get())
-        self.assertTrue(sin_pistas, "la respuesta no trajo cookie de sesión")
-        self.assertIn("samesite=none", sin_pistas.lower())
-
-        del_panel = self._cookies(self._get(headers={"Origin": TUQUI}))
-        self.assertTrue(del_panel, "la respuesta no trajo cookie de sesión")
-        self.assertIn("samesite=none", del_panel.lower())
-
-    def test_apagado_la_cookie_no_se_toca(self):
-        """El límite real, y el que importa: sin el parámetro cargado, la sesión
-        sale como siempre. Ese es el interruptor — no el origen del pedido."""
-        self.env["ir.config_parameter"].sudo().set_param(PARAM, "")
-        cookies = self._cookies(self._get(headers={"Origin": TUQUI}))
-        self.assertTrue(cookies, "la respuesta no trajo cookie de sesión")
-        self.assertNotIn("samesite=none", cookies.lower())
-
-    def test_la_cookie_aflojada_sigue_siendo_httponly(self):
-        """Lo que NO se resigna: la página que embebe no puede leer la sesión.
-
-        Sin esto, el sitio de al lado dejaría de necesitar CSRF — se llevaría la
-        sesión directamente.
-        """
-        self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
-        cookies = self._cookies(self._get(headers={"Origin": TUQUI})).lower()
-        self.assertIn("samesite=none", cookies)
-        self.assertIn("httponly", cookies)
-        self.assertIn("secure", cookies)
-
-    @staticmethod
-    def _cookies(response):
-        """La ÚLTIMA cookie de sesión de la respuesta: la que el browser guarda.
-
-        Dos precisiones que costaron un test inútil. Primero, mirar sólo
-        `session_id`: juntar todos los Set-Cookie hacía que la palabra `HttpOnly`
-        apareciera siempre, porque otras cookies de Odoo la traen. Segundo,
-        quedarse con la ÚLTIMA: cuando el módulo reemite, la respuesta lleva DOS
-        `Set-Cookie: session_id` —la de Odoo y la nuestra— y el browser aplica la
-        de más abajo. Un test que leyera la primera aprobaría cualquier cosa que
-        hiciéramos con la segunda, que es justamente la que cambia la seguridad.
-        """
-        # `response.headers` de requests COLAPSA los Set-Cookie repetidos en un
-        # solo string separado por comas — leerlo de ahí devolvía las dos cookies
-        # pegadas, así que cualquier flag presente en una tapaba su ausencia en la
-        # otra. `raw.headers.getlist` conserva la lista tal como vino.
-        crudas = response.raw.headers.getlist("Set-Cookie")
-        cookies = [v for v in crudas if v.startswith("session_id=")]
-        return cookies[-1] if cookies else ""
+    # Los tests de la cookie aflojada vivían acá y se fueron con ella: este
+    # módulo ya no la toca. El invariante que ocupó su lugar —que NO la
+    # toque, ni prendido ni apagado— vive en `test_cookie_is_never_touched.py`.
 
 
 @tagged("post_install", "-at_install")

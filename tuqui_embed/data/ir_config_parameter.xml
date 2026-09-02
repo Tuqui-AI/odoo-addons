@@ -8,7 +8,9 @@
         memoria. Dos, el que importa: que quien lo vea sepa **qué habilita** antes
         de cargarlo. Hoy es una línea de texto libre sin nada al lado, y esto no
         es una preferencia — es el interruptor entre "Odoo normal" y "Odoo que se
-        deja mostrar dentro de otro sitio y afloja el SameSite de su sesión".
+        deja mostrar dentro de otro sitio". La cookie de sesión NO se toca (ver
+        el README): lo que se resigna es la protección contra clickjacking, y
+        sólo para los orígenes que el administrador declare acá.
 
         Vacío no cambia nada: el módulo instalado y sin origen cargado es
         indistinguible de no estar instalado.
