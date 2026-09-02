@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from odoo.exceptions import UserError
 from odoo.tests import TransactionCase, tagged
+from odoo.tools import mute_logger
 
 from ..models import ir_actions_server as action_mod
 
@@ -111,13 +112,18 @@ class TestTuquiNotifyAction(TransactionCase):
         assert headers["X-Tuqui-Signature"].startswith("t=")
         assert ",v1=" in headers["X-Tuqui-Signature"]
 
+    @mute_logger("odoo.addons.tuqui.models.ir_actions_server")
     def test_a_tuqui_that_is_down_yields_an_empty_list_and_no_traceback(self):
+        """@mute_logger: an unreachable Tuqui deserves a warning in production,
+        but this test causes it on purpose and runbot counts any WARNING in the
+        log as a build failure."""
         with patch(
             "odoo.addons.tuqui.models.ir_actions_server.requests.get",
             side_effect=OSError("connection refused"),
         ):
             assert self.Action._tuqui_agent_choices() == []
 
+    @mute_logger("odoo.addons.tuqui.models.ir_actions_server")
     def test_an_action_already_configured_keeps_its_agent_when_tuqui_is_down(self):
         """The point of storing the id rather than a foreign key: only the
         selector degrades, never the automation."""
