@@ -42,6 +42,13 @@ _TIMEOUT_SECONDS = 20
 # ever reach Tuqui?" without letting the table grow forever.
 _DEFAULT_RETENTION_DAYS = 30
 
+# Client-error statuses that WILL change on their own, and are therefore the
+# only 4xx worth retrying. Everything else in that range is a refusal that
+# waiting cannot fix: a feature switched off, a key Tuqui does not recognise,
+# a body it rejects. Burning the whole ladder on those costs eight hours
+# before anybody reads the error, and the error is the useful part.
+_RETRYABLE_CLIENT_STATUSES = frozenset({408, 429})
+
 _STATE_SELECTION = [
     ("pending", "Pending"),
     ("sent", "Sent"),
@@ -311,24 +318,35 @@ class TuquiEvent(models.Model):
             status_code=response.status_code,
         )
 
+    @api.model
+    def _is_permanent(self, status_code):
+        """Whether this status means "never", as opposed to "not now".
+
+        A transport failure arrives as status 0 and is always worth another
+        try; a 5xx is the other side having a bad minute. A 4xx is Tuqui
+        refusing on purpose, and it will refuse the next five times too.
+        """
+        return 400 <= status_code < 500 and status_code not in _RETRYABLE_CLIENT_STATUSES
+
     def _record_failure(self, message, status_code):
         """Move the row along the backoff ladder, or give up and wait for a human."""
         self.ensure_one()
         attempt = self.attempt + 1
+        permanent = self._is_permanent(status_code)
         values = {
             "attempt": attempt,
             "last_error": message,
             "last_status_code": status_code,
         }
-        if attempt >= MAX_ATTEMPTS:
+        if permanent or attempt >= MAX_ATTEMPTS:
             # Failed, not deleted: the row is the evidence that something was
             # owed and never delivered, and the only thing a manual retry can
             # act on.
             values["state"] = "failed"
             _logger.warning(
-                "tuqui.event %s: giving up after %s attempts (%s)",
+                "tuqui.event %s: %s (%s)",
                 self.uuid,
-                attempt,
+                "refused by Tuqui, not retrying" if permanent else f"giving up after {attempt} attempts",
                 message,
             )
         else:

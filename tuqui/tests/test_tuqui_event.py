@@ -130,6 +130,47 @@ class TestTuquiEvent(TransactionCase):
         # Failed, not deleted: the row is the only trace that something was owed.
         self.assertTrue(event.exists())
 
+    @mute_logger("odoo.addons.tuqui.models.tuqui_event")
+    def test_a_refusal_does_not_burn_the_ladder(self):
+        """A 4xx is Tuqui refusing on purpose — a feature switched off, a key it
+        does not know — and it will refuse the next five times too. Retrying for
+        eight hours only delays the moment somebody reads the error."""
+        event = self._event()
+        with patch(
+            "odoo.addons.tuqui.models.tuqui_event.requests.post",
+            return_value=_Response(404, '{"detail":"Unknown webhook"}'),
+        ):
+            event._post()
+        self.assertEqual(event.state, "failed")
+        self.assertEqual(event.attempt, 1)
+        self.assertIn("Unknown webhook", event.last_error)
+        # And the cron leaves it alone from here: the recourse is the manual
+        # retry, once whoever owns the refusal has fixed it.
+        with patch("odoo.addons.tuqui.models.tuqui_event.requests.post") as post:
+            self.Event._cron_dispatch()
+        post.assert_not_called()
+
+    def test_a_rate_limit_is_not_a_refusal(self):
+        """429 is the server asking for later, not for never."""
+        event = self._event()
+        with patch("odoo.addons.tuqui.models.tuqui_event.requests.post", return_value=_Response(429)):
+            event._post()
+        self.assertEqual(event.state, "pending")
+        self.assertEqual(event.attempt, 1)
+
+    def test_a_timeout_status_is_not_a_refusal(self):
+        event = self._event()
+        with patch("odoo.addons.tuqui.models.tuqui_event.requests.post", return_value=_Response(408)):
+            event._post()
+        self.assertEqual(event.state, "pending")
+
+    def test_a_server_error_still_walks_the_ladder(self):
+        event = self._event()
+        with patch("odoo.addons.tuqui.models.tuqui_event.requests.post", return_value=_Response(503)):
+            event._post()
+        self.assertEqual(event.state, "pending")
+        self.assertEqual(event.attempt, 1)
+
     # ─── The cron picks what is due ───────────────────────────────────────────
 
     def test_the_cron_leaves_an_event_that_is_not_due_yet(self):
