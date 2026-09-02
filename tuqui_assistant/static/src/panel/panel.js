@@ -364,7 +364,9 @@ export class TuquiPanel extends Component {
         if (marcado) {
             return;
         }
-        const que = payload.label || payload.field || payload.action || "";
+        // `String()` porque el payload lo escribe el modelo: un objeto ahí
+        // imprimía "[object Object]" en el cartel que lee la persona.
+        const que = String(payload.label || payload.field || payload.action || "");
         this.notification.add(
             que
                 ? _t('Tuqui quiso señalarte "%s", pero no está en esta pantalla.', que)

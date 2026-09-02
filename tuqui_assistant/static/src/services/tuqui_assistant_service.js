@@ -1626,10 +1626,13 @@ export const tuquiAssistantService = {
          * La gota: señalar en la pantalla dónde hay que hacer algo, con el
          * puntero de `web_tour` (el que la gente ya conoce del onboarding).
          *
-         * Devuelve si se pudo señalar, y ese dato VUELVE al chat. No es un
-         * detalle: si el campo no está en esta pantalla y el agente no se
-         * entera, se queda esperando un "listo" sobre una marca que nunca
-         * apareció. Con el resultado, dice "estás en otra pantalla" o navega.
+         * Devuelve si se pudo señalar. Ese dato NO vuelve al chat —el panel lo
+         * usa para avisarle a la persona con un cartel (`_spotlight` en
+         * `panel.js`)— y es una decisión, no una omisión: quien está mirando la
+         * pantalla es el único que puede moverse a la vista correcta, y el agente
+         * ya sabe de antemano dónde está parado, porque el contexto de la página
+         * viaja en cada mensaje. Lo que hay que evitar es que la persona se quede
+         * buscando una marca que nunca apareció.
          */
         const spotlightHandle = makeSpotlight(overlay);
         const spotlight = async (payload) => spotlightHandle.spotlight(payload);
