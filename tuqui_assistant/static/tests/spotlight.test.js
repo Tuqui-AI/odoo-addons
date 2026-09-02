@@ -213,7 +213,7 @@ describe("makeSpotlight", () => {
         const { handle, calls } = harness();
 
         expect(await handle.spotlight({ field: "l10n_ar_afip_pos_number", hint: "El número que te dio ARCA" })).toBe(true);
-        expect(calls[0].anchor).toBe(el);
+        expect(apuntaA(calls[0].anchor, el)).toBe(true);
         expect(calls[0].step.content).toBe("El número que te dio ARCA");
         expect(calls[1]).toEqual({ showContent: false });
 
@@ -358,7 +358,7 @@ describe("makeSpotlight", () => {
         const { handle, calls } = harness();
 
         expect(await handle.spotlight({ field: "l10n_ar_afip_pos_number" })).toBe(true);
-        expect(calls[0].anchor?.className).toBe("el-campo");
+        expect(apuntaA(calls[0].anchor, form.querySelector(".el-campo"))).toBe(true);
 
         handle.destroy();
         form.remove();
@@ -441,6 +441,25 @@ describe("la Gota real (template heredado de Odoo)", () => {
         expect(queryAll(".o_tour_pointer.o_tuqui_gota").length).toBe(1);
     });
 });
+
+/**
+ * ¿La gota está apuntando a ESTE campo?
+ *
+ * No alcanza con comparar identidad: en un campo ancho —la mayoría, en Odoo el
+ * control ocupa la columna— la marca apunta a un ancla angosta puesta sobre el
+ * principio del campo, que es donde la persona hace clic. Ver `alPuntoDeClic`.
+ */
+function apuntaA(anchor, campo) {
+    if (anchor === campo) {
+        return true;
+    }
+    const ra = anchor?.getBoundingClientRect?.();
+    const rc = campo?.getBoundingClientRect?.();
+    if (!ra || !rc) {
+        return false;
+    }
+    return Math.abs(ra.left - rc.left) <= 2 && Math.abs(ra.top - rc.top) <= 2;
+}
 
 /**
  * Las llamadas a `pointTo` de una lista de llamadas.
@@ -531,7 +550,9 @@ describe("mientras la marca vive", () => {
         await animationFrame();
 
         expect(apuntados(calls).length > 0).toBe(true);
-        expect(apuntados(calls).at(-1).anchor.className).toBe("el-campo-nuevo");
+        // `apuntaA` y no identidad: el campo es ancho, así que la marca apunta al
+        // ancla puesta sobre su principio. Ver `alPuntoDeClic`.
+        expect(apuntaA(apuntados(calls).at(-1).anchor, form.querySelector(".el-campo-nuevo"))).toBe(true);
         expect(calls.includes("hide")).toBe(false);
 
         handle.destroy();
@@ -663,6 +684,118 @@ describe("el globo y el loop no se pelean", () => {
 
         const cerradas = calls.filter((c) => c.showContent === false);
         expect(cerradas.length).toBe(0);
+
+        handle.destroy();
+        form.remove();
+    });
+});
+
+describe("la gota cae donde se hace clic", () => {
+    function harnessAncho(anchoPx) {
+        const form = document.createElement("div");
+        form.className = "o_form_view";
+        form.style.cssText = "position:fixed;left:0;top:200px;width:1000px;";
+        form.innerHTML = `<div name="campo" class="el-campo" style="display:block;width:${anchoPx}px;height:26px"></div>`;
+        document.body.appendChild(form);
+
+        const calls = [];
+        const pointer = {
+            state: {},
+            pointTo: (anchor, step) => calls.push({ anchor, step }),
+            showContent: (open) => calls.push({ showContent: open }),
+            setState: (st) => calls.push({ setState: st }),
+            hide: () => calls.push("hide"),
+            destroy: () => calls.push("destroy"),
+        };
+        const handle = makeSpotlight({ add: () => () => {} }, {
+            createPointerState: () => pointer,
+            Gota: "FakeGota",
+        });
+        return { form, handle, calls, campo: form.querySelector("[name=campo]") };
+    }
+
+    test("un campo ANCHO se marca en su principio, no en su medio", async () => {
+        // Medido en un Odoo real: el control de un campo ocupa la columna entera
+        // —505 px el teléfono— y la gota se centra sobre lo que se le apunte, así
+        // que caía 238 px a la derecha del lugar donde se hace clic. Señalaba el
+        // renglón, no el campo.
+        const { form, handle, calls, campo } = harnessAncho(500);
+        await handle.spotlight({ field: "campo" });
+
+        const anchor = apuntados(calls)[0].anchor;
+        expect(anchor).not.toBe(campo);
+        const rc = campo.getBoundingClientRect();
+        const ra = anchor.getBoundingClientRect();
+        // Arranca donde arranca el campo, y es angosto.
+        expect(Math.abs(ra.left - rc.left) <= 2).toBe(true);
+        expect(ra.width < 40).toBe(true);
+        // A la misma altura: la gota queda pegada al renglón, no arriba ni abajo.
+        expect(Math.abs(ra.top - rc.top) <= 2).toBe(true);
+
+        handle.destroy();
+        form.remove();
+    });
+
+    test("y uno angosto —un botón— se marca tal cual, centrado", async () => {
+        // El otro lado del par: un botón mide 51 px y centrarse ahí es lo
+        // correcto. Sin esto, el fix de arriba lo aprobaría también un cambio que
+        // desplazara TODAS las marcas al borde izquierdo.
+        const { form, handle, calls, campo } = harnessAncho(50);
+        await handle.spotlight({ field: "campo" });
+
+        expect(apuntados(calls)[0].anchor).toBe(campo);
+
+        handle.destroy();
+        form.remove();
+    });
+
+    test("al apagarse no deja el ancla colgada en el body", async () => {
+        const { form, handle, calls } = harnessAncho(500);
+        await handle.spotlight({ field: "campo" });
+        const anchor = apuntados(calls)[0].anchor;
+        expect(anchor.isConnected).toBe(true);
+
+        handle.destroy();
+        expect(anchor.isConnected).toBe(false);
+
+        form.remove();
+    });
+});
+
+describe("el ancla no puede alimentar al loop", () => {
+    test("acomodar el ancla no dispara otra vuelta: si no, es un ciclo infinito", async () => {
+        // Cómo apareció: la suite de tests se colgó. El ancla se posiciona
+        // escribiendo su `style`, eso es una mutación del DOM, el loop escucha
+        // mutaciones y el loop vuelve a acomodar el ancla. Girando mientras la
+        // marca viva — 15 segundos de CPU al palo en la pestaña de la persona.
+        //
+        // El test cuenta los apuntados: con el ciclo, crecen sin parar.
+        const form = document.createElement("div");
+        form.className = "o_form_view";
+        form.style.cssText = "position:fixed;left:0;top:250px;width:900px;";
+        form.innerHTML = '<div name="campo" style="display:block;width:600px;height:26px"></div>';
+        document.body.appendChild(form);
+
+        const calls = [];
+        const pointer = {
+            state: {},
+            pointTo: (anchor, step) => calls.push({ anchor, step }),
+            showContent: (open) => calls.push({ showContent: open }),
+            setState: (st) => calls.push({ setState: st }),
+            hide: () => calls.push("hide"),
+            destroy: () => calls.push("destroy"),
+        };
+        const handle = makeSpotlight({ add: () => () => {} }, {
+            createPointerState: () => pointer,
+            Gota: "FakeGota",
+        });
+
+        await handle.spotlight({ field: "campo" });
+        for (let i = 0; i < 6; i++) {
+            await animationFrame();
+        }
+        // Sin la guarda esto se va a las decenas y no para; con ella se estabiliza.
+        expect(apuntados(calls).length < 8).toBe(true);
 
         handle.destroy();
         form.remove();
