@@ -229,6 +229,53 @@ class TestTuquiRpcGateway(HttpCase):
         )
         self.assertTrue(resp.json()["ok"])
 
+    def test_read_only_member_allows_the_access_check(self):
+        """``check_access_rights`` answers "may this user do X" and reads no
+        records, so a read-only member must get through.
+
+        Classified as ``execute`` it was refused, and this one fails loudly:
+        its only caller is ``open_odoo_view`` in ``mode='new'``, an embed-only
+        tool — so it runs exclusively over the companion. On a read-only one
+        (the default right after activation) asking the embedded chat to create
+        a record answered "Could not verify Odoo access rights", blaming the
+        user's permissions for a refusal of ours.
+
+        The connection path is the opposite case — see the next test.
+        """
+        self.client.write({"read_only": True})
+        # Exercised with `has_access`, not with the method the backend calls
+        # today: `check_access_rights` is @api.deprecated in 19, so dispatching
+        # it logs a DeprecationWarning and the runbot fails the build on it.
+        # Same classification, same gate, same code path — and `has_access` is
+        # where the caller has to end up anyway (see the note in rpc.py).
+        resp = self._rpc("res.partner", "has_access", args=[[], "read"], expect_status=200)
+        self.assertTrue(resp.json()["ok"])
+
+    def test_connection_path_refuses_the_questions_about_the_caller(self):
+        """An access check run as superuser answers about nobody, and answers YES.
+
+        ``has_access`` is literally ``self.env.su or not self._check_access(op)``:
+        on the connection path that is an unconditional True, for any operation,
+        ``unlink`` included — a caller would read "allowed" and act on it. Same
+        shape for ``has_group``, whose cross-user question ``res.users`` only
+        permits when ``env.su``.
+
+        So they stay classified as reads (the honest audit label) and are still
+        refused here, with a reason that says why instead of handing back an
+        answer that means nothing.
+        """
+        for method, args in (
+            ("check_access_rights", ["read"]),
+            ("has_access", [[], "unlink"]),
+            ("has_group", [[], "base.group_system"]),
+        ):
+            resp = self._rpc("res.partner", method, args=args, connection=True, expect_status=403)
+            self.assertEqual(
+                resp.json()["error"]["code"],
+                "requires_acting_user",
+                f"{method} answers about the caller; as superuser it must be refused",
+            )
+
     def test_read_only_paths_allow_the_view_metadata_read(self):
         """``get_view`` is a read, and both restricted paths must let it through.
 
@@ -254,11 +301,19 @@ class TestTuquiRpcGateway(HttpCase):
         self.assertEqual(resp.json()["error"]["code"], "method_blocked")
 
     def test_classify_covers_companion_transport_surface(self):
-        """Contract guard: every typed method CompanionTransport posts to
-        /tuqui/rpc must classify as intended. Mirror of
+        """Contract guard: every method Tuqui posts to /tuqui/rpc must classify
+        as intended. Mirror of
         tuqui_core/integrations/odoo/transports/companion.py — when its method
         surface changes, update this list and _READ_METHODS/_WRITE_METHODS
-        together. A read that slips to 'execute' is refused on read_only."""
+        together.
+
+        The ``untyped`` group is the one that matters: those calls go through
+        the transport's generic ``execute()`` / ``execute_method()`` instead of
+        a method of their own, so nothing about them is greppable from the
+        transport's signatures. This guard only mirrored the typed surface, and
+        that is precisely how ``get_view`` and ``check_access_rights`` reached
+        production classified as ``execute`` — refused on every read-only
+        companion. Add the method here when a new call site appears."""
         reads = (
             "search_read",
             "read",
@@ -269,7 +324,28 @@ class TestTuquiRpcGateway(HttpCase):
             "get_view",
         )
         writes = ("create", "write", "unlink", "copy")
-        for method in reads:
+        # Reached through the generic execute()/execute_method(), not through a
+        # typed method — see the docstring.
+        untyped_reads = (
+            "get_view",  # integrations/odoo/search_view.py
+            "check_access_rights",  # integrations/odoo/adapter.py ← open_odoo_view
+            "has_group",  # workspaces/service.py
+        )
+        # Not called yet, but on the list because they are the natural vector of
+        # the view-metadata work (#73440). Asserted one by one on purpose: a
+        # tuple that lists three of thirteen is a guard that does not guard —
+        # dropping any of the others would leave the suite green.
+        untyped_reads_ahead = (
+            "get_views",
+            "has_access",
+            "has_groups",
+            "get_metadata",
+            "get_property_definition",
+            "web_read",
+            "web_search_read",
+            "web_read_group",
+        )
+        for method in reads + untyped_reads + untyped_reads_ahead:
             self.assertEqual(_classify(method), "read", f"{method} must classify as a read")
         for method in writes:
             self.assertEqual(_classify(method), "write", f"{method} must classify as a write")
