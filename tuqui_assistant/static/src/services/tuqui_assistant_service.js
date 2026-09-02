@@ -1634,7 +1634,13 @@ export const tuquiAssistantService = {
          * viaja en cada mensaje. Lo que hay que evitar es que la persona se quede
          * buscando una marca que nunca apareció.
          */
-        const spotlightHandle = makeSpotlight(overlay);
+        const spotlightHandle = makeSpotlight(overlay, {
+            // La marca es de UN registro. Si la persona se va a otro, el campo se
+            // llama igual y la gota lo señalaría con confianza en el lugar
+            // equivocado; con esto se apaga sola.
+            recordKey: () =>
+                activeRecord ? `${activeRecord.resModel}:${activeRecord.resId}` : null,
+        });
         const spotlight = async (payload) => spotlightHandle.spotlight(payload);
 
         async function reloadView() {
