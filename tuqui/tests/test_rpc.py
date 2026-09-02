@@ -243,7 +243,12 @@ class TestTuquiRpcGateway(HttpCase):
         The connection path is the opposite case — see the next test.
         """
         self.client.write({"read_only": True})
-        resp = self._rpc("res.partner", "check_access_rights", args=["read"], expect_status=200)
+        # Exercised with `has_access`, not with the method the backend calls
+        # today: `check_access_rights` is @api.deprecated in 19, so dispatching
+        # it logs a DeprecationWarning and the runbot fails the build on it.
+        # Same classification, same gate, same code path — and `has_access` is
+        # where the caller has to end up anyway (see the note in rpc.py).
+        resp = self._rpc("res.partner", "has_access", args=[[], "read"], expect_status=200)
         self.assertTrue(resp.json()["ok"])
 
     def test_connection_path_refuses_the_questions_about_the_caller(self):
