@@ -624,3 +624,47 @@ describe("la marca es de UN registro", () => {
         form.remove();
     });
 });
+
+describe("el globo y el loop no se pelean", () => {
+    test("un re-apuntado NO le cierra el texto a quien tiene el mouse encima", async () => {
+        // Salió de mirar un video: el loop re-apunta en cada cambio del DOM, y
+        // como cada apuntado forzaba "cerrado", el texto se abría al acercarse el
+        // mouse y se cerraba solo un frame después. El hover no servía para nada,
+        // y eso es la mitad de la gota: la marca dice DÓNDE, el texto dice QUÉ.
+        const form = document.createElement("div");
+        form.className = "o_form_view";
+        form.innerHTML = '<div name="campo_hover" class="el-campo"></div>';
+        document.body.appendChild(form);
+
+        const calls = [];
+        const pointer = {
+            state: {},
+            pointTo: (anchor, step) => calls.push({ anchor, step }),
+            showContent: (open) => calls.push({ showContent: open }),
+            setState: (st) => calls.push({ setState: st }),
+            hide: () => calls.push("hide"),
+            destroy: () => calls.push("destroy"),
+        };
+        const handle = makeSpotlight({ add: () => () => {} }, {
+            createPointerState: () => pointer,
+            Gota: "FakeGota",
+        });
+
+        await handle.spotlight({ field: "campo_hover", hint: "algo que explica" });
+        await animationFrame();
+        // La persona acerca el mouse al campo: el texto se despliega.
+        form.querySelector("[name=campo_hover]").dispatchEvent(new MouseEvent("mouseenter"));
+        calls.length = 0;
+
+        // Y el DOM se mueve, como se mueve todo el tiempo en un formulario.
+        form.appendChild(document.createElement("span"));
+        await animationFrame();
+        await animationFrame();
+
+        const cerradas = calls.filter((c) => c.showContent === false);
+        expect(cerradas.length).toBe(0);
+
+        handle.destroy();
+        form.remove();
+    });
+});
