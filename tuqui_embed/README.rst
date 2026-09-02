@@ -129,6 +129,29 @@ sitio. O sea: el riesgo se mudó de "cualquier sitio de internet" a "cualquier
 página bajo nuestro propio dominio" — un subdominio comprometido o mal
 apuntado. Bajo nuestro control, pero no cero.
 
+**Medido, con el par que discrimina.** Dos páginas piden ``/web/become`` con un
+``<img>``, y se mira el header ``Cookie`` que el navegador adjuntó comparado
+contra el ``session_id`` exacto del admin (que "haya algún session_id" no
+prueba nada: Odoo le da una sesión anónima a cualquier visitante):
+
+=========================================  ==========================================
+Origen de la página que ataca              ¿Se llevó la sesión del admin?
+=========================================  ==========================================
+Otro sitio (``evil.localhost``)            **No** — no le llegó ninguna cookie
+Mismo sitio (``evil.localtest.me``)        **Sí** — con el ``session_id`` del admin
+=========================================  ==========================================
+
+Eso vuelve concreta la condición de despliegue: **nada que se sirva como
+documento bajo el dominio de Tuqui puede ser contenido que no controlemos.**
+
+Hoy eso se cumple, y conviene que quede anotado porque pasa a ser una
+propiedad a preservar: los artifacts publicados **no** son un vector, porque
+corren en un iframe cuyo ``sandbox`` NO incluye ``allow-same-origin`` (origen
+opaco, o sea que no es "mismo sitio" con nada) y su ruta pública devuelve JSON,
+no un documento servido en el origen de Tuqui. Leído del código de
+``tuqui-py`` (``web/src/lib/artifacts/sandbox.ts``,
+``tuqui_core/artifacts/public_router.py``), no medido en un navegador.
+
 Lo que lo contiene:
 
 - ``frame-ancestors`` sigue acotando **quién** puede embeber: no alcanza con ser
