@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 from odoo import fields
 from odoo.tests import TransactionCase, tagged
+from odoo.tools import mute_logger
 
 from ..models.tuqui_event import MAX_ATTEMPTS
 
@@ -115,7 +116,11 @@ class TestTuquiEvent(TransactionCase):
         self.assertEqual(event.last_status_code, 0)
         self.assertIn("connection reset", event.last_error)
 
+    @mute_logger("odoo.addons.tuqui.models.tuqui_event")
     def test_it_gives_up_after_the_ladder_and_keeps_the_evidence(self):
+        """@mute_logger: giving up is worth a warning in production, but this
+        test drives it on purpose and runbot counts any WARNING in the log as a
+        build failure."""
         event = self._event()
         with patch("odoo.addons.tuqui.models.tuqui_event.requests.post", return_value=_Response(503)):
             for _ in range(MAX_ATTEMPTS):
