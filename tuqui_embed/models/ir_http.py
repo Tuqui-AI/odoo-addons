@@ -156,8 +156,46 @@ class IrHttp(models.AbstractModel):
                     secure=True,
                     samesite="None",
                 )
+                cls._tuqui_partition_last_session_cookie(response)
         except Exception:
             # Un módulo de conveniencia no puede tumbar una respuesta de Odoo.
             # Tampoco fallar callado: sin el log, "el panel se ve en blanco" no
             # tendría dónde investigarse.
             _logger.exception("tuqui_embed: no se pudo aplicar la política de embed")
+
+    @classmethod
+    def _tuqui_partition_last_session_cookie(cls, response):
+        """Bind the loosened cookie to (Odoo, the site that framed it) — CHIPS.
+
+        `SameSite=None` makes the cookie travel to ANY window that embeds
+        Odoo, not just the one declared in `tuqui.embed_origins` — the
+        module only decides who is allowed to *show the frame*, it doesn't
+        stop the browser from sending the cookie into someone else's frame.
+        Two vectors slip through that gap regardless of `embed_origins`,
+        because neither is blocked by CORS or by the frame check:
+
+          * a cross-origin WebSocket handshake (`/websocket` is
+            `auth="public", cors="*"`) reads the user's live bus;
+          * a bare `<img src=".../web/become">` on any page a logged-in
+            admin happens to open escalates them to superuser — no click,
+            no form, a single GET.
+
+        `Partitioned` closes both without touching either endpoint: the
+        browser keys the cookie by (top-level site, this origin) instead of
+        just this origin, so a page on a DIFFERENT top-level site gets an
+        empty partition — the WebSocket and the `<img>` never see this
+        cookie at all, no matter what `embed_origins` says.
+
+        werkzeug 2.2 (what this Odoo pins) has no `partitioned=` kwarg on
+        `set_cookie` yet, so it's appended to the header by hand. Only the
+        LAST `Set-Cookie: session_id=...` is touched — Odoo's own
+        `SameSite=Lax` cookie, set earlier in the same response, is left
+        alone.
+        """
+        cookies = response.headers.getlist("Set-Cookie")
+        if not cookies or not cookies[-1].startswith("session_id="):
+            return
+        if "Partitioned" in cookies[-1]:
+            return
+        cookies[-1] = cookies[-1] + "; Partitioned"
+        response.headers.setlist("Set-Cookie", cookies)
