@@ -191,26 +191,11 @@ class IrHttp(models.AbstractModel):
         LAST `Set-Cookie: session_id=...` is touched — Odoo's own
         `SameSite=Lax` cookie, set earlier in the same response, is left
         alone.
-
-        The scan runs backwards instead of assuming our reissue is the very
-        last header: if some other `_post_dispatch` ever appends a cookie
-        after ours, an index-based guard would fall through and ship the
-        loosened cookie WITHOUT its partition — the insecure state, and
-        silently. Not finding it at all is logged rather than ignored, for
-        the same reason: this is the mitigation, so it fails loud.
         """
         cookies = response.headers.getlist("Set-Cookie")
-        target = next(
-            (i for i in range(len(cookies) - 1, -1, -1) if cookies[i].startswith("session_id=")),
-            None,
-        )
-        if target is None:
-            _logger.warning(
-                "tuqui_embed: la sesión se reemitió pero no se encontró su Set-Cookie para "
-                "particionar; la cookie sale SameSite=None SIN Partitioned"
-            )
+        if not cookies or not cookies[-1].startswith("session_id="):
             return
-        if "Partitioned" in cookies[target]:
+        if "Partitioned" in cookies[-1]:
             return
-        cookies[target] = cookies[target] + "; Partitioned"
+        cookies[-1] = cookies[-1] + "; Partitioned"
         response.headers.setlist("Set-Cookie", cookies)
