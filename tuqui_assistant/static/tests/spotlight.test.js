@@ -214,8 +214,14 @@ describe("makeSpotlight", () => {
 
         expect(await handle.spotlight({ field: "l10n_ar_afip_pos_number", hint: "El número que te dio ARCA" })).toBe(true);
         expect(apuntaA(calls[0].anchor, el)).toBe(true);
-        expect(calls[0].step.content).toBe("El número que te dio ARCA");
+        // El PRIMER apuntado va sin texto a propósito: con el cartel puesto, la
+        // posición del primer dibujo sale corrida `(ancho − 28) / 2` a la
+        // izquierda del campo —120 px medidos con un texto largo—. Ver `marcar`.
+        expect(calls[0].step.content).toBe("");
         expect(calls[1]).toEqual({ showContent: false });
+
+        await asentada();
+        expect(apuntados(calls).at(-1).step.content).toBe("El número que te dio ARCA");
 
         handle.destroy();
         el.remove();
@@ -253,9 +259,13 @@ describe("makeSpotlight", () => {
         await handle.spotlight({ field: "campo_con_texto", hint: "algo que explica" });
         calls.length = 0;
         el.dispatchEvent(new MouseEvent("mouseenter"));
-        expect(calls).toEqual([{ showContent: true }]);
+        // Se afirma sobre el ESTADO, no sobre la secuencia exacta: abrir también
+        // vuelve a apuntar (si no, el globo se expande manteniendo el borde
+        // izquierdo y la flecha deja de señalar el campo), así que en el medio
+        // hay un apuntado.
+        expect(ultimoShowContent(calls)).toBe(true);
         el.dispatchEvent(new MouseEvent("mouseleave"));
-        expect(calls).toEqual([{ showContent: true }, { showContent: false }]);
+        expect(ultimoShowContent(calls)).toBe(false);
 
         handle.destroy();
         el.remove();
@@ -461,6 +471,26 @@ function apuntaA(anchor, campo) {
     return Math.abs(ra.left - rc.left) <= 2 && Math.abs(ra.top - rc.top) <= 2;
 }
 
+/** El último estado abierto/cerrado que se le pidió al puntero. */
+function ultimoShowContent(calls) {
+    const ultima = calls.filter((c) => typeof c !== "string" && "showContent" in c).at(-1);
+    return ultima ? ultima.showContent : null;
+}
+
+/**
+ * Esperar a que la marca se asiente: el segundo apuntado, el que trae el texto.
+ *
+ * El servicio espera a que la gota esté DIBUJADA para recién entonces mandarle
+ * el texto —ver el comentario en `marcar`—, y con el puntero de mentira de estos
+ * tests ese elemento nunca aparece, así que se agotan los cinco frames de
+ * `esperarA`. Seis alcanzan y no dependen del número exacto.
+ */
+async function asentada() {
+    for (let i = 0; i < 6; i++) {
+        await animationFrame();
+    }
+}
+
 /**
  * Las llamadas a `pointTo` de una lista de llamadas.
  *
@@ -499,7 +529,7 @@ describe("mientras la marca vive", () => {
         return { form, handle, calls };
     }
 
-    test("vuelve a apuntar en el frame siguiente: es lo que ve si el campo está fuera de pantalla", async () => {
+    test("vuelve a apuntar una vez dibujada: es lo que ve si el campo está fuera de pantalla", async () => {
         // La clasificación "dentro o fuera del área visible" la hace un
         // IntersectionObserver, que es asincrónico: en la PRIMERA llamada todavía
         // no observó nada y el getter de Odoo devuelve "in" por defecto. Sin este
@@ -510,7 +540,7 @@ describe("mientras la marca vive", () => {
         expect(await handle.spotlight({ field: "campo_vivo" })).toBe(true);
         expect(apuntados(calls).length).toBe(1);
 
-        await animationFrame();
+        await asentada();
         expect(apuntados(calls).length).toBe(2);
 
         handle.destroy();
@@ -736,14 +766,75 @@ describe("la gota cae donde se hace clic", () => {
         form.remove();
     });
 
-    test("y uno angosto —un botón— se marca tal cual, centrado", async () => {
+    test("y uno angosto —un botón— se cubre ENTERO, para seguir centrado", async () => {
         // El otro lado del par: un botón mide 51 px y centrarse ahí es lo
-        // correcto. Sin esto, el fix de arriba lo aprobaría también un cambio que
-        // desplazara TODAS las marcas al borde izquierdo.
+        // correcto, así que su ancla lo cubre completo. Sin esto, el fix de
+        // arriba desplazaría TODAS las marcas al borde izquierdo.
+        //
+        // También va por ancla —y no directo al elemento— porque el ancla es lo
+        // que libera el auto-bloqueo del puntero: apuntando al botón real, la
+        // posición quedaba congelada en el cálculo hecho con el globo expandido y
+        // el botón salía descentrado.
         const { form, handle, calls, campo } = harnessAncho(50);
         await handle.spotlight({ field: "campo" });
 
-        expect(apuntados(calls)[0].anchor).toBe(campo);
+        const anchor = apuntados(calls)[0].anchor;
+        expect(anchor).not.toBe(campo);
+        const ra = anchor.getBoundingClientRect();
+        const rc = campo.getBoundingClientRect();
+        expect(Math.abs(ra.left - rc.left) <= 2).toBe(true);
+        // Entero: el mismo ancho que el objetivo, no los 24 px del punto de clic.
+        expect(Math.abs(ra.width - rc.width) <= 2).toBe(true);
+
+        handle.destroy();
+        form.remove();
+    });
+
+    test("al abrirse el globo NO se vuelve a apuntar: la flecha se sostiene sola", async () => {
+        // La flecha del puntero va pegada a su borde izquierdo
+        // (`tour_pointer.scss`: el `tip` en `left: arrow-size / 2`), o sea que el
+        // diseño de Odoo es que el globo se expanda hacia la derecha desde donde
+        // estaba la gota, con la flecha quedándose sobre el campo. Recalcular al
+        // abrir lo re-centra sobre el ancla y manda la flecha 117 px a la
+        // izquierda — medido en el navegador. Lo que la sostiene es el
+        // auto-bloqueo del puntero, que para eso conviene que esté puesto.
+        const { form, handle, calls, campo } = harnessAncho(500);
+        await handle.spotlight({ field: "campo", hint: "algo que explica" });
+        await asentada();
+        const antes = apuntados(calls).length;
+
+        campo.dispatchEvent(new MouseEvent("mouseenter"));
+        await animationFrame();
+
+        expect(apuntados(calls).length).toBe(antes);
+        expect(ultimoShowContent(calls)).toBe(true);
+
+        handle.destroy();
+        form.remove();
+    });
+
+    test("y el ancla es siempre la misma: se acomoda, no se reemplaza", async () => {
+        // Es lo que permite que el puntero se auto-bloquee, y el bloqueo es lo
+        // que sostiene la flecha del globo sobre el campo al abrirse. Un ancla
+        // nueva en cada apuntado lo mantenía suelto: cerrada quedaba bien, pero
+        // al desplegarse el texto se re-centraba y la flecha se iba.
+        const { form, handle, campo } = harnessAncho(500);
+        await handle.spotlight({ field: "campo", hint: "algo que explica" });
+        await asentada();
+        const ancla = document.querySelector("[data-tuqui-ancla]");
+        expect(ancla).not.toBe(null);
+        expect(document.querySelectorAll("[data-tuqui-ancla]").length).toBe(1);
+
+        // Y cuando el campo SE MUEVE de verdad, se acomoda la misma.
+        campo.style.marginTop = "40px";
+        await asentada();
+        expect(document.querySelector("[data-tuqui-ancla]")).toBe(ancla);
+        expect(document.querySelectorAll("[data-tuqui-ancla]").length).toBe(1);
+        expect(
+            Math.abs(
+                ancla.getBoundingClientRect().top - campo.getBoundingClientRect().top
+            ) <= 2
+        ).toBe(true);
 
         handle.destroy();
         form.remove();
