@@ -749,15 +749,29 @@ describe("la gota cae donde se hace clic", () => {
         form.remove();
     });
 
-    test("al apagarse no deja el ancla colgada en el body", async () => {
-        const { form, handle, calls } = harnessAncho(500);
+    test("al apagarse no deja ninguna ancla colgada en el body", async () => {
+        const { form, handle } = harnessAncho(500);
         await handle.spotlight({ field: "campo" });
-        const anchor = apuntados(calls)[0].anchor;
-        expect(anchor.isConnected).toBe(true);
+        await animationFrame();
+        expect(document.querySelectorAll("[data-tuqui-ancla]").length > 0).toBe(true);
 
         handle.destroy();
-        expect(anchor.isConnected).toBe(false);
+        expect(document.querySelectorAll("[data-tuqui-ancla]").length).toBe(0);
 
+        form.remove();
+    });
+
+    test("y no las acumula: cada apuntado deja una sola", async () => {
+        // Hay un ancla NUEVA por apuntado —es lo que libera el auto-bloqueo del
+        // puntero— así que lo que hay que fijar es que la anterior se vaya.
+        const { form, handle } = harnessAncho(500);
+        await handle.spotlight({ field: "campo" });
+        for (let i = 0; i < 4; i++) {
+            await animationFrame();
+        }
+        expect(document.querySelectorAll("[data-tuqui-ancla]").length).toBe(1);
+
+        handle.destroy();
         form.remove();
     });
 });
