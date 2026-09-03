@@ -35,6 +35,16 @@ _BATCH_SIZE = 50
 # timeout is not a lost event: it is one attempt of six.
 _TIMEOUT_SECONDS = 20
 
+# Wall clock one run may spend, checked between events. The batch bounds how
+# many rows we take; this bounds how long taking them can last, and only the
+# second one is what the server enforces: a cron thread is killed at
+# ``--limit-time-real-cron``, which defaults to ``-1`` meaning "use
+# ``--limit-time-real``" - 120 seconds. Fifty events that each time out at 20
+# seconds is 1000, so the batch alone would get the worker killed every minute.
+# Leaving early is free because ``_deliver`` commits per event, and the rows we
+# did not reach are still due on the next run.
+_CRON_BUDGET_SECONDS = 90
+
 # Default retention for delivered events, overridable per database with the
 # ``tuqui.event_retention_days`` config parameter. A sent row is evidence that
 # something *was* processed, which stops being useful after a few weeks; the
@@ -118,12 +128,11 @@ class TuquiEvent(models.Model):
 
     # ---------- Delivery ----------
 
-    state = fields.Selection(_STATE_SELECTION, default="pending", required=True, readonly=True, index=True)
+    state = fields.Selection(_STATE_SELECTION, default="pending", required=True, readonly=True)
     attempt = fields.Integer(default=0, readonly=True, help="How many times delivery has been tried.")
     next_attempt_at = fields.Datetime(
         default=fields.Datetime.now,
         readonly=True,
-        index=True,
         help="When the cron may try again. Set by the backoff ladder after each failure.",
     )
     sent_at = fields.Datetime(readonly=True)
@@ -134,6 +143,21 @@ class TuquiEvent(models.Model):
         "unique(uuid)",
         "A Tuqui event UUID must be unique - it is the idempotency key Tuqui dedups on.",
     )
+    # The index the dispatch cron actually needs, and the one its description
+    # promises: `state = 'pending' AND next_attempt_at <= now()` ordered by
+    # `next_attempt_at`, run every minute on every database that installs the
+    # companion. Two per-field indexes each answered half of that, which is not
+    # the same thing.
+    #
+    # And only this one. `state` alone is a prefix of it, so the retention sweep
+    # and the list view's filters ride it too, and `next_attempt_at` is never
+    # queried without a state - while every extra index is paid for on insert,
+    # and a mass action inserts thousands at once. (A field that stops declaring
+    # `index=True` keeps the index it already has: Odoo logs "Keep unexpected
+    # index" rather than dropping one it did not create. Only databases that
+    # installed an earlier commit of this branch carry the strays - the table
+    # itself ships for the first time here.)
+    _state_next_attempt_idx = models.Index("(state, next_attempt_at)")
 
     # ---------- Enqueue ----------
 
@@ -234,8 +258,16 @@ class TuquiEvent(models.Model):
             return
 
         _logger.info("tuqui.event: dispatching %s event(s)", len(due))
-        for event in due:
+        deadline = time.monotonic() + _CRON_BUDGET_SECONDS
+        for position, event in enumerate(due, start=1):
             event._deliver()
+            if time.monotonic() > deadline and position < len(due):
+                _logger.info(
+                    "tuqui.event: out of time after %s event(s), %s still due for the next run",
+                    position,
+                    len(due) - position,
+                )
+                break
 
     def _deliver(self, auto_commit=True):
         """Try once, and record what happened either way.
@@ -292,6 +324,12 @@ class TuquiEvent(models.Model):
         client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
         if not client:
             raise ValueError("This Odoo is not connected to Tuqui")
+        if client.state != "active":
+            # Checked before signing, not after being refused. Without this the
+            # event goes out, comes back 401, and `_is_permanent` files it as
+            # "Tuqui refused" - which sends whoever reads the queue looking for a
+            # problem in Tuqui instead of at the connection in front of them.
+            raise ValueError(f"The Tuqui connection is {client.state}, not active")
 
         body = json.dumps(self._payload(), separators=(",", ":"), sort_keys=True)
         timestamp = int(time.time())

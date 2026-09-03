@@ -39,8 +39,9 @@ class TestTuquiEvent(TransactionCase):
         super().setUpClass()
         cls.Event = cls.env["tuqui.event"].sudo()
         cls.client = cls.env["tuqui.oauth.client"].sudo()._get_or_create_singleton()[0]
-        # A signing key, as activation would have left one.
-        cls.client.write({"event_signing_key": "test-signing-key"})
+        # Active, with a signing key: exactly what activation leaves behind, and
+        # the only state in which a database has any business queueing events.
+        cls.client.write({"state": "active", "event_signing_key": "test-signing-key"})
 
     def _event(self, **overrides):
         values = {
@@ -115,6 +116,22 @@ class TestTuquiEvent(TransactionCase):
         self.assertEqual(event.attempt, 1)
         self.assertEqual(event.last_status_code, 0)
         self.assertIn("connection reset", event.last_error)
+
+    def test_a_disconnected_odoo_does_not_post_at_all(self):
+        """Checked before signing, not after being refused.
+
+        Posting anyway harvests a 401, which `_is_permanent` files as "Tuqui
+        refused" — sending whoever reads the queue looking for a problem in Tuqui
+        instead of at the connection in front of them.
+        """
+        self.client.write({"state": "disconnected"})
+        self.addCleanup(self.client.write, {"state": "active"})
+        event = self._event()
+        with patch("odoo.addons.tuqui.models.tuqui_event.requests.post") as post:
+            event._deliver(auto_commit=False)
+        post.assert_not_called()
+        self.assertEqual(event.state, "pending")
+        self.assertIn("disconnected", event.last_error)
 
     @mute_logger("odoo.addons.tuqui.models.tuqui_event")
     def test_it_gives_up_after_the_ladder_and_keeps_the_evidence(self):
