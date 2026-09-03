@@ -154,6 +154,32 @@ async function mountFormInvisiblePropio(resId = 1) {
     return getService("tuquiAssistant");
 }
 
+/** El mismo campo DOS VECES, las dos escondidas, pero POR MOTIVOS DISTINTOS.
+ *
+ *  Es el patrón más común de Odoo: una ocurrencia técnica con `invisible="1"`
+ *  —para que el valor viaje y las condiciones lo puedan leer— y la ocurrencia
+ *  de verdad adentro de un contenedor condicional. Con `active` en true no se
+ *  dibuja ninguna de las dos, así que el campo NO está en la pantalla.
+ *
+ *  Es el caso que se cuela si los dos ejes se cuentan por separado: el AND de
+ *  los `invisible` propios da "se ve" (la segunda ocurrencia no tiene), el AND
+ *  de los ancestros también (la primera no está adentro de nada), y el OR de
+ *  los dos vuelve a dar "se ve". La cuenta tiene que ser por OCURRENCIA. */
+const FORM_ARCH_DOS_MOTIVOS = `
+    <form>
+        <field name="active"/>
+        <field name="email" invisible="1"/>
+        <group invisible="active">
+            <field name="email"/>
+        </group>
+        <field name="fecha"/>
+    </form>`;
+
+async function mountFormDosMotivos(resId = 1) {
+    await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_DOS_MOTIVOS });
+    return getService("tuquiAssistant");
+}
+
 async function mountFormConAncestro(resId = 1) {
     await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_ANCESTRO });
     return getService("tuquiAssistant");
@@ -478,6 +504,36 @@ describe("contexto vivo", () => {
         // no lo tiene delante y no puede revisar el cambio antes de guardar.
         const assistant = await mountFormInvisiblePropio();
         expect(assistant.getContextPayload().fieldState.email.invisible).toBe(true);
+        const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
+        expect(ok).toBe(false);
+        expect(assistant.getActiveRecord().data.email).toBe("acme@example.com");
+    });
+
+    test("dos ocurrencias escondidas por motivos distintos también es oculto", async () => {
+        // La ocurrencia técnica la esconde su propio `invisible="1"`; la otra, el
+        // group que la contiene. Contar los dos ejes por separado daba "se ve" en
+        // los dos y el campo salía como normal — la misma mentira que este mapa
+        // existe para evitar, y del lado peligroso.
+        const assistant = await mountFormDosMotivos();
+        // Lo que decide: el campo no está en la pantalla, en ninguna de las dos.
+        expect(".o_field_widget[name=email]").toHaveCount(0);
+        expect(assistant.getContextPayload().fieldState.email.invisible).toBe(true);
+    });
+
+    test("y con la condición falsa la segunda ocurrencia se ve, así que no", async () => {
+        // El otro lado del par: sin esto, al test de arriba lo aprobaría también
+        // un cambio que marcara como oculto todo campo con una ocurrencia técnica.
+        const assistant = await mountFormDosMotivos();
+        await contains(".o_field_widget[name=active] input").click();
+        expect(".o_field_widget[name=email]").toHaveCount(1);
+        expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(undefined);
+    });
+
+    test("y una propuesta sobre ese campo se descarta", async () => {
+        // El guard de escritura lee el mismo mapa, así que heredaba el mismo
+        // agujero: la propuesta pasaba el filtro y se escribía sobre un campo que
+        // la persona no puede ver ni revisar antes de guardar.
+        const assistant = await mountFormDosMotivos();
         const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
         expect(ok).toBe(false);
         expect(assistant.getActiveRecord().data.email).toBe("acme@example.com");

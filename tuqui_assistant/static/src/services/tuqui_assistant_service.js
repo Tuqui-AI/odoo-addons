@@ -157,7 +157,8 @@ function normalizeX2manyValue(value) {
 }
 
 /**
- * Los campos que están ocultos porque un ANCESTRO lo está, no ellos.
+ * Los campos que el ARCH deja fuera de la pantalla, leídos ocurrencia por
+ * ocurrencia.
  *
  * POR QUÉ HACE FALTA, Y ES EL BORDE QUE MÁS ENGAÑA. `activeFields[campo].invisible`
  * trae SÓLO el modificador del propio nodo `<field>`. El `invisible` de un
@@ -168,6 +169,18 @@ function normalizeX2manyValue(value) {
  * sobre algo que la persona no tiene delante: exactamente la falla que este
  * contexto existe para evitar. Medido sobre 324 modelos: **20,19% de los campos
  * top-level** están en esa situación.
+ *
+ * EL ORDEN DE LA CUENTA ES EL QUE IMPORTA, y es la parte que se puede hacer mal
+ * sin que se note: por CADA ocurrencia se pregunta si la esconde su propio
+ * modificador **o** alguno de sus ancestros, y recién después se combinan las
+ * ocurrencias entre sí. Calcular los dos ejes por separado —el AND de los
+ * propios por un lado, el AND de los ancestros por el otro, y un OR al final—
+ * deja pasar el patrón más común de Odoo: el mismo campo puesto dos veces, una
+ * como `<field invisible="1"/>` técnico y otra adentro de un contenedor
+ * condicional. Ahí ninguna de las dos se dibuja y ninguno de los dos ejes lo
+ * marca. En los formularios del core de la 19 hay 20 campos así — `qr_code` en
+ * los pagos, tres de gastos, tres de configuración del PdV, `pricelist_id` en
+ * ventas — y en todos la mentira sale justo del lado peligroso.
  *
  * `field:not(field field)` es el mismo idioma que usa Odoo (`form_controller.js`,
  * el barrido de `footer`) para saltear lo que vive dentro de otro `<field>`: un
@@ -180,7 +193,7 @@ function normalizeX2manyValue(value) {
  * @param {Object} record  el record OWL, para evaluar la condición
  * @returns {Set<string>}
  */
-function camposOcultosPorUnAncestro(xmlDoc, record) {
+function camposOcultosSegunElArch(xmlDoc, record) {
     const ocultos = new Set();
     if (!xmlDoc?.querySelectorAll || !record) {
         return ocultos;
@@ -193,10 +206,12 @@ function camposOcultosPorUnAncestro(xmlDoc, record) {
         if (!nombre) {
             continue;
         }
+        // Arranca en el PROPIO nodo, no en su padre: para esta ocurrencia da lo
+        // mismo que la esconda su modificador o el del `<group>` de arriba.
         let escondida = false;
-        let ancestro = nodo.parentElement;
-        while (ancestro && !escondida) {
-            const expr = ancestro.getAttribute?.("invisible");
+        let el = nodo;
+        while (el && !escondida) {
+            const expr = el.getAttribute?.("invisible");
             try {
                 if (expr && evaluateBooleanExpr(expr, ctx)) {
                     escondida = true;
@@ -205,7 +220,7 @@ function camposOcultosPorUnAncestro(xmlDoc, record) {
                 // Una condición que no se puede evaluar no esconde nada: el
                 // default es dejar pasar, como antes de este chequeo.
             }
-            ancestro = ancestro.parentElement;
+            el = el.parentElement;
         }
         const previo = cuenta.get(nombre) || { veces: 0, escondidas: 0 };
         cuenta.set(nombre, {
@@ -270,7 +285,7 @@ function evaluadoresDisponibles(record) {
  * @param {Object} record  el record OWL del formulario abierto
  * @returns {Object} `{campo: {invisible?, readonly?, required?}}`, sólo con lo anómalo
  */
-function serializeFieldState(record, ocultosPorUnAncestro = new Set()) {
+function serializeFieldState(record, ocultosSegunElArch = new Set()) {
     const activos = record?.activeFields || {};
     const out = {};
     for (const name of Object.keys(activos)) {
@@ -281,9 +296,11 @@ function serializeFieldState(record, ocultosPorUnAncestro = new Set()) {
             // justamente el dato que no se puede reconstruir desde afuera. Cada
             // campo va en su propio try: si una versión los renombra, se pierde el
             // estado de los campos y no el contexto entero.
-            // El OR con los ancestros es lo que hace honesto a este mapa: el
-            // evaluador de Odoo sólo conoce el modificador del propio campo.
-            if (record._isInvisible?.(name) || ocultosPorUnAncestro.has(name)) {
+            // El OR con lo que dice el arch es lo que hace honesto a este mapa:
+            // el evaluador de Odoo no ve los ancestros, y al fusionar dos nodos
+            // del mismo campo pierde de vista que las dos ocurrencias podían
+            // estar escondidas por motivos distintos.
+            if (record._isInvisible?.(name) || ocultosSegunElArch.has(name)) {
                 estado.invisible = true;
             }
             if (record._isReadonly?.(name)) {
@@ -987,7 +1004,7 @@ export const tuquiAssistantService = {
                 // lo que se pierde es la cola de los VALORES, igual que antes de
                 // que este mapa existiera. Ocupa poco: sólo viajan las
                 // excepciones.
-                const ocultos = camposOcultosPorUnAncestro(_owner?.archInfo?.xmlDoc, activeRecord);
+                const ocultos = camposOcultosSegunElArch(_owner?.archInfo?.xmlDoc, activeRecord);
                 ctx.fieldState = serializeFieldState(activeRecord, ocultos);
                 // Sólo viaja la excepción: si el mapa NO es confiable se dice, y
                 // del otro lado el prompt deja de leer "ausente" como "normal".
@@ -1041,10 +1058,10 @@ export const tuquiAssistantService = {
             // atrapar; ahora se ignoran y, si no queda nada válido, se avisa y corta.
             const fieldDefs = activeRecord.fields || {};
             const enPantalla = activeRecord.activeFields || {};
-            // Un campo escondido por un ancestro está EN `activeFields` y no en la
-            // pantalla: escribirlo deja un cambio que la persona no puede ver ni
-            // revisar antes de guardar, igual que un campo de otra vista.
-            const ocultosPorUnAncestro = camposOcultosPorUnAncestro(
+            // Un campo que el arch deja fuera de la pantalla está igual en
+            // `activeFields`: escribirlo deja un cambio que la persona no puede
+            // ver ni revisar antes de guardar, igual que un campo de otra vista.
+            const ocultosSegunElArch = camposOcultosSegunElArch(
                 _owner?.archInfo?.xmlDoc,
                 activeRecord
             );
@@ -1064,10 +1081,11 @@ export const tuquiAssistantService = {
                 // en los campos que no están en pantalla.
                 // El `invisible` PROPIO del campo cuenta igual que el del grupo
                 // que lo contiene: en los dos casos la persona no lo tiene
-                // delante, y escribirlo deja un cambio que no puede revisar. Sin
-                // esto, el chequeo era inconsistente — rechazaba lo que esconde
-                // un ancestro y dejaba pasar lo que se esconde a sí mismo.
-                let fueraDeLaVista = ocultosPorUnAncestro.has(name);
+                // delante, y escribirlo deja un cambio que no puede revisar. El
+                // arch resuelve los dos; se le pregunta igual al evaluador de
+                // Odoo, que es el único que ve lo que no salió del arch de este
+                // formulario (el `invisible` que hereda un x2many, por ejemplo).
+                let fueraDeLaVista = ocultosSegunElArch.has(name);
                 try {
                     fueraDeLaVista = fueraDeLaVista || Boolean(activeRecord._isInvisible?.(name));
                 } catch {
