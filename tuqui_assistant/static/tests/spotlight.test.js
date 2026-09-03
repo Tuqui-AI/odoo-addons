@@ -214,14 +214,18 @@ describe("makeSpotlight", () => {
 
         expect(await handle.spotlight({ field: "l10n_ar_afip_pos_number", hint: "El número que te dio ARCA" })).toBe(true);
         expect(apuntaA(calls[0].anchor, el)).toBe(true);
-        // El PRIMER apuntado va sin texto a propósito: con el cartel puesto, la
-        // posición del primer dibujo sale corrida `(ancho − 28) / 2` a la
-        // izquierda del campo —120 px medidos con un texto largo—. Ver `marcar`.
+        // El apuntado va sin texto a propósito: el `usePosition` del puntero corre
+        // antes del efecto que fija el ancho, así que cada dibujo se posiciona con
+        // el ancho del dibujo anterior. Con el cartel puesto, la gota cae
+        // `(ancho − 28) / 2` a la izquierda del campo —120 px medidos con un texto
+        // largo—. Ver `marcar`.
         expect(calls[0].step.content).toBe("");
         expect(calls[1]).toEqual({ showContent: false });
 
         await asentada();
-        expect(apuntados(calls).at(-1).step.content).toBe("El número que te dio ARCA");
+        // Y el texto NO llega en el re-apuntado: llega al abrirse el globo, que es
+        // cuando el desfasaje de un dibujo del puntero juega a favor. Ver `marcar`.
+        expect(apuntados(calls).at(-1).step.content).toBe("");
 
         handle.destroy();
         el.remove();
@@ -259,13 +263,11 @@ describe("makeSpotlight", () => {
         await handle.spotlight({ field: "campo_con_texto", hint: "algo que explica" });
         calls.length = 0;
         el.dispatchEvent(new MouseEvent("mouseenter"));
-        // Se afirma sobre el ESTADO, no sobre la secuencia exacta: abrir también
-        // vuelve a apuntar (si no, el globo se expande manteniendo el borde
-        // izquierdo y la flecha deja de señalar el campo), así que en el medio
-        // hay un apuntado.
-        expect(ultimoShowContent(calls)).toBe(true);
+        // Se afirma sobre el ESTADO y no sobre la secuencia: abrir manda el texto
+        // junto con el `isOpen`, y cerrar los saca en dos pasos.
+        expect(ultimoAbierto(calls)).toBe(true);
         el.dispatchEvent(new MouseEvent("mouseleave"));
-        expect(ultimoShowContent(calls)).toBe(false);
+        expect(ultimoAbierto(calls)).toBe(false);
 
         handle.destroy();
         el.remove();
@@ -471,10 +473,25 @@ function apuntaA(anchor, campo) {
     return Math.abs(ra.left - rc.left) <= 2 && Math.abs(ra.top - rc.top) <= 2;
 }
 
-/** El último estado abierto/cerrado que se le pidió al puntero. */
-function ultimoShowContent(calls) {
-    const ultima = calls.filter((c) => typeof c !== "string" && "showContent" in c).at(-1);
-    return ultima ? ultima.showContent : null;
+/**
+ * El último estado abierto/cerrado que se le pidió al puntero.
+ *
+ * Por los DOS canales: cerrar usa `showContent(false)`, y abrir manda el texto y
+ * el `isOpen` juntos en un `setState` —tienen que viajar en el mismo cambio de
+ * estado para que el globo se expanda desde donde estaba la gota, ver `atarHover`—.
+ */
+function ultimoAbierto(calls) {
+    const ultima = calls
+        .filter(
+            (c) =>
+                typeof c !== "string" &&
+                ("showContent" in c || (c.setState && "isOpen" in c.setState))
+        )
+        .at(-1);
+    if (!ultima) {
+        return null;
+    }
+    return "showContent" in ultima ? ultima.showContent : ultima.setState.isOpen;
 }
 
 /**
@@ -807,7 +824,42 @@ describe("la gota cae donde se hace clic", () => {
         await animationFrame();
 
         expect(apuntados(calls).length).toBe(antes);
-        expect(ultimoShowContent(calls)).toBe(true);
+        // El texto y el "abierto" viajan en el MISMO cambio de estado.
+        const abrio = calls.filter((c) => typeof c !== "string" && c.setState).at(-1).setState;
+        expect(abrio).toEqual({ content: "algo que explica", isOpen: true });
+
+        handle.destroy();
+        form.remove();
+    });
+
+    test("y al salir del hover se re-apunta DOS veces con anclas nuevas", async () => {
+        // Lo reportó Gonza probándolo en un Odoo real: pasabas el mouse por encima
+        // y la marca QUEDABA CORRIDA 120 px a la izquierda. Medido: el dibujo que
+        // cierra el globo calcula la posición con el ancho del cartel todavía
+        // puesto y ahí mismo el puntero se auto-bloquea con esa posición. Un ancla
+        // nueva es lo único que lo suelta, y hacen falta DOS pasadas porque su
+        // `unlock()` corre en el efecto, después del cálculo de ese dibujo: la
+        // primera destraba, la segunda recalcula.
+        const { form, handle, calls, campo } = harnessAncho(500);
+        await handle.spotlight({ field: "campo", hint: "algo que explica" });
+        await asentada();
+        const antes = apuntados(calls).length;
+        const anclaVieja = document.querySelector("[data-tuqui-ancla]");
+
+        campo.dispatchEvent(new MouseEvent("mouseenter"));
+        await animationFrame();
+        campo.dispatchEvent(new MouseEvent("mouseleave"));
+        await asentada();
+
+        expect(ultimoAbierto(calls)).toBe(false);
+        expect(apuntados(calls).length).toBe(antes + 2);
+        // Y el ancla que quedó es OTRA: si fuera la misma, el puntero seguiría
+        // bloqueado en la posición del globo abierto.
+        const ancla = document.querySelector("[data-tuqui-ancla]");
+        expect(ancla).not.toBe(anclaVieja);
+        expect(document.querySelectorAll("[data-tuqui-ancla]").length).toBe(1);
+        // Cerrada otra vez, sin texto: el cartel sólo vive mientras está abierta.
+        expect(apuntados(calls).at(-1).step.content).toBe("");
 
         handle.destroy();
         form.remove();
