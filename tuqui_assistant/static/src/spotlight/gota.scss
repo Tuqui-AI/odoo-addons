@@ -17,4 +17,19 @@
         background-color: var(--TourPointer__color);
         color: var(--TourPointer__text-color);
     }
+
+    &.o_open {
+        // Y LA FLECHITA TAMBIÉN. Al abrirse, el `tip` deja de ser la gota y pasa
+        // a ser el triangulito que señala el campo, y Odoo lo pinta blanco con
+        // borde gris —igual que el fondo del globo, que acá ya no es gris—. Sin
+        // esto la punta salía blanca colgando de un cartel verde. Va también el
+        // borde de la raíz, que es el marco del globo.
+        border-color: var(--TourPointer__color);
+        background-color: var(--TourPointer__color);
+
+        .o_tour_pointer_tip {
+            background: var(--TourPointer__color);
+            border-color: var(--TourPointer__color);
+        }
+    }
 }
