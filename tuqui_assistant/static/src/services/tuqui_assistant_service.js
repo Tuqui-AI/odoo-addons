@@ -43,6 +43,9 @@ const MAX_X2MANY_IDS = 50;
 // arriba de esto la lista ES parcial y nadie debe leerla como la selección.
 const MAX_SELECTION_IDS = 200;
 
+/** Tope de botones en el contexto: alcanza para cualquier formulario real. */
+const TOPE_DE_BOTONES = 25;
+
 /**
  * Estado compartido + puente (bridge) entre el panel del asistente y lo que el
  * usuario está mirando en Odoo.
@@ -245,6 +248,59 @@ function camposOcultosSegunElArch(xmlDoc, record) {
         }
     }
     return ocultos;
+}
+
+/**
+ * Los botones que la persona puede clickear en la pantalla abierta.
+ *
+ * POR QUÉ VIAJAN. Sin esto el modelo tiene que ADIVINAR cómo se llama un botón, y
+ * adivina mal de dos formas que se midieron contra un Odoo real: inventando uno
+ * que no existe —pidió marcar "Action" en un proyecto que tiene "Share Project" a
+ * la vista— y traduciendo el texto —"Log internal note" contra un botón que dice
+ * "Log note"—. Las dos terminan igual: el addon no encuentra nada, y el agente le
+ * dice a la persona "te lo resalté" sobre una pantalla donde no hay nada.
+ *
+ * EL ALCANCE ES EL MISMO CON EL QUE SE BUSCAN, y eso no es un detalle: la marca
+ * busca dentro de `.o_form_view` (ver `pantalla` en `spotlight.js`), así que
+ * mandar botones de afuera ofrecería lo que después no se puede señalar. Por eso
+ * entran también los del chatter, que viven ahí adentro y son de los más pedidos.
+ *
+ * LA LISTA PUEDE SER PARCIAL —hay un tope, y se filtra lo que no tiene nombre
+ * que una persona pueda decir (un contador, una fecha)—, así que sirve para
+ * ELEGIR y no para negar: nada se rechaza por no estar acá.
+ *
+ * @returns {Array<{text: string, name?: string}>}
+ */
+function botonesEnPantalla() {
+    const vista = document.querySelector(".o_form_view");
+    if (!vista) {
+        return [];
+    }
+    const salida = [];
+    const vistos = new Set();
+    for (const boton of vista.querySelectorAll("button, a.btn")) {
+        const caja = boton.getBoundingClientRect();
+        if (!caja.width || !caja.height) {
+            continue;
+        }
+        const texto = (boton.innerText || "").replace(/\s+/g, " ").trim().slice(0, 40);
+        // Un botón que sólo dice un número o una fecha —un contador, el selector
+        // de un rango— no es algo que alguien pida por su nombre.
+        if (!texto || !/[a-zá-úñ]/i.test(texto)) {
+            continue;
+        }
+        const name = boton.getAttribute("name") || undefined;
+        const clave = `${texto}|${name || ""}`;
+        if (vistos.has(clave)) {
+            continue;
+        }
+        vistos.add(clave);
+        salida.push(name ? { text: texto, name } : { text: texto });
+        if (salida.length >= TOPE_DE_BOTONES) {
+            break;
+        }
+    }
+    return salida;
 }
 
 /**
@@ -1085,6 +1141,10 @@ export const tuquiAssistantService = {
                 if (!evaluadoresDisponibles(activeRecord)) {
                     ctx.fieldStateUnavailable = true;
                 }
+                // Los BOTONES que la persona tiene delante, por el mismo motivo
+                // de orden: van antes de los valores porque pesan poco y no se
+                // pueden reconstruir del otro lado.
+                ctx.buttons = botonesEnPantalla();
                 ctx.fields = serializeRecordFields(activeRecord);
             }
             // Aplanar a JSON puro: arranca los Proxies reactivos (domain/filters/
