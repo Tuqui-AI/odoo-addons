@@ -10,6 +10,8 @@ import {
 } from "@web/core/l10n/dates";
 import { evaluateBooleanExpr } from "@web/core/py_js/py";
 
+import { makeSpotlight } from "./spotlight";
+
 // Luxon es un global en Odoo, no un import ESM — igual que en
 // web/static/src/core/l10n/dates.js.
 const { DateTime } = luxon;
@@ -40,6 +42,9 @@ const MAX_X2MANY_IDS = 50;
 // El `count` sigue siendo el real, y `truncated` sigue marcando el corte: por
 // arriba de esto la lista ES parcial y nadie debe leerla como la selección.
 const MAX_SELECTION_IDS = 200;
+
+/** Tope de botones en el contexto: alcanza para cualquier formulario real. */
+const TOPE_DE_BOTONES = 25;
 
 /**
  * Estado compartido + puente (bridge) entre el panel del asistente y lo que el
@@ -243,6 +248,129 @@ function camposOcultosSegunElArch(xmlDoc, record) {
         }
     }
     return ocultos;
+}
+
+/**
+ * El motivo REAL de un error del cliente web, desenvuelto.
+ *
+ * Odoo envuelve lo que falla dentro de un render de Owl en un error propio cuyo
+ * `message` es *"An error occured in the owl lifecycle (see this Error's cause
+ * property)"* — literalmente un cartel que le dice a la persona que mire una
+ * propiedad de un objeto de JavaScript. Se vio en un Odoo real: el agente quiso
+ * abrir la configuración del sitio web en una base sin ese módulo, y en vez de
+ * "el modelo no existe" salió esa frase.
+ *
+ * El motivo está en la cadena de `cause`, así que se baja hasta el último que
+ * tenga mensaje. Tope de saltos por si alguna vez viene circular.
+ *
+ * @param {unknown} e  lo que se atrapó
+ * @returns {string} el mensaje más específico que haya
+ */
+export function motivoDeVerdad(e) {
+    let actual = e;
+    let mensaje = "";
+    for (let i = 0; i < 5 && actual; i++) {
+        const propio = typeof actual === "string" ? actual : actual?.message;
+        if (propio && !/owl lifecycle/i.test(propio)) {
+            mensaje = propio;
+        }
+        actual = actual?.cause;
+    }
+    if (mensaje) {
+        return mensaje;
+    }
+    return typeof e === "string" ? e : e?.message || String(e);
+}
+
+/**
+ * Por qué no se pudo abrir una vista, en algo que una persona pueda leer.
+ *
+ * Desenvolver el error de Owl deja de mandar a mirar una propiedad de
+ * JavaScript, pero lo que queda abajo tampoco explica nada: para un modelo que
+ * no existe, Odoo contesta `404: Not Found`. Así que en el camino de FALLA —y
+ * sólo ahí, que es lo que hace que la consulta extra no cueste nada en el camino
+ * bueno— se le pregunta a Odoo si ese modelo existe, y si no existe se dice eso,
+ * que es la mitad de la respuesta que la persona necesita.
+ *
+ * Medido: le pidieron la configuración del sitio web en una base sin ese módulo.
+ *
+ * @param {unknown} e  lo que se atrapó
+ * @param {string} model  el modelo que se quiso abrir
+ * @param {object} orm  el servicio `orm`
+ * @returns {Promise<string>}
+ */
+export async function porQueNoSePudoAbrir(e, model, orm) {
+    const motivo = motivoDeVerdad(e);
+    // `404` y `Unknown model` son las dos formas en que Odoo cuenta lo mismo, y
+    // ninguna de las dos nombra el modelo.
+    if (model && /(404|not found|unknown model)/i.test(motivo)) {
+        try {
+            const existe = await orm.searchCount("ir.model", [["model", "=", model]]);
+            if (!existe) {
+                return _t(
+                    "the model '%s' does not exist in this database — that app is probably not installed",
+                    model
+                );
+            }
+        } catch {
+            // Si ni eso se puede consultar, se devuelve lo que había: peor un
+            // motivo pobre que ninguno.
+        }
+    }
+    return motivo;
+}
+
+/**
+ * Los botones que la persona puede clickear en la pantalla abierta.
+ *
+ * POR QUÉ VIAJAN. Sin esto el modelo tiene que ADIVINAR cómo se llama un botón, y
+ * adivina mal de dos formas que se midieron contra un Odoo real: inventando uno
+ * que no existe —pidió marcar "Action" en un proyecto que tiene "Share Project" a
+ * la vista— y traduciendo el texto —"Log internal note" contra un botón que dice
+ * "Log note"—. Las dos terminan igual: el addon no encuentra nada, y el agente le
+ * dice a la persona "te lo resalté" sobre una pantalla donde no hay nada.
+ *
+ * EL ALCANCE ES EL MISMO CON EL QUE SE BUSCAN, y eso no es un detalle: la marca
+ * busca dentro de `.o_form_view` (ver `pantalla` en `spotlight.js`), así que
+ * mandar botones de afuera ofrecería lo que después no se puede señalar. Por eso
+ * entran también los del chatter, que viven ahí adentro y son de los más pedidos.
+ *
+ * LA LISTA PUEDE SER PARCIAL —hay un tope, y se filtra lo que no tiene nombre
+ * que una persona pueda decir (un contador, una fecha)—, así que sirve para
+ * ELEGIR y no para negar: nada se rechaza por no estar acá.
+ *
+ * @returns {Array<{text: string, name?: string}>}
+ */
+function botonesEnPantalla() {
+    const vista = document.querySelector(".o_form_view");
+    if (!vista) {
+        return [];
+    }
+    const salida = [];
+    const vistos = new Set();
+    for (const boton of vista.querySelectorAll("button, a.btn")) {
+        const caja = boton.getBoundingClientRect();
+        if (!caja.width || !caja.height) {
+            continue;
+        }
+        const texto = (boton.innerText || "").replace(/\s+/g, " ").trim().slice(0, 40);
+        // Un botón que sólo dice un número o una fecha —un contador, el selector
+        // de un rango— no es algo que alguien pida por su nombre.
+        if (!texto || !/[a-zá-úñ]/i.test(texto)) {
+            continue;
+        }
+        const name = boton.getAttribute("name") || undefined;
+        const clave = `${texto}|${name || ""}`;
+        if (vistos.has(clave)) {
+            continue;
+        }
+        vistos.add(clave);
+        salida.push(name ? { text: texto, name } : { text: texto });
+        if (salida.length >= TOPE_DE_BOTONES) {
+            break;
+        }
+    }
+    return salida;
 }
 
 /**
@@ -613,10 +741,82 @@ function sanitizeChatterBody(html) {
     }
 }
 
+/**
+ * ¿Nos están mostrando adentro de otra página?
+ *
+ * Leer `window.top` de otro origen tira SecurityError, y ese error ES la
+ * respuesta: si no lo podemos ni mirar, es de otro. Por eso el catch devuelve
+ * `true` en vez de tragarse el error.
+ */
+function estamosAnidados() {
+    try {
+        return window.top !== window.self;
+    } catch {
+        return true;
+    }
+}
+
+/**
+ * El asistente, apagado. Misma forma que el servicio real, sin hacer nada.
+ *
+ * POR QUÉ EXISTE. Odoo se puede ver DENTRO del panel de Tuqui. Ahí el asistente
+ * no tiene sentido —la conversación ya está del otro lado de la pantalla— y
+ * además **cuelga el hilo principal de la pestaña entera** a los dos segundos de
+ * entrar al menú de aplicaciones. Reproducido en 5 s; con el módulo
+ * desinstalado, 28 s sin problema.
+ *
+ * Se devuelve un servicio inerte y no se corta la carga del módulo porque los
+ * controladores de vistas lo piden por dependencia: si no existiera, sus parches
+ * romperían el cliente web que estamos tratando de mostrar.
+ *
+ * Todo lo que devuelve es lo que el resto del módulo espera encontrar. `state`
+ * es el que mira el systray para decidir si dibuja algo: con `panelOpen` en
+ * false y sin contexto, no dibuja nada.
+ */
+function servicioApagado() {
+    const nada = () => {};
+    return {
+        state: reactive({
+            panelOpen: false,
+            minimized: false,
+            expanded: false,
+            context: null,
+            newChatRequest: 0,
+        }),
+        setRecordContext: nada,
+        refreshRecordContext: () => false,
+        setSearchContext: nada,
+        clearContext: nada,
+        togglePanel: nada,
+        openFreshChat: nada,
+        minimize: nada,
+        restore: nada,
+        expand: nada,
+        contract: nada,
+        applyProposal: async () => false,
+        proposeChatter: async () => false,
+        navigate: async () => false,
+        reloadView: async () => false,
+        saveRecord: async () => false,
+        spotlight: async () => false,
+        getEmbedBootstrap: async () => null,
+        getSsoAuth: async () => null,
+        getContextPayload: () => ({ kind: "none" }),
+        getActiveRecord: () => null,
+        consumeResumeOnOpen: () => false,
+    };
+}
+
+
 export const tuquiAssistantService = {
     // `action` is needed to open the standard composer (doAction) from proposeChatter.
-    dependencies: ["notification", "orm", "action"],
-    start(env, { notification, orm, action }) {
+    dependencies: ["notification", "orm", "action", "overlay"],
+    start(env, { notification, orm, action, overlay }) {
+        // Odoo mostrado adentro de otra página (el panel de Tuqui) es una VISTA:
+        // el asistente no se monta ahí. Ver `servicioApagado`.
+        if (estamosAnidados()) {
+            return servicioApagado();
+        }
         // Persist panel UI state across Ctrl+R, per-tab (sessionStorage is tab-scoped).
         // panelOpen / minimized / expanded survive reload; context and newChatRequest
         // are ephemeral (rebuilt from the current Odoo view on mount).
@@ -1011,6 +1211,10 @@ export const tuquiAssistantService = {
                 if (!evaluadoresDisponibles(activeRecord)) {
                     ctx.fieldStateUnavailable = true;
                 }
+                // Los BOTONES que la persona tiene delante, por el mismo motivo
+                // de orden: van antes de los valores porque pesan poco y no se
+                // pueden reconstruir del otro lado.
+                ctx.buttons = botonesEnPantalla();
                 ctx.fields = serializeRecordFields(activeRecord);
             }
             // Aplanar a JSON puro: arranca los Proxies reactivos (domain/filters/
@@ -1548,6 +1752,27 @@ export const tuquiAssistantService = {
             return true;
         }
 
+        /**
+         * La gota: señalar en la pantalla dónde hay que hacer algo, con el
+         * puntero de `web_tour` (el que la gente ya conoce del onboarding).
+         *
+         * Devuelve si se pudo señalar. Ese dato NO vuelve al chat —el panel lo
+         * usa para avisarle a la persona con un cartel (`_spotlight` en
+         * `panel.js`)— y es una decisión, no una omisión: quien está mirando la
+         * pantalla es el único que puede moverse a la vista correcta, y el agente
+         * ya sabe de antemano dónde está parado, porque el contexto de la página
+         * viaja en cada mensaje. Lo que hay que evitar es que la persona se quede
+         * buscando una marca que nunca apareció.
+         */
+        const spotlightHandle = makeSpotlight(overlay, {
+            // La marca es de UN registro. Si la persona se va a otro, el campo se
+            // llama igual y la gota lo señalaría con confianza en el lugar
+            // equivocado; con esto se apaga sola.
+            recordKey: () =>
+                activeRecord ? `${activeRecord.resModel}:${activeRecord.resId}` : null,
+        });
+        const spotlight = async (payload) => spotlightHandle.spotlight(payload);
+
         async function reloadView() {
             const viewModel = _owner?.model;
             if (!viewModel) {
@@ -1609,13 +1834,51 @@ export const tuquiAssistantService = {
          *
          * @param {{model?: string, mode?: string, viewType?: string, domain?: any[], defaults?: object, title?: string}} payload
          */
-        async function navigate({ model, mode, viewType, domain, defaults, title } = {}) {
+        async function navigate({ model, mode, viewType, domain, defaults, title, resId } = {}) {
             if (typeof model !== "string" || !model.trim()) {
                 notification.add(
                     _t("Cannot navigate: missing Odoo model to open."),
                     { type: "danger" }
                 );
                 return false;
+            }
+            if (mode === "record") {
+                // Abrir el formulario de UN registro que ya existe.
+                //
+                // Es el modo que le faltaba al trío, y sin él no se puede guiar a
+                // nadie sobre un campo: los campos viven en el formulario, no en la
+                // lista, así que "andá al diario y te marco el punto de venta"
+                // terminaba mostrando una lista donde ese campo no existe y una
+                // marca que no tenía dónde caer.
+                const id = Number(resId);
+                if (!Number.isInteger(id) || id <= 0) {
+                    notification.add(
+                        _t("Cannot open that record: missing or invalid id."),
+                        { type: "danger" }
+                    );
+                    return false;
+                }
+                try {
+                    await action.doAction({
+                        type: "ir.actions.act_window",
+                        name: title || model,
+                        res_model: model,
+                        res_id: id,
+                        views: [[false, "form"]],
+                        target: "current",
+                        view_id: false,
+                    });
+                } catch (e) {
+                    // Odoo rechaza por sus propios permisos o porque el registro no
+                    // existe. Se lo decimos a la persona: un form que no se abre y
+                    // no explica por qué es indistinguible de una pantalla colgada.
+                    notification.add(
+                        _t("Could not open that record in Odoo: %s", await porQueNoSePudoAbrir(e, model, orm)),
+                        { type: "danger" }
+                    );
+                    return false;
+                }
+                return true;
             }
             if (mode === "browse") {
                 let vt = BROWSE_VIEW_TYPES.includes(viewType) ? viewType : "list";
@@ -1650,7 +1913,7 @@ export const tuquiAssistantService = {
                     );
                 } catch (e) {
                     notification.add(
-                        _t("Could not open the view in Odoo: %s", e.message || e),
+                        _t("Could not open the view in Odoo: %s", await porQueNoSePudoAbrir(e, model, orm)),
                         { type: "danger" }
                     );
                     return false;
@@ -1676,7 +1939,7 @@ export const tuquiAssistantService = {
                 });
             } catch (e) {
                 notification.add(
-                    _t("Could not open the new form in Odoo: %s", e.message || e),
+                    _t("Could not open the new form in Odoo: %s", await porQueNoSePudoAbrir(e, model, orm)),
                     { type: "danger" }
                 );
                 return false;
@@ -1701,6 +1964,7 @@ export const tuquiAssistantService = {
             navigate,
             reloadView,
             saveRecord,
+            spotlight,
             getEmbedBootstrap,
             getSsoAuth,
             getContextPayload,
