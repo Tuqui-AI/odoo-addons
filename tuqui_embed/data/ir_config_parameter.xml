@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo noupdate="1">
+    <!--
+        El parámetro se crea VACÍO, con su descripción.
+
+        Dos motivos. Uno: que exista con nombre visible en Ajustes → Técnico →
+        Parámetros del sistema, en vez de que haya que saber escribir la clave de
+        memoria. Dos, el que importa: que quien lo vea sepa **qué habilita** antes
+        de cargarlo. Hoy es una línea de texto libre sin nada al lado, y esto no
+        es una preferencia — es el interruptor entre "Odoo normal" y "Odoo que se
+        deja mostrar dentro de otro sitio". La cookie de sesión NO se toca (ver
+        el README): lo que se resigna es la protección contra clickjacking, y
+        sólo para los orígenes que el administrador declare acá.
+
+        Vacío no cambia nada: el módulo instalado y sin origen cargado es
+        indistinguible de no estar instalado.
+
+        Va con `noupdate="1"` en la raíz, y no es cosmético: sin eso, cada
+        `-u tuqui_embed` reescribe el `value` con el vacío del XML y le apaga el
+        embed al cliente sin decir nada.
+    -->
+    <record id="param_embed_origins" model="ir.config_parameter">
+        <field name="key">tuqui.embed_origins</field>
+        <field name="value"></field>
+    </record>
+</odoo>
