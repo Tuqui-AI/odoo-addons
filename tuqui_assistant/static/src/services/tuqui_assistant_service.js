@@ -251,6 +251,38 @@ function camposOcultosSegunElArch(xmlDoc, record) {
 }
 
 /**
+ * El motivo REAL de un error del cliente web, desenvuelto.
+ *
+ * Odoo envuelve lo que falla dentro de un render de Owl en un error propio cuyo
+ * `message` es *"An error occured in the owl lifecycle (see this Error's cause
+ * property)"* — literalmente un cartel que le dice a la persona que mire una
+ * propiedad de un objeto de JavaScript. Se vio en un Odoo real: el agente quiso
+ * abrir la configuración del sitio web en una base sin ese módulo, y en vez de
+ * "el modelo no existe" salió esa frase.
+ *
+ * El motivo está en la cadena de `cause`, así que se baja hasta el último que
+ * tenga mensaje. Tope de saltos por si alguna vez viene circular.
+ *
+ * @param {unknown} e  lo que se atrapó
+ * @returns {string} el mensaje más específico que haya
+ */
+export function motivoDeVerdad(e) {
+    let actual = e;
+    let mensaje = "";
+    for (let i = 0; i < 5 && actual; i++) {
+        const propio = typeof actual === "string" ? actual : actual?.message;
+        if (propio && !/owl lifecycle/i.test(propio)) {
+            mensaje = propio;
+        }
+        actual = actual?.cause;
+    }
+    if (mensaje) {
+        return mensaje;
+    }
+    return typeof e === "string" ? e : e?.message || String(e);
+}
+
+/**
  * Los botones que la persona puede clickear en la pantalla abierta.
  *
  * POR QUÉ VIAJAN. Sin esto el modelo tiene que ADIVINAR cómo se llama un botón, y
@@ -1803,7 +1835,7 @@ export const tuquiAssistantService = {
                     // existe. Se lo decimos a la persona: un form que no se abre y
                     // no explica por qué es indistinguible de una pantalla colgada.
                     notification.add(
-                        _t("Could not open that record in Odoo: %s", e.message || e),
+                        _t("Could not open that record in Odoo: %s", motivoDeVerdad(e)),
                         { type: "danger" }
                     );
                     return false;
@@ -1843,7 +1875,7 @@ export const tuquiAssistantService = {
                     );
                 } catch (e) {
                     notification.add(
-                        _t("Could not open the view in Odoo: %s", e.message || e),
+                        _t("Could not open the view in Odoo: %s", motivoDeVerdad(e)),
                         { type: "danger" }
                     );
                     return false;
@@ -1869,7 +1901,7 @@ export const tuquiAssistantService = {
                 });
             } catch (e) {
                 notification.add(
-                    _t("Could not open the new form in Odoo: %s", e.message || e),
+                    _t("Could not open the new form in Odoo: %s", motivoDeVerdad(e)),
                     { type: "danger" }
                 );
                 return false;
