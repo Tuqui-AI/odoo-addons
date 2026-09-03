@@ -283,6 +283,44 @@ export function motivoDeVerdad(e) {
 }
 
 /**
+ * Por qué no se pudo abrir una vista, en algo que una persona pueda leer.
+ *
+ * Desenvolver el error de Owl deja de mandar a mirar una propiedad de
+ * JavaScript, pero lo que queda abajo tampoco explica nada: para un modelo que
+ * no existe, Odoo contesta `404: Not Found`. Así que en el camino de FALLA —y
+ * sólo ahí, que es lo que hace que la consulta extra no cueste nada en el camino
+ * bueno— se le pregunta a Odoo si ese modelo existe, y si no existe se dice eso,
+ * que es la mitad de la respuesta que la persona necesita.
+ *
+ * Medido: le pidieron la configuración del sitio web en una base sin ese módulo.
+ *
+ * @param {unknown} e  lo que se atrapó
+ * @param {string} model  el modelo que se quiso abrir
+ * @param {object} orm  el servicio `orm`
+ * @returns {Promise<string>}
+ */
+export async function porQueNoSePudoAbrir(e, model, orm) {
+    const motivo = motivoDeVerdad(e);
+    // `404` y `Unknown model` son las dos formas en que Odoo cuenta lo mismo, y
+    // ninguna de las dos nombra el modelo.
+    if (model && /(404|not found|unknown model)/i.test(motivo)) {
+        try {
+            const existe = await orm.searchCount("ir.model", [["model", "=", model]]);
+            if (!existe) {
+                return _t(
+                    "the model '%s' does not exist in this database — that app is probably not installed",
+                    model
+                );
+            }
+        } catch {
+            // Si ni eso se puede consultar, se devuelve lo que había: peor un
+            // motivo pobre que ninguno.
+        }
+    }
+    return motivo;
+}
+
+/**
  * Los botones que la persona puede clickear en la pantalla abierta.
  *
  * POR QUÉ VIAJAN. Sin esto el modelo tiene que ADIVINAR cómo se llama un botón, y
@@ -1835,7 +1873,7 @@ export const tuquiAssistantService = {
                     // existe. Se lo decimos a la persona: un form que no se abre y
                     // no explica por qué es indistinguible de una pantalla colgada.
                     notification.add(
-                        _t("Could not open that record in Odoo: %s", motivoDeVerdad(e)),
+                        _t("Could not open that record in Odoo: %s", await porQueNoSePudoAbrir(e, model, orm)),
                         { type: "danger" }
                     );
                     return false;
@@ -1875,7 +1913,7 @@ export const tuquiAssistantService = {
                     );
                 } catch (e) {
                     notification.add(
-                        _t("Could not open the view in Odoo: %s", motivoDeVerdad(e)),
+                        _t("Could not open the view in Odoo: %s", await porQueNoSePudoAbrir(e, model, orm)),
                         { type: "danger" }
                     );
                     return false;
@@ -1901,7 +1939,7 @@ export const tuquiAssistantService = {
                 });
             } catch (e) {
                 notification.add(
-                    _t("Could not open the new form in Odoo: %s", motivoDeVerdad(e)),
+                    _t("Could not open the new form in Odoo: %s", await porQueNoSePudoAbrir(e, model, orm)),
                     { type: "danger" }
                 );
                 return false;
