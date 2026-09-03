@@ -64,7 +64,13 @@ class TestTuquiAccessLogRetention(TransactionCase):
                 self.assertEqual(self.AccessLog._max_rows(), expected)
 
     def test_max_rows_without_parameter_is_the_default(self):
-        """Unconfigured — the common case — resolves to the documented default."""
+        """With the parameter gone, the cap falls back to the module default.
+
+        The module seeds ``tuqui.access_log.max_rows`` on install
+        (``data/ir_config_parameter_data.xml``), so an unconfigured database is
+        the exception and not the rule — this covers the fallback for a base
+        where the record was removed.
+        """
         self.ICP.search([("key", "=", _MAX_ROWS_PARAM)]).unlink()
         self.assertEqual(self.AccessLog._max_rows(), _DEFAULT_MAX_ROWS)
 
