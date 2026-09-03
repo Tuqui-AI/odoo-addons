@@ -68,6 +68,43 @@ class IrHttp(models.AbstractModel):
         value = (value or "").strip()
         return value or None
 
+    def session_info(self):
+        """Apagar los tours cuando esta pantalla se está mostrando embebida.
+
+        POR QUÉ, Y ES UN BUG DE ODOO. Con un tour de onboarding pendiente, el
+        webclient dentro de un iframe de otro origen **le crashea la pestaña**:
+        el puntero del tour busca el documento del padre, eso tira
+        ``SecurityError`` en bucle y explota la memoria del renderer. Medido:
+        con un solo tour pendiente el navegador se cae; con ese tour consumido,
+        anda perfecto.
+
+        Odoo YA intenta evitarlo — ``tour_service.js`` arranca los tours dentro
+        de ``if (!window.frameElement)`` —, pero ``window.frameElement``
+        devuelve ``null`` cuando el padre es de OTRO origen, así que la guarda
+        se cumple justo en el caso que quería prevenir. Es una línea, y es de
+        Odoo, no nuestra: corresponde reportarla arriba.
+
+        Mientras tanto, acá se corta de raíz: si el pedido es la navegación de
+        un iframe, el ``session_info`` sale con los tours apagados. Se apagan
+        las DOS puertas —``tour_enabled`` y ``current_tour``— porque el JS
+        arranca un tour por cualquiera de las dos.
+
+        NO se toca la preferencia guardada del usuario: esto es por pedido, así
+        que su Odoo de siempre sigue mostrándole el onboarding igual.
+        """
+        info = super().session_info()
+        if not self._tuqui_embed_origins():
+            return info
+        # `Sec-Fetch-Dest` lo pone el browser y no se puede falsificar desde
+        # JS. `iframe` es exactamente "esta navegación es la de un frame".
+        if (request.httprequest.headers.get("Sec-Fetch-Dest") or "").lower() != "iframe":
+            return info
+        if "tour_enabled" in info:
+            info["tour_enabled"] = False
+        if "current_tour" in info:
+            info["current_tour"] = False
+        return info
+
     @classmethod
     def _post_dispatch(cls, response):
         super()._post_dispatch(response)

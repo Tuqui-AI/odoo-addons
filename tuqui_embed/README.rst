@@ -35,6 +35,10 @@ Qué hace exactamente
 **Permite el frame** desde los orígenes de la lista: saca el ``X-Frame-Options``
 y responde ``Content-Security-Policy: frame-ancestors 'self' <lista>``.
 
+Y **apaga los tours de onboarding cuando la pantalla se muestra embebida**, que
+no es un agregado sino la diferencia entre "se ve" y "se puede usar" — ver
+"El crash de los tours" más abajo.
+
 El ``'self'`` VA SIEMPRE. Odoo embebe sus propias páginas en iframes del mismo
 origen —el visor de PDF y de texto, el preview de reportes— y una lista sin
 ``'self'`` los deja en blanco para TODA la base en cuanto se prende el switch.
@@ -120,6 +124,63 @@ devolvió vacío para uno de los dos pedidos, así que es hipótesis, no medici�
 Con el panel same-site no hay nada que aflojar, así que ninguno de los dos
 vectores se abre. Eso es lo que hace que este módulo no tenga una decisión de
 seguridad pendiente.
+
+El crash de los tours: un bug de Odoo, y su workaround
+======================================================
+
+Con un tour de onboarding en curso, este webclient dentro de un iframe de otro
+origen **le crashea la pestaña**: el puntero del tour busca el documento del
+padre, eso tira ``SecurityError`` en bucle (59 contados en pocos segundos) y se
+lleva la memoria del renderer.
+
+**El tour no arranca en el panel: arranca en el Odoo de siempre.** El usuario
+entra, el tour empieza y deja su estado en ``localStorage``; después abre el
+panel —mismo origen, mismo ``localStorage``— y el tour se REANUDA adentro del
+iframe.
+
+**La causa raíz es una línea de Odoo.** ``web_tour/tour_service.js`` ya intenta
+evitarlo: arranca y reanuda tours dentro de ``if (!window.frameElement)``. Pero
+``window.frameElement`` devuelve ``null`` cuando el padre es de OTRO origen, así
+que la guarda se cumple justo en el caso que quería prevenir. La condición que
+sí funciona cross-origin es ``window.top !== window.self``. **Corresponde
+reportarlo upstream.**
+
+Mientras tanto, el módulo lo tapa por los dos lados:
+
+- **Servidor** (``models/ir_http.py``): si el pedido es la navegación de un
+  iframe (``Sec-Fetch-Dest: iframe``), el ``session_info`` sale con
+  ``tour_enabled`` y ``current_tour`` apagados. Evita que un tour ARRANQUE
+  dentro del panel.
+- **Cliente** (``static/src/no_tours_when_framed.js``): la puerta que importa.
+  ``tourState.getCurrentTour()`` devuelve ``null`` dentro de un frame, así que
+  no hay nada que reanudar. La reanudación lee ``localStorage``, no el
+  ``session_info``, y por eso el lado servidor solo no alcanzaba.
+
+**Medido, con el par que discrimina** (un tour pendiente en los dos casos):
+
+====================  ===========================  ==============
+Dónde                 ¿Arranca/reanuda el tour?    ¿Crashea?
+====================  ===========================  ==============
+Top-level (su Odoo)   **Sí** — onboarding intacto  No
+Dentro del panel      **No**                       No, 0 errores
+====================  ===========================  ==============
+
+Antes del arreglo: 59 ``SecurityError`` y pestaña muerta. Después: 0 errores y
+el bundle del tour ni se descarga.
+
+Dos cosas que se decidieron y conviene no revertir sin leer esto:
+
+- **No se saca ``tour_service`` del registry**, aunque sería más directo: el
+  widget de onboarding y el POS hacen ``useService("tour_service")`` y
+  reventarían al renderizar.
+- **No se borra el progreso del usuario.** Se devuelve ``null`` sólo dentro del
+  frame; el ``localStorage`` queda intacto, así que en su Odoo de siempre el
+  tour sigue donde lo dejó. Hay un test que fija justamente que no se borre.
+
+Y se descartó falsificar ``window.frameElement`` para que la guarda de Odoo
+funcionara sola: es una línea, pero hay código de ``website`` y del editor que
+USA ese elemento (``dispatchEvent``, ``ownerDocument``), así que habría
+cambiado un crash de tours por roturas en otro lado.
 
 El riesgo que sí queda, y es mucho más chico
 ============================================
