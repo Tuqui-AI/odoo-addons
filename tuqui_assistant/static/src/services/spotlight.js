@@ -97,6 +97,9 @@ const ANCHO_QUE_YA_ES_UNA_ZONA = 120;
 /** Cuánto del principio del campo se toma como "el lugar del clic". */
 const ANCHO_DEL_PUNTO_DE_CLIC = 24;
 
+/** Lo que mide la gota cerrada: `TourPointer.width`, que es 28 desde la 17. */
+const ANCHO_DE_LA_GOTA = 28;
+
 /**
  * El texto de un elemento, comparable.
  *
@@ -597,25 +600,7 @@ export function makeSpotlight(overlay, deps = {}) {
         abierto = false;
         marcar(el);
         if (hint) {
-            desatar = atarHover(
-                pointer,
-                el,
-                hint,
-                (v) => (abierto = v),
-                () => {
-                    if (mia !== generacion || !pointer || claveDelRegistro() !== claveInicial) {
-                        return;
-                    }
-                    const actual = findSpotlightTarget(payload || {});
-                    if (!actual) {
-                        return;
-                    }
-                    // Soltarlas es lo que fuerza un ancla NUEVA en `alPuntoDeClic`,
-                    // y el ancla nueva es lo que suelta el bloqueo del puntero.
-                    soltarAnclas(anclas);
-                    marcar(actual);
-                },
-            );
+            desatar = atarHover(pointer, el, hint, (v) => (abierto = v));
         } else {
             desatar = null;
         }
@@ -673,12 +658,11 @@ export function makeSpotlight(overlay, deps = {}) {
  * @param {HTMLElement} anchor  el campo de verdad, no el ancla
  * @param {string} hint  el texto, que sólo vive en el puntero mientras está abierto
  * @param {(abierto: boolean) => void} anotar  para que la marca sepa su estado
- * @param {() => void} reapuntar  se llama al cerrar: ver el comentario de `cerrar`
  * @returns {() => void} para despegar los listeners cuando la gota se mueve o se
  *   apaga. Sin esto, el campo de la marca anterior seguiría abriendo un texto que
  *   ya no le corresponde.
  */
-function atarHover(pointer, anchor, hint, anotar = () => {}, reapuntar = () => {}) {
+function atarHover(pointer, anchor, hint, anotar = () => {}) {
     const abrir = () => {
         anotar(true);
         // El texto y "abierto" en el MISMO cambio de estado: así el dibujo que
@@ -692,27 +676,8 @@ function atarHover(pointer, anchor, hint, anotar = () => {}, reapuntar = () => {
     };
     const cerrar = () => {
         anotar(false);
+        colapsarElGlobo();
         pointer.showContent(false);
-        // Y UN FRAME DESPUÉS SE VUELVE A APUNTAR, CON UN ANCLA NUEVA. El dibujo
-        // que cierra el globo calcula la posición con el ancho del cartel todavía
-        // puesto y deja la gota `(ancho − 28) / 2` a la izquierda —120 px medidos
-        // con un texto largo—, y ahí mismo el puntero SE AUTO-BLOQUEA con esa
-        // posición: el ancla es la misma y no se movió (`tour_pointer.js:140-161`).
-        // Un `setState` no lo despierta, porque el bloqueo corta el recálculo. Lo
-        // único que lo suelta es un ancla que no sea "la misma", y entonces el
-        // recálculo sale con los 28 px que ya tiene puestos.
-        //
-        // Y son DOS pasadas, no una: el `position.unlock()` del puntero corre en su
-        // efecto, o sea DESPUÉS del cálculo de posición de ese mismo dibujo. La
-        // primera pasada, entonces, sólo destraba; la segunda es la que recalcula.
-        //
-        // Sin esto, pasar el mouse por encima MOVÍA la marca — que es lo peor que
-        // puede hacer algo cuyo único trabajo es decir "acá". Lo reportó Gonza
-        // probándolo en un Odoo real.
-        requestAnimationFrame(() => {
-            reapuntar();
-            requestAnimationFrame(reapuntar);
-        });
     };
     pointer.setState({ onMouseEnter: abrir, onMouseLeave: cerrar });
     anchor.addEventListener("mouseenter", abrir);
@@ -722,4 +687,47 @@ function atarHover(pointer, anchor, hint, anotar = () => {}, reapuntar = () => {
         anchor.removeEventListener("mouseleave", cerrar);
         pointer.setState({ onMouseEnter: null, onMouseLeave: null });
     };
+}
+
+/**
+ * Devolver el globo a 28 px A MANO, un tick antes de cerrarlo.
+ *
+ * ES LO QUE HACE QUE SALIR DEL HOVER NO MUEVA LA MARCA. En `tour_pointer.js` el
+ * `usePosition` está declarado ANTES del efecto que fija el ancho, y los efectos
+ * corren en orden de declaración: **cada dibujo calcula su posición con el ancho
+ * del dibujo ANTERIOR**. El que cierra el globo, entonces, la calcula con el
+ * ancho del CARTEL y centra ahí una gota de 28 px: se iba `(ancho − 28) / 2` a la
+ * izquierda, y con un texto largo hasta el borde de la pantalla (medido: `left`
+ * pasaba de 111 px a 0,9 px). Escribiéndole nosotros el ancho que el puntero se
+ * va a escribir igual, ese cálculo ya sale con los 28 px puestos.
+ *
+ * Al ABRIRSE no hace falta nada, porque ahí el desfasaje juega a favor: la
+ * posición se calcula con los 28 px que la gota todavía tiene, y desde ahí el
+ * cartel se expande hacia la derecha con la flecha —pegada a su borde izquierdo—
+ * quedando sobre el campo.
+ *
+ * Los dos caminos que NO funcionan, para no volver a recorrerlos:
+ *
+ * - **Corregir después.** Un `unlock()` dice recalcular en el acto, pero el guard
+ *   de batching de `usePosition` se come el pedido si viene desde un efecto; y
+ *   corregir un frame más tarde deja frames pintados en el lugar equivocado —
+ *   medidos: dos frames, 121 px.
+ * - **Dejar que el puntero se auto-bloquee.** Existe (`tour_pointer.js:150`) y
+ *   sería lo ideal, pero pedir el dibujo que lo dispara no se puede desde afuera:
+ *   `rev` no lo lee el template, y los handlers del hover tampoco —Owl compila los
+ *   `t-on-*` para evaluarlos al disparar el evento, no al dibujar—. Y además hacen
+ *   falta tres dibujos cerrados, porque el puntero compara el movimiento del ancla
+ *   contra dos variables que arrancan en `[0, 0]`.
+ */
+function colapsarElGlobo() {
+    const el = document.querySelector(".o_tour_pointer");
+    if (!el) {
+        return;
+    }
+    // Sin transición, igual que hace el propio puntero al cerrarse: con la
+    // animación puesta, el ancho medido sigue siendo el del cartel durante los
+    // 200 ms y el cálculo saldría igual de corrido.
+    el.style.transition = "none";
+    el.style.width = `${ANCHO_DE_LA_GOTA}px`;
+    el.style.height = `${ANCHO_DE_LA_GOTA}px`;
 }

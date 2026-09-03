@@ -832,19 +832,20 @@ describe("la gota cae donde se hace clic", () => {
         form.remove();
     });
 
-    test("y al salir del hover se re-apunta DOS veces con anclas nuevas", async () => {
-        // Lo reportó Gonza probándolo en un Odoo real: pasabas el mouse por encima
-        // y la marca QUEDABA CORRIDA 120 px a la izquierda. Medido: el dibujo que
-        // cierra el globo calcula la posición con el ancho del cartel todavía
-        // puesto y ahí mismo el puntero se auto-bloquea con esa posición. Un ancla
-        // nueva es lo único que lo suelta, y hacen falta DOS pasadas porque su
-        // `unlock()` corre en el efecto, después del cálculo de ese dibujo: la
-        // primera destraba, la segunda recalcula.
+    test("al salir del hover la marca NO se toca: la sostiene el bloqueo del puntero", async () => {
+        // Lo reportó Gonza probándolo en un Odoo real, en dos etapas: primero la
+        // marca QUEDABA CORRIDA 120 px a la izquierda al salir del hover, y con un
+        // arreglo a medias —corregirla después— SALTABA ahí por 33 ms, dos frames
+        // pintados, medidos frame por frame.
+        //
+        // Lo que la sostiene es el auto-bloqueo del puntero, y para eso hay que
+        // conseguir un segundo dibujo mientras está cerrada: ver `fijarLaPosicion`.
+        // Cerrar, entonces, no re-apunta nada.
         const { form, handle, calls, campo } = harnessAncho(500);
         await handle.spotlight({ field: "campo", hint: "algo que explica" });
         await asentada();
         const antes = apuntados(calls).length;
-        const anclaVieja = document.querySelector("[data-tuqui-ancla]");
+        const ancla = document.querySelector("[data-tuqui-ancla]");
 
         campo.dispatchEvent(new MouseEvent("mouseenter"));
         await animationFrame();
@@ -852,16 +853,41 @@ describe("la gota cae donde se hace clic", () => {
         await asentada();
 
         expect(ultimoAbierto(calls)).toBe(false);
-        expect(apuntados(calls).length).toBe(antes + 2);
-        // Y el ancla que quedó es OTRA: si fuera la misma, el puntero seguiría
-        // bloqueado en la posición del globo abierto.
-        const ancla = document.querySelector("[data-tuqui-ancla]");
-        expect(ancla).not.toBe(anclaVieja);
-        expect(document.querySelectorAll("[data-tuqui-ancla]").length).toBe(1);
-        // Cerrada otra vez, sin texto: el cartel sólo vive mientras está abierta.
-        expect(apuntados(calls).at(-1).step.content).toBe("");
+        // Ni un apuntado más, y la misma ancla: mover cualquiera de las dos cosas
+        // suelta el bloqueo y la marca se va de lugar.
+        expect(apuntados(calls).length).toBe(antes);
+        expect(document.querySelector("[data-tuqui-ancla]")).toBe(ancla);
 
         handle.destroy();
+        form.remove();
+    });
+
+    test("y el globo vuelve a 28 px ANTES de cerrarse, no después", async () => {
+        // Es lo que hace que salir del hover no mueva la marca: el dibujo que
+        // cierra calcula la posición con el ancho del dibujo anterior, así que si
+        // el cartel todavía mide 268 px la gota se va a la izquierda. Ver
+        // `colapsarElGlobo`. Se afirma sobre el DOM del puntero real, que es lo
+        // que el cálculo de Odoo va a medir.
+        const { form, handle, campo } = harnessAncho(500);
+        // Un puntero de mentira no tiene DOM, así que este test necesita el
+        // elemento: se pone uno con la clase que busca `colapsarElGlobo`.
+        const falso = document.createElement("div");
+        falso.className = "o_tour_pointer";
+        falso.style.cssText = "position:fixed;left:0;top:0;width:268px;height:60px";
+        document.body.appendChild(falso);
+        await handle.spotlight({ field: "campo", hint: "algo que explica" });
+        await asentada();
+
+        campo.dispatchEvent(new MouseEvent("mouseenter"));
+        await animationFrame();
+        campo.dispatchEvent(new MouseEvent("mouseleave"));
+
+        // Sin esperar un frame: ya tiene que estar colapsado.
+        expect(falso.style.width).toBe("28px");
+        expect(falso.style.transition).toBe("none");
+
+        handle.destroy();
+        falso.remove();
         form.remove();
     });
 
