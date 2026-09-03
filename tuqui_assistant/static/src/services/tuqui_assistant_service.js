@@ -8,6 +8,7 @@ import {
     serializeDate,
     serializeDateTime,
 } from "@web/core/l10n/dates";
+import { evaluateBooleanExpr } from "@web/core/py_js/py";
 
 // Luxon es un global en Odoo, no un import ESM — igual que en
 // web/static/src/core/l10n/dates.js.
@@ -153,6 +154,169 @@ function normalizeX2manyValue(value) {
         }
         return el; // forma desconocida: no la tocamos (que falle visible, no en silencio)
     });
+}
+
+/**
+ * Los campos que el ARCH deja fuera de la pantalla, leídos ocurrencia por
+ * ocurrencia.
+ *
+ * POR QUÉ HACE FALTA, Y ES EL BORDE QUE MÁS ENGAÑA. `activeFields[campo].invisible`
+ * trae SÓLO el modificador del propio nodo `<field>`. El `invisible` de un
+ * `<group>`, una `<page>` o un `<div>` que lo contiene se compila a un `t-if` del
+ * template y **nunca toca `activeFields`** — así que el evaluador de Odoo dice
+ * que el campo se ve, el valor viaja, y el campo no está en el DOM. Como el
+ * contrato de este mapa es "un campo ausente es normal", el modelo lee *visible*
+ * sobre algo que la persona no tiene delante: exactamente la falla que este
+ * contexto existe para evitar. Medido sobre 324 modelos: **20,19% de los campos
+ * top-level** están en esa situación.
+ *
+ * EL ORDEN DE LA CUENTA ES EL QUE IMPORTA, y es la parte que se puede hacer mal
+ * sin que se note: por CADA ocurrencia se pregunta si la esconde su propio
+ * modificador **o** alguno de sus ancestros, y recién después se combinan las
+ * ocurrencias entre sí. Calcular los dos ejes por separado —el AND de los
+ * propios por un lado, el AND de los ancestros por el otro, y un OR al final—
+ * deja pasar el patrón más común de Odoo: el mismo campo puesto dos veces, una
+ * como `<field invisible="1"/>` técnico y otra adentro de un contenedor
+ * condicional. Ahí ninguna de las dos se dibuja y ninguno de los dos ejes lo
+ * marca. En los formularios del core de la 19 hay 20 campos así — `qr_code` en
+ * los pagos, tres de gastos, tres de configuración del PdV, `pricelist_id` en
+ * ventas — y en todos la mentira sale justo del lado peligroso.
+ *
+ * `field:not(field field)` es el mismo idioma que usa Odoo (`form_controller.js`,
+ * el barrido de `footer`) para saltear lo que vive dentro de otro `<field>`: un
+ * x2many embebido trae su propia vista, y sus campos no son de este formulario.
+ *
+ * Sólo `invisible`: un `readonly` o un `required` puestos en un ancestro **no se
+ * propagan ni al render**, así que para esos dos el mapa ya estaba bien.
+ *
+ * @param {Object} xmlDoc  el arch del formulario (`archInfo.xmlDoc`)
+ * @param {Object} record  el record OWL, para evaluar la condición
+ * @returns {Set<string>}
+ */
+function camposOcultosSegunElArch(xmlDoc, record) {
+    const ocultos = new Set();
+    if (!xmlDoc?.querySelectorAll || !record) {
+        return ocultos;
+    }
+    const ctx = record.evalContextWithVirtualIds || {};
+    /** Por campo: cuántas veces aparece en el arch y cuántas están escondidas. */
+    const cuenta = new Map();
+    for (const nodo of xmlDoc.querySelectorAll("field:not(field field)")) {
+        const nombre = nodo.getAttribute?.("name");
+        if (!nombre) {
+            continue;
+        }
+        // Arranca en el PROPIO nodo, no en su padre: para esta ocurrencia da lo
+        // mismo que la esconda su modificador o el del `<group>` de arriba.
+        let escondida = false;
+        let el = nodo;
+        while (el && !escondida) {
+            const expr = el.getAttribute?.("invisible");
+            try {
+                if (expr && evaluateBooleanExpr(expr, ctx)) {
+                    escondida = true;
+                }
+            } catch {
+                // Una condición que no se puede evaluar no esconde nada: el
+                // default es dejar pasar, como antes de este chequeo.
+            }
+            el = el.parentElement;
+        }
+        const previo = cuenta.get(nombre) || { veces: 0, escondidas: 0 };
+        cuenta.set(nombre, {
+            veces: previo.veces + 1,
+            escondidas: previo.escondidas + (escondida ? 1 : 0),
+        });
+    }
+    // UN CAMPO QUE APARECE DOS VECES ESTÁ OCULTO SÓLO SI LAS DOS ESTÁN OCULTAS,
+    // y esto no es un detalle: el patrón de dos ramas mutuamente excluyentes
+    // —el mismo campo en dos `<div>` con condiciones opuestas— es común en los
+    // formularios de Odoo. Marcarlo con que UNA esté escondida daba el campo por
+    // invisible cuando la persona lo tiene delante en la otra rama, y de paso
+    // hacía descartar una propuesta legítima.
+    //
+    // Es la misma regla que usa Odoo al fusionar dos nodos del mismo campo:
+    // `patchActiveFields` combina el `invisible` con AND (utils.js:174).
+    for (const [nombre, { veces, escondidas }] of cuenta) {
+        if (veces > 0 && escondidas === veces) {
+            ocultos.add(nombre);
+        }
+    }
+    return ocultos;
+}
+
+/**
+ * ¿Se puede confiar en el estado que reporta este record?
+ *
+ * Los tres evaluadores se llaman con `?.()`, y eso degrada en silencio HACIA EL
+ * LADO PELIGROSO: si una versión de Odoo renombra sólo `_isInvisible`, el mapa no
+ * queda vacío — queda sin ningún `invisible`, que es indistinguible de "todos los
+ * campos se ven". Por eso se chequea una vez y se dice, en vez de inferirlo del
+ * vacío del otro lado.
+ */
+function evaluadoresDisponibles(record) {
+    return (
+        typeof record?._isInvisible === "function" &&
+        typeof record?._isReadonly === "function" &&
+        typeof record?._isRequired === "function"
+    );
+}
+
+/**
+ * El ESTADO de los campos del formulario abierto: cuáles se ven, cuáles se
+ * pueden escribir, cuáles son obligatorios.
+ *
+ * POR QUÉ HACE FALTA. Hasta acá el asistente recibía los VALORES de los campos y
+ * nada de su estado, así que sabía qué dice cada campo pero no cuáles están en la
+ * pantalla. De ahí salieron tres fallas distintas que son la misma: marcó un
+ * campo que la configuración de ese registro tenía oculto; dijo "te lo señalé"
+ * sobre una marca que no podía caer; y propuso escribir en campos de sólo
+ * lectura, porque el único chequeo posible era la definición ESTÁTICA del campo y
+ * la mitad de los readonly de Odoo son condicionales.
+ *
+ * Odoo ya resuelve las tres preguntas contra el registro concreto —con sus
+ * condiciones evaluadas— y lo único que faltaba era transportarlo.
+ *
+ * SÓLO VIAJAN LAS EXCEPCIONES. Un formulario tiene decenas de campos y casi todos
+ * son visibles, editables y opcionales; mandar tres booleanos por cada uno
+ * engordaría cada mensaje para no decir nada. Un campo ausente de este mapa es un
+ * campo normal.
+ *
+ * @param {Object} record  el record OWL del formulario abierto
+ * @returns {Object} `{campo: {invisible?, readonly?, required?}}`, sólo con lo anómalo
+ */
+function serializeFieldState(record, ocultosSegunElArch = new Set()) {
+    const activos = record?.activeFields || {};
+    const out = {};
+    for (const name of Object.keys(activos)) {
+        try {
+            const estado = {};
+            // Métodos internos de Odoo (`_isInvisible` y compañía). Se usan igual
+            // porque son los que EVALÚAN la condición contra este registro, que es
+            // justamente el dato que no se puede reconstruir desde afuera. Cada
+            // campo va en su propio try: si una versión los renombra, se pierde el
+            // estado de los campos y no el contexto entero.
+            // El OR con lo que dice el arch es lo que hace honesto a este mapa:
+            // el evaluador de Odoo no ve los ancestros, y al fusionar dos nodos
+            // del mismo campo pierde de vista que las dos ocurrencias podían
+            // estar escondidas por motivos distintos.
+            if (record._isInvisible?.(name) || ocultosSegunElArch.has(name)) {
+                estado.invisible = true;
+            }
+            if (record._isReadonly?.(name)) {
+                estado.readonly = true;
+            }
+            if (record._isRequired?.(name)) {
+                estado.required = true;
+            }
+            if (Object.keys(estado).length) {
+                out[name] = estado;
+            }
+        } catch {
+            // Un campo que no se puede evaluar no tira abajo el resto.
+        }
+    }
+    return out;
 }
 
 /**
@@ -828,6 +992,25 @@ export const tuquiAssistantService = {
             const ctx = { ...state.context };
             if (ctx.kind === "record" && activeRecord) {
                 ctx.dirty = Boolean(activeRecord.dirty);
+                // Qué se ve, qué se puede escribir y qué es obligatorio. Sin esto
+                // el asistente conoce los valores pero no la pantalla.
+                //
+                // VA ANTES DE `fields`, Y ES A PROPÓSITO. El consumidor serializa
+                // este objeto entero y lo CORTA en 8000 caracteres (`prompts.py`,
+                // `payload_truncated`). En un account.move o un sale.order los
+                // valores solos se acercan a ese tope, así que la última clave es
+                // la primera en desaparecer — y sería justo el estado, que es lo
+                // único que no se puede reconstruir del otro lado. Puesto antes,
+                // lo que se pierde es la cola de los VALORES, igual que antes de
+                // que este mapa existiera. Ocupa poco: sólo viajan las
+                // excepciones.
+                const ocultos = camposOcultosSegunElArch(_owner?.archInfo?.xmlDoc, activeRecord);
+                ctx.fieldState = serializeFieldState(activeRecord, ocultos);
+                // Sólo viaja la excepción: si el mapa NO es confiable se dice, y
+                // del otro lado el prompt deja de leer "ausente" como "normal".
+                if (!evaluadoresDisponibles(activeRecord)) {
+                    ctx.fieldStateUnavailable = true;
+                }
                 ctx.fields = serializeRecordFields(activeRecord);
             }
             // Aplanar a JSON puro: arranca los Proxies reactivos (domain/filters/
@@ -874,10 +1057,59 @@ export const tuquiAssistantService = {
             // subject} sobre un res.partner) reventaba _update con un error JS sin
             // atrapar; ahora se ignoran y, si no queda nada válido, se avisa y corta.
             const fieldDefs = activeRecord.fields || {};
+            const enPantalla = activeRecord.activeFields || {};
+            // Un campo que el arch deja fuera de la pantalla está igual en
+            // `activeFields`: escribirlo deja un cambio que la persona no puede
+            // ver ni revisar antes de guardar, igual que un campo de otra vista.
+            const ocultosSegunElArch = camposOcultosSegunElArch(
+                _owner?.archInfo?.xmlDoc,
+                activeRecord
+            );
             const known = {};
             const dropped = [];
             for (const [name, value] of Object.entries(changes)) {
-                if (!fieldDefs[name] || fieldDefs[name].readonly === true) {
+                // Primero que el campo EXISTA Y ESTÉ EN ESTE FORMULARIO. Son dos
+                // conjuntos distintos: `fields` es el fields_get de TODAS las
+                // vistas de la acción —lista y buscador incluidos— así que trae
+                // campos que este form no muestra. Escribir uno de esos deja un
+                // cambio que la persona no puede ver ni revisar antes de guardar,
+                // que es exactamente lo que este chequeo existe para evitar.
+                //
+                // Y es lo mismo que hacía reventar al evaluador de abajo: lee
+                // `activeFields[campo]` sin chequear que exista, tiraba TypeError,
+                // el catch lo tapaba y el chequeo caía al readonly ESTÁTICO justo
+                // en los campos que no están en pantalla.
+                // El `invisible` PROPIO del campo cuenta igual que el del grupo
+                // que lo contiene: en los dos casos la persona no lo tiene
+                // delante, y escribirlo deja un cambio que no puede revisar. El
+                // arch resuelve los dos; se le pregunta igual al evaluador de
+                // Odoo, que es el único que ve lo que no salió del arch de este
+                // formulario (el `invisible` que hereda un x2many, por ejemplo).
+                let fueraDeLaVista = ocultosSegunElArch.has(name);
+                try {
+                    fueraDeLaVista = fueraDeLaVista || Boolean(activeRecord._isInvisible?.(name));
+                } catch {
+                    // Un campo que no se puede evaluar no se descarta por eso.
+                }
+                if (!fieldDefs[name] || !(name in enPantalla) || fueraDeLaVista) {
+                    dropped.push(name);
+                    continue;
+                }
+                // El readonly se pregunta EVALUADO contra este registro, no en la
+                // definición del campo. La mitad de los readonly de Odoo son
+                // condicionales —"sólo lectura si el pedido está confirmado"— y la
+                // definición estática los da como editables: la propuesta pasaba el
+                // filtro y `_update` la aplicaba sobre un campo que la persona no
+                // puede tocar. Se cae al chequeo estático si el método no está.
+                let soloLectura = fieldDefs[name].readonly === true;
+                try {
+                    if (activeRecord._isReadonly) {
+                        soloLectura = activeRecord._isReadonly(name);
+                    }
+                } catch {
+                    // Queda el chequeo estático.
+                }
+                if (soloLectura) {
                     dropped.push(name);
                 } else {
                     known[name] = value;

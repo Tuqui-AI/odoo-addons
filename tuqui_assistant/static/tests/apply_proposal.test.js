@@ -76,6 +76,135 @@ async function mountPartnerForm() {
     return getService("tuquiAssistant");
 }
 
+/** Un formulario con los tres estados que importan, y uno de ellos CONDICIONAL:
+ *  `email` se esconde según el valor de otro campo, que es el caso que la
+ *  definición estática del campo no puede contar. */
+const FORM_ARCH_ESTADOS = `
+    <form>
+        <field name="name" required="1"/>
+        <field name="active"/>
+        <field name="email" invisible="active"/>
+        <field name="ref"/>
+        <field name="fecha"/>
+    </form>`;
+
+async function mountFormConEstados(resId = 1) {
+    await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_ESTADOS });
+    return getService("tuquiAssistant");
+}
+
+/** Un formulario donde el que se esconde es el ANCESTRO, no el campo.
+ *
+ *  `email` no tiene modificador propio: el `invisible` está en el `<group>` que
+ *  lo contiene. Es el caso que el evaluador de Odoo no reporta, porque ese
+ *  `invisible` se compila a un `t-if` del template y nunca toca `activeFields`.
+ *
+ *  `fecha` es el CONTROL NEGATIVO: mismo formulario, un group sin condición.
+ *  Y el `<field name="child_ids">` con su lista adentro es el borde: los campos
+ *  de una vista embebida no son campos de este formulario. */
+const FORM_ARCH_ANCESTRO = `
+    <form>
+        <field name="active"/>
+        <field name="name"/>
+        <group invisible="active">
+            <field name="email"/>
+            <field name="child_ids">
+                <list editable="bottom">
+                    <field name="name"/>
+                </list>
+            </field>
+        </group>
+        <group>
+            <field name="fecha"/>
+        </group>
+    </form>`;
+
+/** El mismo campo DOS VECES, en dos ramas mutuamente excluyentes.
+ *
+ *  Es un patrón común en los formularios de Odoo: dos `<div>`/`<group>` con
+ *  condiciones opuestas y el mismo campo en cada uno. Con `active` en true, la
+ *  primera rama está escondida y la segunda visible — así que el campo SE VE. */
+const FORM_ARCH_DOS_RAMAS = `
+    <form>
+        <field name="active"/>
+        <group invisible="active">
+            <field name="email"/>
+            <field name="fecha"/>
+        </group>
+        <group invisible="not active">
+            <field name="email"/>
+        </group>
+    </form>`;
+
+async function mountFormDosRamas(resId = 1) {
+    await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_DOS_RAMAS });
+    return getService("tuquiAssistant");
+}
+
+/** Un campo que se esconde a SÍ MISMO, no por su grupo. */
+const FORM_ARCH_INVISIBLE_PROPIO = `
+    <form>
+        <field name="active"/>
+        <field name="email" invisible="active"/>
+        <field name="fecha"/>
+    </form>`;
+
+async function mountFormInvisiblePropio(resId = 1) {
+    await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_INVISIBLE_PROPIO });
+    return getService("tuquiAssistant");
+}
+
+/** El mismo campo DOS VECES, las dos escondidas, pero POR MOTIVOS DISTINTOS.
+ *
+ *  Es el patrón más común de Odoo: una ocurrencia técnica con `invisible="1"`
+ *  —para que el valor viaje y las condiciones lo puedan leer— y la ocurrencia
+ *  de verdad adentro de un contenedor condicional. Con `active` en true no se
+ *  dibuja ninguna de las dos, así que el campo NO está en la pantalla.
+ *
+ *  Es el caso que se cuela si los dos ejes se cuentan por separado: el AND de
+ *  los `invisible` propios da "se ve" (la segunda ocurrencia no tiene), el AND
+ *  de los ancestros también (la primera no está adentro de nada), y el OR de
+ *  los dos vuelve a dar "se ve". La cuenta tiene que ser por OCURRENCIA. */
+const FORM_ARCH_DOS_MOTIVOS = `
+    <form>
+        <field name="active"/>
+        <field name="email" invisible="1"/>
+        <group invisible="active">
+            <field name="email"/>
+        </group>
+        <field name="fecha"/>
+    </form>`;
+
+async function mountFormDosMotivos(resId = 1) {
+    await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_DOS_MOTIVOS });
+    return getService("tuquiAssistant");
+}
+
+async function mountFormConAncestro(resId = 1) {
+    await mountView({ type: "form", resModel: "res.partner", resId, arch: FORM_ARCH_ANCESTRO });
+    return getService("tuquiAssistant");
+}
+
+/** `email` es editable o no SEGÚN el valor de otro campo del mismo formulario.
+ *  Es el caso que la definición estática del campo no puede contar: `email` no
+ *  es readonly en el modelo, así que el chequeo viejo lo dejaba pasar siempre. */
+const FORM_ARCH_READONLY_CONDICIONAL = `
+    <form>
+        <field name="active"/>
+        <field name="email" readonly="active"/>
+        <field name="name"/>
+    </form>`;
+
+async function mountFormReadonlyCondicional(resId = 1) {
+    await mountView({
+        type: "form",
+        resModel: "res.partner",
+        resId,
+        arch: FORM_ARCH_READONLY_CONDICIONAL,
+    });
+    return getService("tuquiAssistant");
+}
+
 /**
  * Aplica una propuesta y espera el re-render.
  *
@@ -223,6 +352,40 @@ describe("applyProposal — one2many", () => {
     });
 });
 
+describe("applyProposal — readonly condicional", () => {
+    /* La rama nueva: el readonly se pregunta EVALUADO contra este registro.
+     *
+     * Los otros tests de descarte usan `ref`, que es readonly en la DEFINICIÓN
+     * del campo — ese caso ya lo agarraba el chequeo viejo, así que pasan igual
+     * con la rama nueva borrada. Estos dos no: el par mide justo el
+     * discriminador, el mismo campo del mismo formulario en los dos sentidos.
+     */
+
+    test("con la condición cumplida NO se escribe, aunque la definición diga que sí", async () => {
+        const assistant = await mountFormReadonlyCondicional();
+        const ok = await applyAndRender(assistant, {
+            email: "nuevo@example.com",
+            name: "Acme SA",
+        });
+        // Lo aplicable se aplica igual: descartar uno no aborta la propuesta.
+        expect(ok).toBe(true);
+        expect(".o_field_widget[name=name] input").toHaveValue("Acme SA");
+        // Y el condicional quedó como estaba: nunca un "ok" silencioso sobre un
+        // cambio que no ocurrió.
+        expect(assistant.getActiveRecord().data.email).toBe("acme@example.com");
+    });
+
+    test("y con la condición falsa sí se escribe: mismo campo, mismo formulario", async () => {
+        // El otro lado del par. Sin esto, al test de arriba lo aprobaría también
+        // un chequeo que descartara `email` siempre.
+        const assistant = await mountFormReadonlyCondicional();
+        await contains(".o_field_widget[name=active] input").click();
+        const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
+        expect(ok).toBe(true);
+        expect(assistant.getActiveRecord().data.email).toBe("nuevo@example.com");
+    });
+});
+
 describe("contexto vivo", () => {
     test("el contexto arranca en el record abierto", async () => {
         const assistant = await mountPartnerForm();
@@ -231,6 +394,149 @@ describe("contexto vivo", () => {
         expect(ctx.model).toBe("res.partner");
         expect(ctx.resId).toBe(1);
         expect(ctx.fields.name).toBe("Acme");
+    });
+
+    test("el contexto dice qué campos NO están en la pantalla", async () => {
+        // El caso que motivó esto: un campo que existe, tiene valor, y Odoo no lo
+        // muestra para ESTE registro. Con sólo los valores, el assistant lo daba
+        // por presente y decía haberlo señalado sobre una pantalla donde no está.
+        const assistant = await mountFormConEstados();
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fields.email).toBe("acme@example.com"); // el valor está…
+        expect(ctx.fieldState.email.invisible).toBe(true); // …y la pantalla, no
+    });
+
+    test("y qué campos no se pueden escribir, aunque la condición sea de este registro", async () => {
+        const assistant = await mountFormConEstados();
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fieldState.ref.readonly).toBe(true);
+        expect(ctx.fieldState.name.required).toBe(true);
+    });
+
+    test("los campos normales NO ocupan lugar en el mapa", async () => {
+        // Un formulario tiene decenas de campos y casi todos son comunes: mandar
+        // tres booleanos por cada uno engordaría cada mensaje para no decir nada.
+        const assistant = await mountFormConEstados();
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fieldState.fecha).toBe(undefined);
+    });
+
+    test("el estado sigue la condición: si cambia el registro, cambia lo que se ve", async () => {
+        // Lo que hace que esto no se pueda reemplazar por `fields_get`: la misma
+        // definición da distinto según el valor del registro.
+        const assistant = await mountFormConEstados();
+        expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(true);
+        await contains(".o_field_widget[name=active] input").click();
+        expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(undefined);
+    });
+
+    test("un campo que esconde su ANCESTRO también viaja como oculto", async () => {
+        // El agujero que este chequeo cierra: el evaluador de Odoo mira sólo el
+        // modificador del propio `<field>`, así que un campo dentro de un
+        // `<group invisible="…">` se reportaba como normal — el valor viajaba y
+        // el modelo lo leía visible sobre algo que no está en la pantalla.
+        const assistant = await mountFormConAncestro();
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fields.email).toBe("acme@example.com"); // el valor está…
+        expect(ctx.fieldState.email.invisible).toBe(true); // …y la pantalla, no
+        // Control negativo: el mismo formulario, un group SIN condición.
+        expect(ctx.fieldState.fecha).toBe(undefined);
+    });
+
+    test("y sigue la condición del ancestro: si cambia el registro, cambia", async () => {
+        // El otro lado del par. Sin esto, al test de arriba lo aprobaría también
+        // un cambio que marcara como oculto todo lo que esté dentro de un group.
+        const assistant = await mountFormConAncestro();
+        expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(true);
+        await contains(".o_field_widget[name=active] input").click();
+        expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(undefined);
+    });
+
+    test("los campos de una vista embebida NO son campos de este formulario", async () => {
+        // El borde que hay que medir, y está armado para que pueda fallar: `name`
+        // aparece DOS veces en el arch — arriba, visible, como campo del
+        // formulario; y adentro de la lista del x2many, que está en el group
+        // escondido. Un barrido que no distinga las dos cosas marca el `name` del
+        // formulario como oculto y el modelo deja de ver un campo que la persona
+        // sí tiene delante.
+        const assistant = await mountFormConAncestro();
+        const ctx = assistant.getContextPayload();
+        expect(ctx.fieldState.email.invisible).toBe(true); // el x2many y su vecino sí
+        expect(ctx.fieldState.child_ids.invisible).toBe(true);
+        expect(ctx.fieldState.name).toBe(undefined); // el de arriba, NO
+    });
+
+    test("una propuesta sobre un campo que esconde su ancestro se descarta", async () => {
+        // Mismo argumento que un campo de otra vista: escribirlo deja un cambio
+        // que la persona no puede ver ni revisar antes de guardar.
+        const assistant = await mountFormConAncestro();
+        const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
+        expect(ok).toBe(false);
+        expect(assistant.getActiveRecord().data.email).toBe("acme@example.com");
+    });
+
+    test("un campo que aparece en DOS ramas está oculto sólo si las dos lo esconden", async () => {
+        // El patrón de dos ramas mutuamente excluyentes. Marcar el campo con que
+        // UNA esté escondida lo daba por invisible mientras la persona lo tiene
+        // delante en la otra — y de paso hacía descartar una propuesta legítima.
+        // Es la misma regla que usa Odoo al fusionar dos nodos del mismo campo:
+        // `patchActiveFields` combina el `invisible` con AND.
+        const assistant = await mountFormDosRamas();
+        const ctx = assistant.getContextPayload();
+        // `email` está en las dos ramas: la escondida y la visible.
+        expect(ctx.fieldState.email).toBe(undefined);
+        // `fecha` está SÓLO en la rama escondida: ésa sí está oculta.
+        expect(ctx.fieldState.fecha.invisible).toBe(true);
+    });
+
+    test("y una propuesta sobre el campo de las dos ramas se aplica", async () => {
+        // El otro lado del par: no alcanza con reportarlo bien en el contexto si
+        // el camino de escritura lo descarta igual.
+        const assistant = await mountFormDosRamas();
+        const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
+        expect(ok).toBe(true);
+        expect(assistant.getActiveRecord().data.email).toBe("nuevo@example.com");
+    });
+
+    test("un campo que se esconde a SÍ MISMO tampoco se escribe", async () => {
+        // El chequeo era inconsistente: rechazaba lo que esconde un ancestro y
+        // dejaba pasar lo que se esconde a sí mismo. En los dos casos la persona
+        // no lo tiene delante y no puede revisar el cambio antes de guardar.
+        const assistant = await mountFormInvisiblePropio();
+        expect(assistant.getContextPayload().fieldState.email.invisible).toBe(true);
+        const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
+        expect(ok).toBe(false);
+        expect(assistant.getActiveRecord().data.email).toBe("acme@example.com");
+    });
+
+    test("dos ocurrencias escondidas por motivos distintos también es oculto", async () => {
+        // La ocurrencia técnica la esconde su propio `invisible="1"`; la otra, el
+        // group que la contiene. Contar los dos ejes por separado daba "se ve" en
+        // los dos y el campo salía como normal — la misma mentira que este mapa
+        // existe para evitar, y del lado peligroso.
+        const assistant = await mountFormDosMotivos();
+        // Lo que decide: el campo no está en la pantalla, en ninguna de las dos.
+        expect(".o_field_widget[name=email]").toHaveCount(0);
+        expect(assistant.getContextPayload().fieldState.email.invisible).toBe(true);
+    });
+
+    test("y con la condición falsa la segunda ocurrencia se ve, así que no", async () => {
+        // El otro lado del par: sin esto, al test de arriba lo aprobaría también
+        // un cambio que marcara como oculto todo campo con una ocurrencia técnica.
+        const assistant = await mountFormDosMotivos();
+        await contains(".o_field_widget[name=active] input").click();
+        expect(".o_field_widget[name=email]").toHaveCount(1);
+        expect(assistant.getContextPayload().fieldState.email?.invisible).toBe(undefined);
+    });
+
+    test("y una propuesta sobre ese campo se descarta", async () => {
+        // El guard de escritura lee el mismo mapa, así que heredaba el mismo
+        // agujero: la propuesta pasaba el filtro y se escribía sobre un campo que
+        // la persona no puede ver ni revisar antes de guardar.
+        const assistant = await mountFormDosMotivos();
+        const ok = await applyAndRender(assistant, { email: "nuevo@example.com" });
+        expect(ok).toBe(false);
+        expect(assistant.getActiveRecord().data.email).toBe("acme@example.com");
     });
 
     test("los valores SIN GUARDAR viajan en el contexto", async () => {
