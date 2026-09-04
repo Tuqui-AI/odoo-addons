@@ -41,6 +41,10 @@ import { _t } from "@web/core/l10n/translation";
  * iframe.contentWindow`) Y de un origin concreto que matchee el del SPA (nunca
  * "*"). Ver `_handleMessage`.
  */
+// Origins already given a <link rel="preconnect">, so re-opening the panel doesn't
+// pile up duplicate hints in <head>.
+const PRECONNECTED_ORIGINS = new Set();
+
 export class TuquiPanel extends Component {
     static props = {};
     static template = "tuqui_assistant.Panel";
@@ -78,6 +82,14 @@ export class TuquiPanel extends Component {
             if (this.ui.slug) {
                 this.ui.storedPath = localStorage.getItem(_storageKey()) || null;
             }
+            // Warm the connection to Tuqui now, at page load, so the first open
+            // doesn't pay DNS + TCP + TLS before the iframe can even start
+            // downloading. Follows the panel's own mounting: once the panel is
+            // gated on the chat seat, only users who can actually open it warm
+            // anything.
+            if (this.ui.connected && this.ui.baseUrl) {
+                this._preconnect(this.ui.baseUrl);
+            }
         };
         onWillStart(loadBootstrap);
         // Re-check on panel open/close:
@@ -93,6 +105,18 @@ export class TuquiPanel extends Component {
                     this.ui.embedReady = false;
                     this._authPosted = false;
                     this._lastSpaPath = null;
+                    // Start minting the SSO nonce HERE rather than on "ready":
+                    // it's a round-trip to Odoo that otherwise sits in series
+                    // *after* the SPA has finished loading, right in the middle of
+                    // the first open. Launched now it overlaps the iframe load, so
+                    // by the time "ready" arrives the nonce is usually already in
+                    // hand. One promise per open, awaited (not re-called) by
+                    // _postAuth — the nonce is single-use and a second one gets
+                    // spent twice → 401 → the SPA logs the user out.
+                    //
+                    // If the iframe never becomes ready (Tuqui down), the nonce
+                    // goes unused: it expires in 90s and the GC cron collects it.
+                    this._ssoAuthPromise = this.tuquiAssistant.getSsoAuth();
                     void loadBootstrap();
                 } else {
                     // Panel closed → iframe unmounted → safe to update stored path.
@@ -304,11 +328,16 @@ export class TuquiPanel extends Component {
         const win = this.iframeRef.el?.contentWindow;
         if (!win) {
             this._authPosted = false;
+            this._ssoAuthPromise = null;
             return;
         }
-        const auth = await this.tuquiAssistant.getSsoAuth();
+        // Pre-minted when the panel opened, so this usually resolves immediately.
+        // Every reset of _authPosted also drops the promise: a retry has to mint a
+        // FRESH nonce, since this one may already be consumed or past its 90s TTL.
+        const auth = await (this._ssoAuthPromise ?? this.tuquiAssistant.getSsoAuth());
         if (!auth?.nonce || !auth?.client_id) {
             this._authPosted = false;
+            this._ssoAuthPromise = null;
             return;
         }
         try {
@@ -334,7 +363,40 @@ export class TuquiPanel extends Component {
         } catch {
             // different origin / iframe not yet navigated: retried on the next "ready"
             this._authPosted = false;
+            this._ssoAuthPromise = null;
         }
+    }
+
+    /**
+     * Open the connection to Tuqui's origin ahead of the first open.
+     *
+     * The iframe's first request is a cross-origin document load, which is the
+     * plain (non-crossorigin) preconnect case. Cheap: one idle connection the
+     * browser drops on its own if unused, in exchange for taking DNS, TCP and TLS
+     * off the critical path of the click.
+     *
+     * @param {string} baseUrl Tuqui base URL, from the companion connection.
+     */
+    _preconnect(baseUrl) {
+        let origin;
+        try {
+            origin = new URL(baseUrl).origin;
+        } catch {
+            return; // malformed base_url — embedUrl reports it on its own
+        }
+        // Nothing to warm for a same-origin dev setup, and no point emitting the
+        // hint twice — loadBootstrap re-runs on every open. Tracked in a Set
+        // instead of a DOM query: an origin is not a valid CSS identifier, so an
+        // attribute selector would need escaping that CSS.escape doesn't do for
+        // quoted values.
+        if (origin === window.location.origin || PRECONNECTED_ORIGINS.has(origin)) {
+            return;
+        }
+        PRECONNECTED_ORIGINS.add(origin);
+        const link = document.createElement("link");
+        link.rel = "preconnect";
+        link.href = origin;
+        document.head.appendChild(link);
     }
 
     _postContext() {
