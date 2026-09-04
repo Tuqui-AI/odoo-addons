@@ -107,3 +107,6 @@ class ResConfigSettings(models.TransientModel):
 
     def action_tuqui_open_access_log(self):
         return self.env["ir.actions.act_window"]._for_xml_id("tuqui.action_tuqui_access_log")
+
+    def action_tuqui_open_events(self):
+        return self.env["ir.actions.act_window"]._for_xml_id("tuqui.action_tuqui_event")

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_server_action_form_tuqui" model="ir.ui.view">
+        <field name="name">ir.actions.server.form.tuqui</field>
+        <field name="model">ir.actions.server</field>
+        <field name="inherit_id" ref="base.view_server_action_form"/>
+        <field name="arch" type="xml">
+            <!--
+                One field and nothing else — that is the acceptance criterion:
+                "Existe un tipo de acción de servidor que pide un agente y nada
+                más". No URL to paste, no token, no model mapping: the trigger
+                condition is already expressed by the automation this action
+                hangs from.
+            -->
+            <xpath expr="//field[@name='state']" position="after">
+                <field name="tuqui_agent_id"
+                       invisible="state != 'tuqui_notify'"
+                       required="state == 'tuqui_notify'"
+                       options="{'no_create': True}"/>
+                <div class="text-muted" invisible="state != 'tuqui_notify'">
+                    Tuqui is notified through a durable queue: if it is
+                    unreachable the event is retried, and a delivery that never
+                    succeeds stays on the event list so it can be sent by hand.
+                </div>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
