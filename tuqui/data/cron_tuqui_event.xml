@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+    <!--
+        The dispatcher. Every minute, because the whole point of the queue is
+        that an event survives a Tuqui outage without anybody noticing the
+        delay — an hourly cron would turn a thirty-second blip into an hour of
+        latency for every event behind it.
+
+        Cheap when idle: one indexed lookup on (state, next_attempt_at) that
+        returns nothing. Most databases that install the companion will never
+        enqueue a single row, and this has to cost them nothing.
+    -->
+    <record id="ir_cron_tuqui_event_dispatch" model="ir.cron">
+        <field name="name">Tuqui: deliver queued events</field>
+        <field name="model_id" ref="model_tuqui_event"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_dispatch()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">minutes</field>
+        <field name="active">True</field>
+    </record>
+
+    <!--
+        Retention. Daily is plenty for a window measured in weeks, and keeping
+        it separate from the dispatcher means a failure to deliver never stops
+        the housekeeping, nor the other way round.
+    -->
+    <record id="ir_cron_tuqui_event_gc" model="ir.cron">
+        <field name="name">Tuqui: garbage-collect delivered events</field>
+        <field name="model_id" ref="model_tuqui_event"/>
+        <field name="state">code</field>
+        <field name="code">model._gc_old_events()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active">True</field>
+    </record>
+
+</odoo>
