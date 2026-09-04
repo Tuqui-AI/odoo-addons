@@ -63,6 +63,18 @@ class TuquiActivationNonce(models.Model):
             "consumed_at is set or expires_at passes. NULL after consume."
         ),
     )
+    event_signing_key = fields.Char(
+        readonly=True,
+        groups="base.group_system",
+        help=(
+            "Outgoing event signing key as it stood when this nonce was issued, "
+            "kept under the same rules as the secret beside it: NULL after "
+            "consume, gone when the row expires. Snapshotted rather than read "
+            "live at exchange time because a later activation attempt rotates "
+            "both credentials, and an older nonce redeemed afterwards has to "
+            "hand Tuqui the pair that was minted together."
+        ),
+    )
     client_id = fields.Char(required=True, readonly=True)
     acting_user_login = fields.Char(
         readonly=True,
@@ -85,6 +97,7 @@ class TuquiActivationNonce(models.Model):
         *,
         client_id,
         client_secret_plaintext,
+        event_signing_key=None,
         acting_user_login=None,
         ttl_minutes=_NONCE_TTL_MINUTES,
     ):
@@ -104,13 +117,14 @@ class TuquiActivationNonce(models.Model):
                 "expires_at": expires_at,
                 "client_id": client_id,
                 "client_secret_plaintext": client_secret_plaintext,
+                "event_signing_key": event_signing_key or False,
                 "acting_user_login": acting_user_login or False,
             }
         )
         return nonce, expires_at
 
     def _consume(self):
-        """Mark this row as redeemed and wipe the plaintext secret.
+        """Mark this row as redeemed and wipe both plaintext credentials.
 
         Idempotent at the SQL level via the unique nonce. Callers are
         expected to fetch + branch on ``consumed_at``/``expires_at``
@@ -121,6 +135,7 @@ class TuquiActivationNonce(models.Model):
             {
                 "consumed_at": fields.Datetime.now(),
                 "client_secret_plaintext": False,
+                "event_signing_key": False,
             }
         )
 

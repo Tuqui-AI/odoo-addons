@@ -33,16 +33,25 @@ _BATCH_SIZE = 50
 
 # Per-request ceiling. Generous next to Odoo's native one second, because here a
 # timeout is not a lost event: it is one attempt of six.
-_TIMEOUT_SECONDS = 20
+#
+# A pair and not a scalar: `requests` applies a scalar to connect AND to read,
+# so `20` means one event can hold the worker for 40 seconds, and the cron
+# budget below is checked between events, never inside one. Five seconds is
+# plenty to open a socket to a host that is up.
+_TIMEOUT_SECONDS = (5, 20)
 
 # Wall clock one run may spend, checked between events. The batch bounds how
 # many rows we take; this bounds how long taking them can last, and only the
 # second one is what the server enforces: a cron thread is killed at
 # ``--limit-time-real-cron``, which defaults to ``-1`` meaning "use
-# ``--limit-time-real``" - 120 seconds. Fifty events that each time out at 20
-# seconds is 1000, so the batch alone would get the worker killed every minute.
+# ``--limit-time-real``" - 120 seconds. Fifty events that each time out is
+# 1250, so the batch alone would get the worker killed every minute.
 # Leaving early is free because ``_deliver`` commits per event, and the rows we
 # did not reach are still due on the next run.
+#
+# 90 and not 120: the check happens between events, so a run can overshoot by
+# one whole request. 90 + the 25 that `_TIMEOUT_SECONDS` now caps a request at
+# still lands under the limit.
 _CRON_BUDGET_SECONDS = 90
 
 # Default retention for delivered events, overridable per database with the
@@ -54,10 +63,17 @@ _DEFAULT_RETENTION_DAYS = 30
 
 # Client-error statuses that WILL change on their own, and are therefore the
 # only 4xx worth retrying. Everything else in that range is a refusal that
-# waiting cannot fix: a feature switched off, a key Tuqui does not recognise,
-# a body it rejects. Burning the whole ladder on those costs eight hours
-# before anybody reads the error, and the error is the useful part.
-_RETRYABLE_CLIENT_STATUSES = frozenset({408, 429})
+# waiting cannot fix: a feature switched off, a body Tuqui rejects. Burning the
+# whole ladder on those costs eight hours before anybody reads the error, and
+# the error is the useful part.
+#
+# 401 is in here because Tuqui answers it for a signature that is merely too
+# old, not only for one that is wrong: it allows five minutes of clock skew and
+# refuses beyond that. An on-premise whose clock drifts would otherwise send
+# every event straight to `failed` reading "Tuqui refused", with nothing
+# pointing at the clock. It also covers the minutes between this database
+# minting its signing key and Tuqui fetching it.
+_RETRYABLE_CLIENT_STATUSES = frozenset({401, 408, 429})
 
 _STATE_SELECTION = [
     ("pending", "Pending"),
