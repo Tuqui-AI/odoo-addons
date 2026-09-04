@@ -61,13 +61,19 @@ def _is_absolutely_blocked(method: str) -> bool:
 # explicit write set, or the read prefix family. Business methods and
 # actions land in `execute` and only get bouncing by explicit rules.
 
-# These sets mirror the typed method names Tuqui's CompanionTransport posts to
-# this gateway — see tuqui_core/integrations/odoo/transports/companion.py and
-# the contract test ``test_classify_covers_companion_transport_surface``. Keep
-# all three in sync. Asymmetry to remember when the transport gains a method:
-#   * a READ not recognized here → ``execute`` → mislabelled in the audit log
-#     (that was the formatted_read_group bug; explicit entry in _READ_METHODS fixes it).
-#   * a WRITE not listed → also ``execute`` → only its audit row gets mislabelled.
+# These sets mirror the method names Tuqui posts to this gateway — both the
+# typed surface of CompanionTransport (see
+# tuqui_core/integrations/odoo/transports/companion.py) and the untyped call
+# sites that go through its generic `execute()` / `execute_method()`. THE
+# UNTYPED ONES ARE THE TRAP: the contract test used to mirror only the typed
+# surface, which is exactly how `get_view` and `check_access_rights` slipped
+# through. Keep all three in sync. Asymmetry to remember when a method is added:
+#   * a READ not recognized here → ``execute`` → REFUSED on the two restricted
+#     paths (read-only member, connection), and mislabelled in the audit log.
+#     Refused is the part that bites: `get_view` degraded silently and
+#     `check_access_rights` broke the embedded "create a record" flow outright.
+#   * a WRITE not listed → also ``execute`` → still gated the same way, so only
+#     its audit row gets mislabelled.
 # This classifier is the audit label, NOT the authorization boundary: writes
 # are really gated by the backend whitelist (workspace_write_models) and the
 # acting user's Odoo ACL.
@@ -80,17 +86,66 @@ _READ_METHODS = frozenset(
         "fields_get",
         "default_get",
         "formatted_read_group",
-        # View metadata. It reads no records — Odoo's own `get_view` starts by
-        # checking read access on the model and returns the arch already pruned
-        # to the acting user's groups. Left out of this set it classified as
-        # `execute`, which is not just a wrong audit label: it made the call
-        # refused on both restricted paths, so the search-view field ranking
-        # silently degraded on every read-only companion (the default right
-        # after activation) and on the connection path.
+        # ── Metadata ──────────────────────────────────────────────────────
+        # None of these read records. They answer "what does this model look
+        # like / may this user do X", and Odoo scopes the view ones to the
+        # acting user: `get_view` returns the arch pruned to their groups.
+        #
+        # The access helpers are a different animal and get their own gate
+        # below (`_ONLY_AS_A_USER`): they answer ABOUT the caller, so as
+        # superuser they answer about nobody.
+        #
+        # Falling into `execute` is not just a wrong audit label — it makes the
+        # call REFUSED on the two paths that only allow reads (a read-only
+        # companion, which is the default right after activation, and the
+        # connection path). `get_view` was found that way: the search-view
+        # field ranking degraded silently on every read-only companion.
+        # `check_access_rights` was found the same way and fails loudly: the
+        # embedded chat could not offer to create a record and told the user
+        # their permissions could not be verified.
         "get_view",
+        # `check_access_rights` is @api.deprecated in 19 — it stays here because
+        # the deployed backend still calls it, but the caller should move to
+        # `has_access`. Two traps in that migration:
+        #   * Odoo's own deprecation message says "use check_access() instead",
+        #     and that is bad advice for an RPC client: `check_access` is
+        #     @api.private in 19, so `get_public_method` refuses it. Verified.
+        #   * It is not a rename either. `has_access` is a RECORD method, so
+        #     `_dispatch` pops args[0] as ids: it takes `[[], "read"]`, not
+        #     `["read"]`. On an empty recordset it answers the model-level
+        #     question — measured identical to `check_access_rights` for
+        #     read/create on 18 and 19.
+        "check_access_rights",
+        "get_views",
+        "has_access",
+        "has_group",
+        "has_groups",
+        "get_metadata",
+        "get_property_definition",
+        # web_* are the web client's read entrypoints; they don't match the
+        # search/read prefix because of that prefix of their own.
+        "web_read",
+        "web_search_read",
+        "web_read_group",
     }
 )
 _READ_PREFIXES = ("search", "read")
+
+# Reads that only mean something when there IS an acting user. They answer
+# about `env.user`, and the connection path runs as SUPERUSER — where the
+# answer is not just useless, it is WRONG in the dangerous direction:
+#
+#     def has_access(self, operation):
+#         return self.env.su or not self._check_access(operation)
+#
+# As superuser that is an unconditional True, for any operation, `unlink`
+# included. A caller would read "yes, allowed" and act on it. `has_group`
+# is the same shape: `res.users` only allows the cross-user question when
+# `env.su`, so on that path a token holder could enumerate anyone's groups.
+#
+# So they classify as `read` (which is the honest audit label) and are still
+# refused on the connection path, with a reason of their own that says why.
+_ONLY_AS_A_USER = frozenset({"check_access_rights", "has_access", "has_group", "has_groups"})
 
 
 # L1: read_only is enforced by method-NAME classification, not at the cursor
@@ -138,6 +193,10 @@ def _evaluate_policy(read_only: bool, method: str, op_type: str, *, is_connectio
         # (write / execute) is refused here — sudo must never mutate.
         if op_type != "read":
             return False, "connection_read_only"
+        # …and not even every read: the ones that answer about the caller
+        # answer about nobody here. See `_ONLY_AS_A_USER`.
+        if method in _ONLY_AS_A_USER:
+            return False, "requires_acting_user"
         return True, None
     if read_only and op_type in ("write", "execute"):
         return False, "read_only_mode"
@@ -368,7 +427,15 @@ def _bind_logger(env, *, method, model_name, operation_type, acting_user):
 
 # Policy-deny reasons that should surface as HTTP 403. Anything else
 # from the gate (currently nothing) would surface as 400.
-_POLICY_DENY_403 = frozenset({"method_blocked", "private_method_blocked", "connection_read_only", "read_only_mode"})
+_POLICY_DENY_403 = frozenset(
+    {
+        "method_blocked",
+        "private_method_blocked",
+        "connection_read_only",
+        "read_only_mode",
+        "requires_acting_user",
+    }
+)
 
 
 class TuquiRpc(http.Controller):
