@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_tuqui_event_list" model="ir.ui.view">
+        <field name="name">tuqui.event.list</field>
+        <field name="model">tuqui.event</field>
+        <field name="arch" type="xml">
+            <!--
+                Read-only except for the retry button. Nothing good comes of
+                hand-editing a delivery record: the fields are the account of
+                what happened, and an edited account answers no question.
+            -->
+            <list string="Tuqui Events" create="false" delete="false" edit="false"
+                  decoration-danger="state == 'failed'" decoration-muted="state == 'sent'">
+                <field name="create_date" string="Queued"/>
+                <field name="agent_external_id"/>
+                <field name="res_model"/>
+                <field name="res_id"/>
+                <field name="triggered_by_user_id"/>
+                <field name="state" widget="badge"
+                       decoration-danger="state == 'failed'"
+                       decoration-success="state == 'sent'"/>
+                <field name="attempt"/>
+                <field name="next_attempt_at" string="Next try"/>
+                <field name="last_status_code" string="HTTP"/>
+                <field name="last_error"/>
+                <field name="sent_at"/>
+                <button name="action_retry" type="object" string="Retry" icon="fa-refresh"
+                        invisible="state == 'sent'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_tuqui_event_search" model="ir.ui.view">
+        <field name="name">tuqui.event.search</field>
+        <field name="model">tuqui.event</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="uuid"/>
+                <field name="agent_external_id"/>
+                <field name="res_model"/>
+                <field name="triggered_by_user_id"/>
+                <!-- The two questions anyone actually opens this view to ask. -->
+                <filter name="failed" string="Failed" domain="[('state', '=', 'failed')]"/>
+                <filter name="pending" string="Waiting to be sent" domain="[('state', '=', 'pending')]"/>
+                <separator/>
+                <filter name="group_state" string="State" context="{'group_by': 'state'}"/>
+                <filter name="group_agent" string="Agent" context="{'group_by': 'agent_external_id'}"/>
+                <filter name="group_user" string="Triggered by" context="{'group_by': 'triggered_by_user_id'}"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_tuqui_event" model="ir.actions.act_window">
+        <field name="name">Tuqui Events</field>
+        <field name="res_model">tuqui.event</field>
+        <field name="view_mode">list</field>
+        <field name="context">{'search_default_failed': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No events queued for Tuqui</p>
+            <p>
+                Events appear here when an automation notifies a Tuqui agent. Each one is
+                retried on its own schedule; a failed event stays on the list so it can be
+                sent again by hand.
+            </p>
+        </field>
+    </record>
+
+</odoo>

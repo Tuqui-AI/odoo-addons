@@ -61,6 +61,18 @@ class TuquiOAuthClient(models.Model):
         compute="_compute_access_count_7d",
         help="Total RPC calls logged in tuqui.access.log during the last 7 days.",
     )
+    event_signing_key = fields.Char(
+        readonly=True,
+        copy=False,
+        groups="base.group_system",
+        help=(
+            "Shared key this Odoo signs outgoing events with (tuqui.event). "
+            "Stored in plaintext because signing requires the key itself \u2014 a hash "
+            "cannot produce a signature. Handed to Tuqui once, in the same "
+            "activation exchange as the client secret, and replaced whenever that "
+            "secret is rotated."
+        ),
+    )
     read_only = fields.Boolean(
         string="Read-only mode",
         default=True,
@@ -112,6 +124,72 @@ class TuquiOAuthClient(models.Model):
     def _hash_secret(plain, salt):
         return hashlib.sha256(f"{salt}::{plain}".encode()).hexdigest()
 
+    def _sign_outbound(self, body: str, timestamp: int) -> str:
+        """HMAC-SHA256 over ``timestamp.body`` with this database's signing key.
+
+        One implementation for every signed call this module makes — the event
+        queue and the agent lookup — because two would be two things to keep
+        byte-identical with Tuqui instead of one.
+
+        The timestamp is inside the signed material rather than beside it:
+        signing only the body would leave every captured request replayable
+        forever.
+        """
+        self.ensure_one()
+        return hmac.new(
+            self._outbound_signing_key().encode(),
+            f"{timestamp}.{body}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+
+    def _ensure_signing_key(self) -> str:
+        """Return the outbound signing key, minting one if there is none yet.
+
+        Mints, never rotates. A database that connected before signed events
+        existed has no key and no way to agree on one without tearing the
+        connection down (activation refuses to run while it is live), so the
+        key is created on first demand and handed to Tuqui over the channel it
+        already authenticates on — see ``controllers/signing_key.py``.
+
+        Rotating an existing one instead would invalidate whatever is sitting
+        in ``tuqui.event`` unsent, which is precisely what the queue exists to
+        protect.
+        """
+        self.ensure_one()
+        record = self.sudo()
+        if not record.event_signing_key:
+            record.write({"event_signing_key": secrets.token_urlsafe(48)})
+        return record.event_signing_key
+
+    def _outbound_signing_key(self) -> str:
+        """The key this database signs outgoing events with.
+
+        Note the deliberate asymmetry with ``client_secret``. For calls coming
+        *in* (Tuqui to Odoo) this database keeps only a salted hash, because
+        verifying needs nothing more. For calls going *out* it must keep the key
+        itself: there is no way to produce an HMAC from a hash.
+
+        Returns:
+            The shared signing key agreed with Tuqui at activation.
+
+        Raises:
+            ValueError: if this Odoo was activated before the key existed and
+                Tuqui has not asked for one yet. Not a reason to reconnect:
+                that rotates the secret, kills the live tokens and walks an
+                admin back through a screen where they can pick the wrong
+                workspace. Tuqui mints it through
+                ``GET /tuqui/companion/signing-key`` on its own health cycle,
+                and the event stays queued until it does.
+        """
+        self.ensure_one()
+        key = self.sudo().event_signing_key
+        if not key:
+            raise ValueError(
+                "This Odoo has no Tuqui event signing key yet. Tuqui mints it on its "
+                "next health check; the event stays queued until then."
+            )
+        return key
+
     def verify_secret(self, plain):
         self.ensure_one()
         if not plain or not self.client_secret_hash:
@@ -137,6 +215,12 @@ class TuquiOAuthClient(models.Model):
             {
                 "client_secret_hash": self._hash_secret(plain_secret, salt),
                 "client_secret_salt": salt,
+                # Rotating the secret rotates the signing key with it, so the
+                # two are always minted in the same moment. Which is only half
+                # of not drifting: a rotation can happen while an older nonce is
+                # still redeemable, so the nonce snapshots BOTH and the exchange
+                # hands back the pair that was minted together.
+                "event_signing_key": secrets.token_urlsafe(48),
             }
         )
         return plain_secret

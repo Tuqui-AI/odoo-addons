@@ -89,12 +89,17 @@ class TuquiActivation(http.Controller):
             # otherwise rotate so the plaintext we hand to Tuqui isn't a leftover
             # from an abandoned attempt. Then mint a fresh nonce holding it.
             plain_secret = created_secret or oauth_client._rotate_secret_silent()
+            # The nonce carries the pair, not just the secret. `_rotate_secret_silent`
+            # mints both; a just-created singleton has a secret and no key, so
+            # `_ensure_signing_key` fills that in without rotating anything.
+            signing_key = oauth_client.sudo()._ensure_signing_key()
             nonce, _expires_at = (
                 env["tuqui.activation.nonce"]
                 .sudo()
                 ._issue(
                     client_id=oauth_client.client_id,
                     client_secret_plaintext=plain_secret,
+                    event_signing_key=signing_key,
                     acting_user_login=env.user.login,
                 )
             )
@@ -220,6 +225,12 @@ class TuquiActivation(http.Controller):
         # the plaintext.
         client_id = row.client_id
         client_secret = row.client_secret_plaintext
+        # From the nonce and not from the record: a newer activation attempt
+        # rotates both credentials, and this row may be older than that. Reading
+        # the key live would hand Tuqui a key from one rotation and a secret
+        # from another. Falling back to the live value covers nonces issued
+        # before the module started snapshotting it.
+        signing_key = row.sudo().event_signing_key
         acting_user_login = row.acting_user_login
 
         row._consume()
@@ -240,6 +251,11 @@ class TuquiActivation(http.Controller):
         payload = {
             "client_id": client_id,
             "client_secret": client_secret,
+            # The other half of the pair: Tuqui verifies event signatures with
+            # it. Travels the same one-shot channel as the secret, and for the
+            # same reason \u2014 this is the only moment both sides are in contact
+            # with a human who authorised the connection.
+            "event_signing_key": signing_key or (oauth_client.sudo().event_signing_key if oauth_client else None),
             "companion_url": companion_url,
             "acting_user_login": acting_user_login,
             "module_version": _module_version(env),
