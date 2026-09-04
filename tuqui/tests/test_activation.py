@@ -100,6 +100,51 @@ class TestTuquiActivationExchange(HttpCase):
             self.assertEqual(resp.status_code, expect_status, resp.text)
         return resp
 
+    def test_the_exchange_hands_back_the_pair_that_was_minted_together(self):
+        """A rotation between issuing a nonce and redeeming it must not split the
+        credentials.
+
+        `/start` rotates the secret and the signing key together, so an older
+        nonce that is still redeemable holds a secret from the previous
+        rotation. Reading the key live at exchange time would pair that old
+        secret with the new key, and Tuqui would store a pair no database ever
+        held.
+        """
+        client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        nonce, _ = (
+            self.env["tuqui.activation.nonce"]
+            .sudo()
+            ._issue(
+                client_id=client.client_id,
+                client_secret_plaintext="secret-of-the-first-attempt",
+                event_signing_key="key-of-the-first-attempt",
+            )
+        )
+
+        # A second activation attempt, abandoned. It rotates both.
+        client._rotate_secret_silent()
+        client.invalidate_recordset()
+        self.assertNotEqual(client.event_signing_key, "key-of-the-first-attempt")
+
+        body = self._post_exchange({"nonce": nonce}, expect_status=200).json()
+        self.assertEqual(body["client_secret"], "secret-of-the-first-attempt")
+        self.assertEqual(body["event_signing_key"], "key-of-the-first-attempt")
+
+    def test_consuming_a_nonce_wipes_both_credentials(self):
+        """The key lives under the same rules as the secret beside it: the row
+        stops being useful to anyone who reads the table afterwards."""
+        client_id = self.env["tuqui.oauth.client"].sudo()._get_singleton().client_id
+        nonce, _ = (
+            self.env["tuqui.activation.nonce"]
+            .sudo()
+            ._issue(client_id=client_id, client_secret_plaintext="s", event_signing_key="k")
+        )
+        self._post_exchange({"nonce": nonce}, expect_status=200)
+
+        row = self.env["tuqui.activation.nonce"].sudo().search([("nonce", "=", nonce)])
+        self.assertFalse(row.client_secret_plaintext)
+        self.assertFalse(row.event_signing_key)
+
     def test_exchange_happy_path(self):
         """A valid, unconsumed, unexpired nonce returns all six credential fields."""
         client_id = self.env["tuqui.oauth.client"].sudo()._get_singleton().client_id

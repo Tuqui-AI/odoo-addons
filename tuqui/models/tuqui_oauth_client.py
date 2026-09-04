@@ -173,16 +173,20 @@ class TuquiOAuthClient(models.Model):
             The shared signing key agreed with Tuqui at activation.
 
         Raises:
-            ValueError: if this Odoo was activated before the key existed. The
-                key is half of a shared secret, so it cannot be minted here on
-                the fly \u2014 Tuqui would have no way to verify it. Re-running the
-                activation hands both sides a matching pair.
+            ValueError: if this Odoo was activated before the key existed and
+                Tuqui has not asked for one yet. Not a reason to reconnect:
+                that rotates the secret, kills the live tokens and walks an
+                admin back through a screen where they can pick the wrong
+                workspace. Tuqui mints it through
+                ``GET /tuqui/companion/signing-key`` on its own health cycle,
+                and the event stays queued until it does.
         """
         self.ensure_one()
         key = self.sudo().event_signing_key
         if not key:
             raise ValueError(
-                "This Odoo has no Tuqui event signing key. Reconnect it to Tuqui " "so both sides agree on one."
+                "This Odoo has no Tuqui event signing key yet. Tuqui mints it on its "
+                "next health check; the event stays queued until then."
             )
         return key
 
@@ -211,9 +215,11 @@ class TuquiOAuthClient(models.Model):
             {
                 "client_secret_hash": self._hash_secret(plain_secret, salt),
                 "client_secret_salt": salt,
-                # Minted here so the two credentials can never drift: whatever
-                # Tuqui receives in the exchange is exactly what this database
-                # holds. Rotating the secret rotates the signing key with it.
+                # Rotating the secret rotates the signing key with it, so the
+                # two are always minted in the same moment. Which is only half
+                # of not drifting: a rotation can happen while an older nonce is
+                # still redeemable, so the nonce snapshots BOTH and the exchange
+                # hands back the pair that was minted together.
                 "event_signing_key": secrets.token_urlsafe(48),
             }
         )

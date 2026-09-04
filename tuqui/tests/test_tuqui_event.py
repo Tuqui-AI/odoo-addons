@@ -147,6 +147,21 @@ class TestTuquiEvent(TransactionCase):
         # Failed, not deleted: the row is the only trace that something was owed.
         self.assertTrue(event.exists())
 
+    def test_a_stale_signature_is_not_a_refusal(self):
+        """Tuqui answers 401 for a signature that is merely too old, not only for
+        one that is wrong: it allows five minutes of skew and refuses past that.
+
+        An on-premise whose clock drifts would otherwise send every event
+        straight to `failed` reading "Tuqui refused", with nothing anywhere
+        pointing at the clock. Same for the minutes between this database
+        minting its signing key and Tuqui fetching it.
+        """
+        event = self._event()
+        with patch("odoo.addons.tuqui.models.tuqui_event.requests.post", return_value=_Response(401)):
+            event._post()
+        self.assertEqual(event.state, "pending")
+        self.assertEqual(event.attempt, 1)
+
     @mute_logger("odoo.addons.tuqui.models.tuqui_event")
     def test_a_refusal_does_not_burn_the_ladder(self):
         """A 4xx is Tuqui refusing on purpose — a feature switched off, a key it
