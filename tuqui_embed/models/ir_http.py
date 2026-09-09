@@ -74,8 +74,14 @@ class IrHttp(models.AbstractModel):
             # No env yet (``auth='none'`` routes, early dispatch errors). Unable
             # to read the list, the default is to allow nothing.
             return None
-        value = (value or "").strip()
-        return value or None
+        # Re-joined from the SAME split the validator uses, and not merely
+        # stripped. The two used to be parallel derivations of the raw value:
+        # validation ran over `value.split()`, emission over `value.strip()`.
+        # A value like "https://a.com\nhttps://b.com" split into two perfectly
+        # valid tokens and got saved — and then emitted with the newline still
+        # inside, into an HTTP header. Whether werkzeug catches that or not is
+        # not the point: what is validated has to BE what is emitted.
+        return " ".join((value or "").split()) or None
 
     def session_info(self):
         """Switch tours off when this screen is being shown framed.

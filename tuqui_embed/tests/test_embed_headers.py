@@ -85,6 +85,30 @@ class TestEmbedHeaders(HttpCase):
         self.assertIn("default-src 'none'", csp)
         self.assertIn("frame-ancestors", csp)
 
+    def test_a_newline_between_two_origins_never_reaches_the_header(self):
+        """What is validated has to BE what is emitted.
+
+        Validation runs over `value.split()`, which splits on any whitespace, so
+        a newline between two valid origins produced two good tokens and the
+        value was saved. Emission, meanwhile, came from the raw value — with the
+        newline still in it — on its way into an HTTP header.
+
+        This does not test that werkzeug catches it. It tests that it never gets
+        there.
+        """
+        self.env["ir.config_parameter"].sudo().set_param(PARAM, "%s\nhttps://other.example.com" % TUQUI)
+        csp = self._get().headers.get("Content-Security-Policy", "")
+        self.assertEqual(csp, "frame-ancestors 'self' %s https://other.example.com" % TUQUI)
+        self.assertNotIn("\n", csp)
+
+    def test_tabs_and_double_spaces_are_normalised_too(self):
+        """Same path, with no malice in it: pasted out of a document."""
+        self.env["ir.config_parameter"].sudo().set_param(PARAM, "  %s \t https://other.example.com  " % TUQUI)
+        self.assertEqual(
+            self._get().headers.get("Content-Security-Policy", ""),
+            "frame-ancestors 'self' %s https://other.example.com" % TUQUI,
+        )
+
     # The loosened-cookie tests used to live here and left with it: this module
     # no longer touches it. The invariant that took their place — that it must
     # NOT touch it, on or off — lives in `test_cookie_is_never_touched.py`.
