@@ -66,7 +66,7 @@ class TuquiAccessLog(models.Model):
         help=(
             "Why the policy gate blocked the call. One of: method_blocked, "
             "private_method_blocked, read_only_mode, connection_read_only, "
-            "forbidden_acting_user. Empty when policy_allowed is True."
+            "requires_acting_user. Empty when policy_allowed is True."
         ),
     )
 
