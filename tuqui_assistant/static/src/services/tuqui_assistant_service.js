@@ -9,6 +9,7 @@ import {
     serializeDateTime,
 } from "@web/core/l10n/dates";
 import { evaluateBooleanExpr } from "@web/core/py_js/py";
+import { OPEN_SIGNAL_KEY, PANEL_STATE_KEY } from "@tuqui_assistant/storage_keys";
 
 // Luxon es un global en Odoo, no un import ESM — igual que en
 // web/static/src/core/l10n/dates.js.
@@ -620,7 +621,7 @@ export const tuquiAssistantService = {
         // Persist panel UI state across Ctrl+R, per-tab (sessionStorage is tab-scoped).
         // panelOpen / minimized / expanded survive reload; context and newChatRequest
         // are ephemeral (rebuilt from the current Odoo view on mount).
-        const _SESSION_KEY = "tuqui_panel_state";
+        const _SESSION_KEY = PANEL_STATE_KEY;
         let _savedState = {};
         try {
             _savedState = JSON.parse(sessionStorage.getItem(_SESSION_KEY) || "{}");
@@ -633,7 +634,7 @@ export const tuquiAssistantService = {
         // short-lived signal to localStorage. Consume it here: auto-open the panel
         // so the new tab resumes the conversation. The signal is cleared immediately
         // to avoid affecting unrelated tabs opened later.
-        const _OPEN_SIGNAL_KEY = "tuqui_open_signal";
+        const _OPEN_SIGNAL_KEY = OPEN_SIGNAL_KEY;
         const _OPEN_SIGNAL_TTL = 5000;
         let _openSignalFresh = false;
         try {

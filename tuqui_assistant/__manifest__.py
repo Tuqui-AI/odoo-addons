@@ -1,6 +1,6 @@
 {
     "name": "Tuqui Assistant",
-    "version": "19.0.1.8.0",
+    "version": "19.0.1.9.0",
     "category": "Productivity",
     "summary": "Asistente Tuqui embebido en Odoo: chat contextual + propose-then-apply sobre el formulario",
     "author": "Tuqui-AI",
@@ -15,6 +15,12 @@
     ],
     "assets": {
         "web.assets_backend": [
+            # Order matters here and is not cosmetic: the guard clears the very
+            # storage keys the panel and the service read while loading, so it
+            # has to be evaluated before either of them. Naming it ahead of the
+            # glob pins that down — Odoo keeps a file at its first position and
+            # ignores the repeat, so the glob below does not move it.
+            "tuqui_assistant/static/src/nested_guard.js",
             "tuqui_assistant/static/src/**/*",
         ],
         # Tests de interacción (Hoot). Corren con el runner del propio Odoo, sin
