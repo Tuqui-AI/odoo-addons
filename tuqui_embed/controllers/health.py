@@ -1,21 +1,21 @@
-"""Declarar que este Odoo se deja mostrar dentro de Tuqui.
+"""Announce that this Odoo lets itself be shown inside Tuqui.
 
-POR QUÉ ACÁ Y NO DE OTRA FORMA. El módulo `tuqui` ya tiene un handshake donde
-ANUNCIA lo que sabe hacer, y Tuqui lo lee para decidir — así resuelve, por
-ejemplo, si las escrituras están apagadas (`policy.read_only`). Poder mostrarse
-en un panel es exactamente la misma clase de hecho, así que viaja por el mismo
-canal en vez de inventar uno.
+WHY HERE AND NOT SOME OTHER WAY. The `tuqui` module already has a handshake
+where it ANNOUNCES what it can do, and Tuqui reads it to decide — that is how it
+resolves, for instance, whether writes are switched off (`policy.read_only`).
+Being able to show itself in a panel is exactly the same class of fact, so it
+travels down the same channel instead of inventing one.
 
-La alternativa era que Tuqui adivinara pidiendo la página y mirando sus headers.
-Además de costar una petición por cada apertura, ese camino se equivoca justo
-cuando este módulo está instalado: la política mira el ORIGEN del pedido, y una
-sonda anónima no lleva el origen de Tuqui — así que recibiría el "no" que
-corresponde a cualquier otro sitio, y concluiría que no se puede mostrar algo
-que sí se puede.
+The alternative was for Tuqui to guess by fetching the page and looking at its
+headers. Besides costing one request per open, that path gets it wrong
+precisely when this module is installed: the policy looks at the ORIGIN of the
+request, and an anonymous probe does not carry Tuqui's origin — so it would
+receive the "no" meant for any other site, and conclude that something which
+can be shown cannot.
 
-La capability aparece SÓLO si hay orígenes cargados. Con el módulo instalado y
-sin configurar, este Odoo sigue diciendo que no se deja embeber, que es la
-verdad.
+The capability appears ONLY when origins are loaded. With the module installed
+and unconfigured, this Odoo keeps saying it does not let itself be embedded,
+which is the truth.
 """
 
 import json
@@ -28,17 +28,17 @@ from ..models.ir_http import EMBED_ORIGINS_PARAM
 
 _logger = logging.getLogger(__name__)
 
-#: Lo que Tuqui lee para saber que puede mostrar este Odoo en su panel.
+#: What Tuqui reads to know it may show this Odoo in its panel.
 EMBED_CAPABILITY = "embed.frame"
 
 
 class TuquiEmbedHealth(TuquiHealth):
-    """Suma `embed.frame` al anuncio del companion cuando el embed está encendido."""
+    """Add `embed.frame` to the companion's announcement when the embed is on."""
 
-    # Odoo EXIGE re-decorar un endpoint heredado, aunque el decorador vaya
-    # vacío: el routing del padre se conserva. Sin esto arranca igual —
-    # auto-decora y escribe un WARNING por cada worker— y ese warning deja el
-    # build de runbot en amarillo, que llega a GitHub como rojo.
+    # Odoo REQUIRES re-decorating an inherited endpoint, even with an empty
+    # decorator: the parent's routing is preserved. Without this it still boots
+    # — auto-decorating and writing a WARNING per worker — and that warning
+    # leaves the runbot build amber, which reaches GitHub as red.
     @http.route()
     def health(self, **kwargs):
         response = super().health(**kwargs)
@@ -53,7 +53,8 @@ class TuquiEmbedHealth(TuquiHealth):
             body["capabilities"] = caps
             response.data = json.dumps(body)
         except Exception:
-            # El health es una sonda: nunca puede dejar de responder por esto.
-            # Sin la capability, Tuqui simplemente no ofrece mostrar la pantalla.
-            _logger.exception("tuqui_embed: no se pudo anunciar la capability de embed")
+            # The health route is a probe: it can never stop answering because
+            # of this. Without the capability, Tuqui simply does not offer to
+            # show the screen.
+            _logger.exception("tuqui_embed: could not announce the embed capability")
         return response

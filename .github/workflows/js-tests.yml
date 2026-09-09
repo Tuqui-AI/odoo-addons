@@ -1,39 +1,40 @@
 name: JS tests (Hoot)
 
-# Tests de interacción del assistant contra un Odoo de verdad, sin LLM.
+# Interaction tests running against a real Odoo, with no LLM.
 #
-# Por qué acá y no en el repo de Tuqui: lo que se rompe es JavaScript que corre
-# DENTRO del cliente web de Odoo (`applyProposal` sobre el record model de OWL).
-# Un test que le pegue por RPC no lo toca, y montar el stack completo con un
-# navegador manejando el SPA es mucho más caro para cubrir menos.
+# Why here and not in the Tuqui repo: what breaks is JavaScript running INSIDE
+# Odoo's web client (`applyProposal` over OWL's record model). A test hitting it
+# over RPC does not touch that, and standing up the whole stack with a browser
+# driving the SPA is far more expensive for less coverage.
 #
-# Spec: assistant-en-odoo-confiabilidad §Tests reales — tarea 72555.
+# Spec: assistant-en-odoo-confiabilidad §Tests reales — task 72555.
 #
-# ── Cómo se corren los tests Hoot, que no es obvio ──────────────────────────
+# ── How Hoot tests are run, which is not obvious ────────────────────────────
 #
-# El runner NO vive en el addon: es `web.tests.test_js.WebSuite.test_unit_desktop`,
-# un HttpCase `post_install` del módulo `web` que abre Chrome headless contra
-# `/web/tests` y corre TODO el bundle `web.assets_unit_tests`. De ahí las dos
-# partes raras del comando:
+# The runner does NOT live in the addon: it is
+# `web.tests.test_js.WebSuite.test_unit_desktop`, a `post_install` HttpCase of
+# the `web` module that opens headless Chrome against `/web/tests` and runs the
+# WHOLE `web.assets_unit_tests` bundle. Hence the two odd parts of the command:
 #
-#   -u web            → sin esto los post-tests de `web` no entran en la corrida
-#                       (Odoo sólo corre tests de los módulos que instala/actualiza),
-#                       y no se ejecuta un solo test JS.
-#   [@tuqui_assistant] → parámetro de tag que filtra el suite Hoot a los tests de
-#                       ESTE addon, para que un test roto del core no pinte el PR
-#                       de rojo. Sin el filtro corren miles de tests ajenos.
+#   -u web            → without it, `web`'s post-tests do not join the run
+#                       (Odoo only runs tests of the modules it installs or
+#                       updates), and not a single JS test executes.
+#   [@tuqui_assistant] → a tag parameter filtering the Hoot suite down to THIS
+#                       addon's tests, so a broken core test does not paint the
+#                       PR red. Without the filter, thousands of foreign tests
+#                       run.
 #
-# ── Por qué se instalan un browser y python3-websocket ──────────────────────
+# ── Why a browser and python3-websocket get installed ───────────────────────
 #
-# La imagen oficial `odoo:19` no trae ninguno de los dos, y cuando falta
-# cualquiera de ellos el test NO falla: hace `unittest.SkipTest` y el job queda
-# VERDE sin haber corrido nada. Por eso además del install hay un paso final que
-# verifica en el log que el suite realmente se ejecutó — un verde vacío es peor
-# que un rojo.
+# The official `odoo:19` image ships neither, and when either is missing the
+# test does NOT fail: it does `unittest.SkipTest` and the job goes GREEN having
+# run nothing. That is why, besides the install, there is a final step verifying
+# in the log that the suite actually executed — an empty green is worse than a
+# red.
 #
-# Chrome no se puede reemplazar por `chromium` de Ubuntu: la imagen es noble
-# (24.04), donde `chromium-browser` es el stub de transición a snap y no arranca
-# en un container. Va el paquete de Google.
+# Chrome cannot be swapped for Ubuntu's `chromium`: the image is noble (24.04),
+# where `chromium-browser` is the snap transition stub and does not start inside
+# a container. It has to be Google's package.
 
 on:
   push:
@@ -51,8 +52,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Un addon por corrida, y no todos juntos en un filtro: así el rojo
-        # dice CUÁL suite se rompió, y un addon sin browser no tapa al otro.
+        # One addon per run, rather than all of them behind a single filter: a
+        # red result then says WHICH suite broke, and an addon with no browser
+        # cannot hide the other.
         addon: [tuqui_assistant, tuqui_embed]
     services:
       postgres:
@@ -68,15 +70,16 @@ jobs:
           --health-retries 10
     defaults:
       run:
-        # El job corre DENTRO del container, donde Actions resuelve el shell por
-        # su cuenta y puede caer en `sh` (dash): ahí `set -o pipefail` es un error
-        # de sintaxis y el paso muere antes de correr un solo test. La imagen trae
-        # bash; se lo pedimos explícito.
+        # The job runs INSIDE the container, where Actions resolves the shell on
+        # its own and may land on `sh` (dash): there `set -o pipefail` is a
+        # syntax error and the step dies before running a single test. The image
+        # ships bash; we ask for it explicitly.
         shell: bash
     container:
-      # Fijada a la major del repo: una rama de versión sólo se prueba contra su
-      # propio Odoo. `--user root` es para poder instalar el browser; Chrome corre
-      # headless, que ya implica `--no-sandbox`, así que root no lo rompe.
+      # Pinned to the repo's major: a version branch is only tested against its
+      # own Odoo. `--user root` is needed to install the browser; Chrome runs
+      # headless, which already implies `--no-sandbox`, so root does not break
+      # it.
       image: odoo:19
       options: --user root
     steps:
@@ -115,14 +118,15 @@ jobs:
             --log-level=test 2>&1 | tee /tmp/hoot.log
 
       - name: Fail if the suite did not actually run
-        # Red de seguridad contra el verde vacío: si faltó el browser, si faltó
-        # websocket-client o si el filtro dejó de matchear (por un rename del
-        # addon o de los archivos de test), arriba no falla nada. Acá sí.
+        # A safety net against the empty green: if the browser was missing, if
+        # websocket-client was missing, or if the filter stopped matching
+        # (because the addon or the test files were renamed), nothing above
+        # fails. Here it does.
         run: |
           if ! grep -q '\[HOOT\] "@${{ matrix.addon }}" ended' /tmp/hoot.log; then
-            echo "::error::El suite Hoot de ${{ matrix.addon }} no se ejecutó."
-            echo "Revisá si el job se salteó los tests (browser o websocket-client"
-            echo "ausentes) o si el filtro --test-tags dejó de matchear."
+            echo "::error::The Hoot suite for ${{ matrix.addon }} did not run."
+            echo "Check whether the job skipped the tests (browser or"
+            echo "websocket-client missing) or whether --test-tags stopped matching."
             grep -iE 'skip|not installed' /tmp/hoot.log || true
             exit 1
           fi

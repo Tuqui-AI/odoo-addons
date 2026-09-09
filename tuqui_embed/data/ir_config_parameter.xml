@@ -1,23 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo noupdate="1">
     <!--
-        El parámetro se crea VACÍO, con su descripción.
+        The parameter is created EMPTY, with its description.
 
-        Dos motivos. Uno: que exista con nombre visible en Ajustes → Técnico →
-        Parámetros del sistema, en vez de que haya que saber escribir la clave de
-        memoria. Dos, el que importa: que quien lo vea sepa **qué habilita** antes
-        de cargarlo. Hoy es una línea de texto libre sin nada al lado, y esto no
-        es una preferencia — es el interruptor entre "Odoo normal" y "Odoo que se
-        deja mostrar dentro de otro sitio". La cookie de sesión NO se toca (ver
-        el README): lo que se resigna es la protección contra clickjacking, y
-        sólo para los orígenes que el administrador declare acá.
+        Two reasons. One: so it exists with a visible name under Settings →
+        Technical → System Parameters, instead of requiring the key to be typed
+        from memory. Two, the one that matters: so whoever sees it knows **what
+        it enables** before filling it in. Today it is a line of free text with
+        nothing beside it, and this is not a preference — it is the switch
+        between "normal Odoo" and "Odoo that lets itself be shown inside another
+        site". The session cookie is NOT touched (see the README): what is given
+        up is clickjacking protection, and only for the origins the
+        administrator declares here.
 
-        Vacío no cambia nada: el módulo instalado y sin origen cargado es
-        indistinguible de no estar instalado.
+        Empty changes nothing: the module installed with no origin loaded is
+        indistinguishable from not being installed.
 
-        Va con `noupdate="1"` en la raíz, y no es cosmético: sin eso, cada
-        `-u tuqui_embed` reescribe el `value` con el vacío del XML y le apaga el
-        embed al cliente sin decir nada.
+        It carries `noupdate="1"` at the root, and that is not cosmetic: without
+        it, every `-u tuqui_embed` would rewrite `value` with the XML's empty
+        one and switch the customer's embed off without saying anything.
     -->
     <record id="param_embed_origins" model="ir.config_parameter">
         <field name="key">tuqui.embed_origins</field>

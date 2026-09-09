@@ -2,251 +2,301 @@
 Tuqui Embed
 ============
 
-Permite que un origen declarado —el Tuqui de la empresa— muestre las pantallas
-de este Odoo dentro de un iframe, para que quien conversa con el asistente vea
-el registro del que están hablando al lado de la conversación.
+Lets a declared origin —the company's Tuqui— show this Odoo's screens inside an
+iframe, so that whoever is talking to the assistant sees the record under
+discussion next to the conversation.
 
-**Viene apagado.** Sin el parámetro cargado, no cambia nada.
+**It ships switched off.** With the parameter unset, nothing changes.
 
-**Hace una sola cosa: permite el frame.** No toca la cookie de sesión, no toca
-el manejo de sesión de Odoo, no agrega rutas. Que la sesión del usuario aparezca
-adentro del iframe no es trabajo de este módulo — es consecuencia de cómo se
-sirve el panel, y eso está en "La precondición" más abajo.
+**It does one thing: it allows the frame.** It does not touch the session
+cookie, it does not touch Odoo's session handling, it adds no routes. The user's
+session showing up inside the iframe is not this module's doing — it follows
+from how the panel is served, and that is under "The precondition" below.
 
-Cómo se enciende
-================
+How to switch it on
+===================
 
-En *Ajustes → Técnico → Parámetros del sistema*, crear:
+Under *Settings → Technical → System Parameters*, create:
 
 ::
 
     tuqui.embed_origins = https://odoo-acme.tuqui.com
 
-Varios orígenes van separados por espacios. El valor entra tal cual en
-``frame-ancestors``, así que tiene que ser el origen completo (esquema + host +
-puerto), sin barra final. Se valida al guardar: no se aceptan comodines, un
-esquema sin host, ni ``http://`` fuera de ``localhost``/``127.0.0.1``.
+Several origins go space-separated. The value goes verbatim into
+``frame-ancestors``, so it has to be the full origin (scheme + host + port),
+with no trailing slash. It is validated on save: no wildcards, no scheme
+without a host, no ``http://`` outside ``localhost``/``127.0.0.1``.
 
-Para apagarlo: borrar el parámetro o dejarlo vacío.
+To switch it off: clear the parameter or leave it empty.
 
-Qué hace exactamente
-====================
+What it does, exactly
+=====================
 
-**Permite el frame** desde los orígenes de la lista: saca el ``X-Frame-Options``
-y responde ``Content-Security-Policy: frame-ancestors 'self' <lista>``.
+**It allows the frame** from the origins on the list: it drops
+``X-Frame-Options`` and answers
+``Content-Security-Policy: frame-ancestors 'self' <list>``.
 
-Y **apaga los tours de onboarding cuando la pantalla se muestra embebida**, que
-no es un agregado sino la diferencia entre "se ve" y "se puede usar" — ver
-"El crash de los tours" más abajo.
+And it **switches off onboarding tours when the screen is shown framed**, which
+is not an extra but the difference between "it shows" and "it can be used" — see
+"The tour crash" below.
 
-El ``'self'`` VA SIEMPRE. Odoo embebe sus propias páginas en iframes del mismo
-origen —el visor de PDF y de texto, el preview de reportes— y una lista sin
-``'self'`` los deja en blanco para TODA la base en cuanto se prende el switch.
-El default de Odoo es, justamente, ``frame-ancestors 'self'``: esto amplía la
-lista, no la reemplaza.
+The ``'self'`` IS ALWAYS THERE. Odoo frames its own pages same-origin —the PDF
+and text viewer, the report preview— and a list without ``'self'`` leaves those
+blank for the WHOLE database the moment the switch goes on. Odoo's default is,
+precisely, ``frame-ancestors 'self'``: this widens the list, it does not replace
+it.
 
-Y la CSP se **completa**, no se reemplaza. ``set_csp`` le pone
-``default-src 'none'`` a toda respuesta ``image/*`` (``odoo/http.py``), que es lo
-que sandboxea un SVG subido como adjunto. Sobrescribir el header dejaba ese SVG
-ejecutando script en el origen de Odoo — un agujero que no tiene nada que ver
-con embeber, y que aparecía en todas las respuestas.
+And the CSP is **completed**, not replaced. ``set_csp`` puts
+``default-src 'none'`` on every ``image/*`` response (``odoo/http.py``), which is
+what sandboxes an SVG uploaded as an attachment. Writing over the header left
+that SVG running script in Odoo's origin — a hole with nothing to do with
+embedding, present on every response.
 
-La precondición: el panel tiene que servirse en el MISMO SITIO
-==============================================================
+The precondition: the panel has to be served on the SAME SITE
+=============================================================
 
-Permitir el frame no alcanza por sí solo: si el panel está en otro **sitio**, la
-cookie de sesión de Odoo (``SameSite=Lax``) no viaja adentro del iframe, y el
-usuario ve la pantalla de login aunque ya esté logueado en Odoo.
+Allowing the frame is not enough on its own: if the panel is on another
+**site**, Odoo's session cookie (``SameSite=Lax``) does not travel into the
+iframe, and the user sees the login screen even though they are already logged
+into Odoo.
 
-La salida **no** es aflojar la cookie (ver la sección siguiente): es que el panel
-y este Odoo compartan sitio. ``SameSite`` se define por **sitio** (dominio
-registrable), no por origen, así que ``https://tuqui.com`` y
-``https://odoo-acme.tuqui.com`` son el mismo sitio y la cookie normal entra al
-iframe sola.
+The way out is **not** to loosen the cookie (see the next section): it is for
+the panel and this Odoo to share a site. ``SameSite`` is defined per **site**
+(registrable domain), not per origin, so ``https://tuqui.com`` and
+``https://odoo-acme.tuqui.com`` are the same site and the ordinary cookie walks
+into the iframe on its own.
 
-En la práctica eso significa que Tuqui sirve este Odoo bajo un host propio
-—``odoo-<workspace>.tuqui.com``, reenviando al Odoo del cliente— y el navegador
-sólo habla con ese host.
+In practice that means Tuqui serves this Odoo under a host of its own
+—``odoo-<workspace>.tuqui.com``, forwarding to the customer's Odoo— and the
+browser only ever talks to that host.
 
-**Medido** (Chrome real, con la cookie por default de Odoo: ``SameSite=Lax``,
-sin ``Secure``, sin partición):
+**Measured** (real Chrome, with Odoo's default cookie: ``SameSite=Lax``, no
+``Secure``, no partitioning):
 
 ======================================================  ==================
-Caso                                                    Resultado
+Case                                                    Result
 ======================================================  ==================
-Abrir el panel estando ya logueado en Odoo              Entra logueado
-Reabrirlo en una pestaña nueva                          Entra logueado
-Después de cerrar y reabrir el navegador                Entra logueado
-Bucles de redirección                                   Ninguno
+Opening the panel while already logged into Odoo        Comes in logged in
+Reopening it in a new tab                               Comes in logged in
+After closing and reopening the browser                 Comes in logged in
+Redirect loops                                          None
 ======================================================  ==================
 
-Lo que ese ensayo NO cubre: el proxy en sí. Se montaron los dos hosts en el
-mismo sitio para aislar la pregunta de la cookie; la reescritura de host, el
-upgrade del WebSocket del bus y el tráfico de assets a través de Tuqui siguen
-sin probarse punta a punta.
+What that trial does NOT cover: the proxy itself. The two hosts were set up on
+the same site to isolate the cookie question; host rewriting, the bus WebSocket
+upgrade and asset traffic through Tuqui remain untested end to end.
 
-Por qué NO se afloja la cookie — dos vectores medidos
+Why the cookie is NOT loosened — two measured vectors
 =====================================================
 
-Una versión anterior de este módulo reemitía la sesión con ``SameSite=None``
-para que viajara a un panel de otro sitio. Se descartó, y conviene que quede
-escrito por qué, porque es el camino al que uno vuelve solo.
+An earlier version of this module reissued the session with ``SameSite=None`` so
+it would travel to a panel on another site. It was dropped, and it is worth
+writing down why, because it is the path one drifts back to.
 
-Aflojar el ``SameSite`` abre dos canales que **CORS no cubre** (probado en vivo
-contra el Odoo 19 de dev, con cookie de administrador y
+Loosening ``SameSite`` opens two channels **CORS does not cover** (tested live
+against the dev Odoo 19, with an administrator cookie and
 ``Origin: https://evil.example.com``):
 
-- **WebSocket cross-origin.** ``/websocket`` es ``auth="public", cors="*"``
-  (``addons/bus/controllers/websocket.py``); el downgrade de sesión que
-  protegería de esto sólo actúa si ``ODOO_BUS_PUBLIC_SAMESITE_WS`` está
-  seteada, y no lo está ni por default. Handshake OK, y el socket recibe el bus
-  en vivo del usuario — un WebSocket es legible por JS cross-origin, sin
-  preflight ni gate de credenciales.
-- **``/web/become``: escalada a superusuario zero-click.**
-  ``web/controllers/home.py`` — ``auth='user'``, **GET**, sin token, y para un
-  usuario que ya es ``_is_system()`` hace ``session.uid = SUPERUSER_ID``. Con
-  ``SameSite=None``, un ``<img src=".../web/become">`` en cualquier página que
-  visite un admin logueado lo escala sin un clic. Reproducido en Chrome real,
-  comparando el ``session_id`` del admin y no su mera presencia: **antes del
-  mitigante el sitio ajeno se llevaba la sesión real**. Misma familia:
-  ``/mail/unfollow``, ``/web/hook``.
+- **Cross-origin WebSocket.** ``/websocket`` is ``auth="public", cors="*"``
+  (``addons/bus/controllers/websocket.py``); the session downgrade that would
+  protect against this only kicks in when ``ODOO_BUS_PUBLIC_SAMESITE_WS`` is
+  set, and it is not set by default. Handshake OK, and the socket receives the
+  user's live bus — a WebSocket is readable by JS cross-origin, with no
+  preflight and no credentials gate.
+- **``/web/become``: zero-click superuser escalation.**
+  ``web/controllers/home.py`` — ``auth='user'``, **GET**, no token, and for a
+  user who is already ``_is_system()`` it does ``session.uid = SUPERUSER_ID``.
+  With ``SameSite=None``, an ``<img src=".../web/become">`` on any page a
+  logged-in admin visits escalates them with no click. Reproduced in real
+  Chrome, comparing the admin's ``session_id`` and not merely its presence:
+  **before the mitigation the foreign site walked off with the real session**.
+  Same family: ``/mail/unfollow``, ``/web/hook``.
 
-``Partitioned`` (CHIPS) se probó como mitigante y **no sirve para este diseño**.
-Cierra el ``<img>`` (medido antes/después), pero **rompe el panel**: al
-reabrirlo en una pestaña nueva, Odoo entra en un bucle infinito entre la
-pantalla pedida y ``/web/login`` (``ERR_TOO_MANY_REDIRECTS``). Discriminador
-medido en las dos direcciones — sin ``Partitioned`` esa misma navegación
-devuelve 200 y entra logueada. El mecanismo del bucle quedó **sin explicar**: la
-traza sugiere que el navegador manda la cookie a una ruta y no a la otra, pero
-esa lectura viene de una introspección de headers que en la misma corrida
-devolvió vacío para uno de los dos pedidos, así que es hipótesis, no medición.
+``Partitioned`` (CHIPS) was tried as a mitigation and **it does not work for
+this design**. It closes the ``<img>`` (measured before/after), but it **breaks
+the panel**: reopening it in a new tab sends Odoo into an infinite loop between
+the requested screen and ``/web/login`` (``ERR_TOO_MANY_REDIRECTS``).
+Discriminator measured in both directions — without ``Partitioned`` that same
+navigation returns 200 and comes in logged in. The loop's mechanism remains
+**unexplained**: the trace suggests the browser sends the cookie to one route
+and not the other, but that reading comes from a header introspection which, in
+the same run, returned empty for one of the two requests — so it is a
+hypothesis, not a measurement.
 
-Con el panel same-site no hay nada que aflojar, así que ninguno de los dos
-vectores se abre. Eso es lo que hace que este módulo no tenga una decisión de
-seguridad pendiente.
+With the panel same-site there is nothing to loosen, so neither vector ever
+opens. That is what leaves this module with no pending security decision.
 
-El crash de los tours: un bug de Odoo, y su workaround
-======================================================
+The tour crash: an Odoo bug, and its workaround
+===============================================
 
-Con un tour de onboarding en curso, este webclient dentro de un iframe de otro
-origen **le crashea la pestaña**: el puntero del tour busca el documento del
-padre, eso tira ``SecurityError`` en bucle (59 contados en pocos segundos) y se
-lleva la memoria del renderer.
+With an onboarding tour in progress, this web client inside a cross-origin
+iframe **kills the browser tab**: the tour pointer reaches for the parent
+document, that throws ``SecurityError`` in a loop (59 counted within seconds)
+and takes the renderer's memory with it.
 
-**El tour no arranca en el panel: arranca en el Odoo de siempre.** El usuario
-entra, el tour empieza y deja su estado en ``localStorage``; después abre el
-panel —mismo origen, mismo ``localStorage``— y el tour se REANUDA adentro del
-iframe.
+**The tour does not start in the panel: it starts in the everyday Odoo.** The
+user goes in, the tour begins and leaves its state in ``localStorage``; later
+they open the panel —same origin, same ``localStorage``— and the tour is RESUMED
+inside the iframe.
 
-**La causa raíz es una línea de Odoo.** ``web_tour/tour_service.js`` ya intenta
-evitarlo: arranca y reanuda tours dentro de ``if (!window.frameElement)``. Pero
-``window.frameElement`` devuelve ``null`` cuando el padre es de OTRO origen, así
-que la guarda se cumple justo en el caso que quería prevenir. La condición que
-sí funciona cross-origin es ``window.top !== window.self``. **Corresponde
-reportarlo upstream.**
+**The root cause is one line of Odoo.** ``web_tour/tour_service.js`` already
+tries to prevent this: it starts and resumes tours inside
+``if (!window.frameElement)``. But ``window.frameElement`` returns ``null`` when
+the parent is of ANOTHER origin, so the guard holds precisely in the case it
+meant to prevent. The condition that does work cross-origin is
+``window.top !== window.self``. **This belongs upstream.**
 
-Mientras tanto, el módulo lo tapa por los dos lados:
+Meanwhile, the module covers it from both sides:
 
-- **Servidor** (``models/ir_http.py``): si el pedido es la navegación de un
-  iframe (``Sec-Fetch-Dest: iframe``), el ``session_info`` sale con
-  ``tour_enabled`` y ``current_tour`` apagados. Evita que un tour ARRANQUE
-  dentro del panel.
-- **Cliente** (``static/src/no_tours_when_framed.js``): la puerta que importa.
-  ``tourState.getCurrentTour()`` devuelve ``null`` dentro de un frame, así que
-  no hay nada que reanudar. La reanudación lee ``localStorage``, no el
-  ``session_info``, y por eso el lado servidor solo no alcanzaba.
+- **Server** (``models/ir_http.py``): if the request is a frame's navigation
+  (``Sec-Fetch-Dest: iframe``), the ``session_info`` goes out with
+  ``tour_enabled`` and ``current_tour`` off. This stops a tour from STARTING
+  inside the panel.
+- **Client** (``static/src/no_tours_when_framed.js``): the door that matters.
+  ``tourState.getCurrentTour()`` returns ``null`` inside a frame, so there is
+  nothing to resume. Resumption reads ``localStorage``, not the
+  ``session_info``, which is why the server side alone was not enough.
 
-**Medido, con el par que discrimina** (un tour pendiente en los dos casos):
+**Neither half consults ``tuqui.embed_origins``**, and that is deliberate. The
+crash is Odoo's and happens to anyone framing this web client, whether this
+module authorised it or not. The client half cannot read a server parameter
+anyway, so gating the server half on the switch left the two halves of one fix
+under different rules — the sort of asymmetry that stays invisible until
+somebody frames this Odoo by another route.
+
+**Measured, with the pair that discriminates** (a pending tour in both cases):
 
 ====================  ===========================  ==============
-Dónde                 ¿Arranca/reanuda el tour?    ¿Crashea?
+Where                 Tour starts/resumes?         Crashes?
 ====================  ===========================  ==============
-Top-level (su Odoo)   **Sí** — onboarding intacto  No
-Dentro del panel      **No**                       No, 0 errores
+Top-level (own Odoo)  **Yes** — onboarding intact  No
+Inside the panel      **No**                       No, 0 errors
 ====================  ===========================  ==============
 
-Antes del arreglo: 59 ``SecurityError`` y pestaña muerta. Después: 0 errores y
-el bundle del tour ni se descarga.
+Before the fix: 59 ``SecurityError`` and a dead tab. After: 0 errors and the
+tour bundle is not even downloaded.
 
-Dos cosas que se decidieron y conviene no revertir sin leer esto:
+Two decisions worth not reverting without reading this:
 
-- **No se saca ``tour_service`` del registry**, aunque sería más directo: el
-  widget de onboarding y el POS hacen ``useService("tour_service")`` y
-  reventarían al renderizar.
-- **No se borra el progreso del usuario.** Se devuelve ``null`` sólo dentro del
-  frame; el ``localStorage`` queda intacto, así que en su Odoo de siempre el
-  tour sigue donde lo dejó. Hay un test que fija justamente que no se borre.
+- **``tour_service`` is not removed from the registry**, though it would be more
+  direct: the onboarding widget and the POS call ``useService("tour_service")``
+  and would blow up on render. Keeping the service alive also matters beyond
+  politeness — Tuqui drives the pointer on purpose inside the panel.
+- **The user's progress is not erased.** ``null`` is returned only inside the
+  frame; ``localStorage`` is left intact, so in their everyday Odoo the tour
+  carries on where they left it. There is a test pinning exactly that.
 
-Y se descartó falsificar ``window.frameElement`` para que la guarda de Odoo
-funcionara sola: es una línea, pero hay código de ``website`` y del editor que
-USA ese elemento (``dispatchEvent``, ``ownerDocument``), así que habría
-cambiado un crash de tours por roturas en otro lado.
+And faking ``window.frameElement`` so Odoo's own guard would work was discarded:
+it is one line, but ``website`` and the editor USE that element
+(``dispatchEvent``, ``ownerDocument``), so it would have traded a tour crash for
+breakage elsewhere.
 
-El riesgo que sí queda, y es mucho más chico
-============================================
+The other thing an embedded Odoo has to not do
+==============================================
 
-Con el panel en el mismo sitio, ``SameSite=Lax`` viaja entre páginas de ese
-sitio. O sea: el riesgo se mudó de "cualquier sitio de internet" a "cualquier
-página bajo nuestro propio dominio" — un subdominio comprometido o mal
-apuntado. Bajo nuestro control, pero no cero.
+The Odoo being shown may have ``tuqui_assistant`` installed — and that panel
+reopens itself if it was open before. Tuqui shows Odoo, that Odoo opens its own
+Tuqui, that Tuqui restores its panel with Odoo, and so on: every level loads a
+full web client and **the whole browser goes down**, not just the tab.
 
-**Medido, con el par que discrimina.** Dos páginas piden ``/web/become`` con un
-``<img>``, y se mira el header ``Cookie`` que el navegador adjuntó comparado
-contra el ``session_id`` exacto del admin (que "haya algún session_id" no
-prueba nada: Odoo le da una sesión anónima a cualquier visitante):
+That guard lives in ``tuqui_assistant``
+(``static/src/nested_guard.js``), not here. An earlier version lived in this
+module and could not hold: to run before that panel it had to declare
+``('before', 'tuqui_assistant/…')``, which made this module impossible to
+install without the assistant. It belongs with the behaviour being suppressed —
+the assistant deciding not to mount — rather than with the module that opened
+the door.
+
+The risk that does remain, and it is much smaller
+=================================================
+
+With the panel on the same site, ``SameSite=Lax`` travels between pages of that
+site. So the risk moved from "any site on the internet" to "any page under our
+own domain".
+
+**Measured, with the pair that discriminates.** Two pages request
+``/web/become`` with an ``<img>``, and the ``Cookie`` header the browser
+attached is compared against the admin's exact ``session_id`` (that "some
+session_id" showed up proves nothing: Odoo gives any visitor an anonymous
+session):
 
 =========================================  ==========================================
-Origen de la página que ataca              ¿Se llevó la sesión del admin?
+Origin of the attacking page               Did it carry the admin's session?
 =========================================  ==========================================
-Otro sitio (``evil.localhost``)            **No** — no le llegó ninguna cookie
-Mismo sitio (``evil.localtest.me``)        **Sí** — con el ``session_id`` del admin
+Another site (``evil.localhost``)          **No** — no cookie reached it
+Same site (``evil.localtest.me``)          **Yes** — with the admin's ``session_id``
 =========================================  ==========================================
 
-Eso vuelve concreta la condición de despliegue: **nada que se sirva como
-documento bajo el dominio de Tuqui puede ser contenido que no controlemos.**
+That makes the deployment condition concrete: **nothing served as a document
+under Tuqui's domain may be content we do not control.**
 
-Hoy eso se cumple, y conviene que quede anotado porque pasa a ser una
-propiedad a preservar: los artifacts publicados **no** son un vector, porque
-corren en un iframe cuyo ``sandbox`` NO incluye ``allow-same-origin`` (origen
-opaco, o sea que no es "mismo sitio" con nada) y su ruta pública devuelve JSON,
-no un documento servido en el origen de Tuqui. Leído del código de
-``tuqui-py`` (``web/src/lib/artifacts/sandbox.ts``,
-``tuqui_core/artifacts/public_router.py``), no medido en un navegador.
+**And this is where the design deserves a second look**, because the proxy
+itself is what puts foreign documents there. Each customer's Odoo is served as a
+document under ``odoo-<workspace>.tuqui.com``, and those hosts are same-site
+with each other and with the panel. A page authored inside customer A's Odoo —a
+``website`` page is the obvious one— can issue
+``<img src="https://odoo-B.tuqui.com/web/become">``, and a ``_is_system()`` user
+of B with a live session becomes superuser there, with no click. Attachments are
+not a vector (``Stream.get_response`` gives them ``default-src 'none'`` by
+default); document routes that render user-authored HTML with no CSP are.
 
-Lo que lo contiene:
+A cheaper variant needs no ``website`` at all: any document under
+``*.tuqui.com`` can set a cookie with ``Domain=.tuqui.com``. ``httponly``
+prevents reading, not writing a new, wider-scoped one — that is session fixation
+against the other workspaces and against the panel.
 
-- ``frame-ancestors`` sigue acotando **quién** puede embeber: no alcanza con ser
-  del mismo sitio, hay que estar en la lista que declaró el administrador.
-- Las rutas de datos de Odoo son JSON-only, así que un ``<form>`` POST no
-  escribe. Eso está fijado en ``tests/test_csrf_invariante.py``, porque es una
-  propiedad de Odoo de la que dependemos y podría cambiar sin que nada se
-  ponga rojo.
-- ``httponly`` sigue puesto (Odoo lo pone; este módulo no lo toca).
+Closing that class properly means the site not being ``tuqui.com`` and not being
+shared between workspaces — a dedicated domain with a wildcard Public Suffix
+List entry, where a workspace's panel and its proxied Odoo are same-site with
+each other while two workspaces are not. **That decision belongs to the proxy,
+not to this module**, and it should be taken before switching this on for a
+customer.
 
-Lo que queda abierto para el review
-===================================
+Reasoning is recorded here, not measured by this module: the artifacts published
+by Tuqui are not a vector, because they run in an iframe whose ``sandbox`` does
+NOT include ``allow-same-origin`` (opaque origin, so it is "same site" with
+nothing) and their public route returns JSON rather than a document served on
+Tuqui's origin. Read from the ``tuqui-py`` code
+(``web/src/lib/artifacts/sandbox.ts``, ``tuqui_core/artifacts/public_router.py``),
+not measured in a browser.
 
-- **¿Hace falta este módulo, o el header lo saca el proxy?** Siendo Tuqui el que
-  proxea, podría sacar el ``X-Frame-Options`` y reescribir la CSP al pasar, sin
-  instalar nada en el Odoo del cliente. A favor de este módulo: el
-  administrador del cliente **declara** explícitamente quién puede embeber su
-  Odoo, y ese consentimiento vive con el dueño del dato en vez de decidirlo
-  Tuqui por su cuenta. Es una decisión de producto, no de código.
-- **Validar que el origen declarado sea same-site** con este Odoo sería un
-  buen guardarraíl (hoy se puede declarar un origen de otro sitio y el panel va
-  a mostrar el login sin explicar por qué). No se implementó a propósito:
-  saber si dos hosts comparten dominio registrable exige la Public Suffix List,
-  y una aproximación naíf del tipo "comparar las dos últimas etiquetas" da mal
-  justo en los dominios que más usamos (``.com.ar``).
+What contains the rest:
 
-Notas
+- ``frame-ancestors`` still bounds **who** may frame: being same-site is not
+  enough, you have to be on the list the administrator declared.
+- Odoo's data routes are JSON-only, so a ``<form>`` POST does not write. That is
+  pinned in ``tests/test_csrf_invariant.py``, because it is a property of Odoo
+  we depend on and it could change without anything turning red. Note it does
+  **not** cover ``/web/become``, which is a GET and needs no body.
+- ``httponly`` is still set (Odoo sets it; this module does not touch it).
+
+Decisions taken
+===============
+
+- **The permission lives in this module and not in ``tuqui``.** The companion is
+  server-only and ships on 18.0 and 19.0; this feature cannot be switched on
+  without the tour fix, which is 19-only. A switch the module carrying it cannot
+  safely allow does not belong there. One feature, one module.
+- **Is the module needed at all, or could the proxy strip the header?** The
+  proxy could, but the tour fix is not header work and can only live inside
+  Odoo — so the module is needed regardless. On top of that, the customer's
+  administrator **declares** who may frame their Odoo, and that consent lives
+  with the owner of the data; and a misconfigured proxy is not enough on its own
+  to expose anyone.
+- **Validating that the declared origin is same-site** is not done here on
+  purpose. It requires the Public Suffix List, which is a living dataset that
+  would rot inside a module installed on every customer's Odoo — and it is a
+  property of the Tuqui deployment, which chooses both hosts, not of the
+  customer's Odoo. The guardrail belongs in Tuqui, where the panel is
+  configured.
+
+Notes
 =====
 
-- El parámetro se lee en cada request, pero ``get_param`` está ormcacheado, así
-  que en un despliegue multi-worker sacar el permiso puede tardar en surtir
-  efecto en los workers que ya lo tenían cacheado. Medido: con el valor cambiado
-  por otro proceso, este módulo siguió respondiendo con el anterior hasta
-  reiniciar. Si la revocación tiene que ser inmediata, hay que forzar la
-  invalidación.
-- Un ``frame-ancestors`` con la lista NO es lo mismo que permitir a cualquiera:
-  es lo único que distingue esto de sacar la protección de clickjacking.
+- The parameter is read on every request, but ``get_param`` is ormcached, so on
+  a multi-worker deployment revoking the permission may take a while to reach
+  workers that already had it cached. Measured: with the value changed by
+  another process, this module kept answering with the previous one until a
+  restart. If revocation has to be immediate, the invalidation has to be forced.
+- A ``frame-ancestors`` carrying the list is NOT the same as allowing anyone: it
+  is the only thing that separates this from removing clickjacking protection.

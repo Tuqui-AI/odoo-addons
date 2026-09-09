@@ -1,35 +1,36 @@
-"""Dejar que un origen declarado muestre la pantalla de Odoo dentro de un iframe.
+"""Let a declared origin show this Odoo screen inside an iframe.
 
-EL PROBLEMA, EN CRIOLLO. Quien conversa con el asistente sobre un pedido termina
-saltando entre dos pestañas: la conversación de un lado, el registro del otro.
-Poder ver el registro al lado de lo que se está hablando es la diferencia entre
-"contame qué dice" y "mirá lo que dice". Odoo, por defecto, no deja que ninguna
-página suya se muestre dentro de otro sitio.
+THE PROBLEM, PLAINLY. Someone discussing a record with the assistant ends up
+jumping between two tabs: the conversation on one side, the record on the
+other. Seeing the record next to what is being said is the difference between
+"tell me what it says" and "look at what it says". Odoo, by default, lets no
+page of its own be shown inside another site.
 
-POR QUÉ NO LO DEJA, Y POR QUÉ ESO ESTÁ BIEN. Un iframe ajeno puede ponerse
-encima de la pantalla de Odoo, invisible, y hacer que el usuario le haga clic a
-algo que no ve (clickjacking). El default de Odoo protege de eso, y este módulo
-NO lo saca: lo cambia por una lista de orígenes que el administrador declara. Sin
-esa lista cargada, no cambia nada.
+WHY IT REFUSES, AND WHY THAT IS RIGHT. A foreign iframe can sit invisibly on
+top of an Odoo screen and make the user click something they cannot see
+(clickjacking). Odoo's default protects against that, and this module does NOT
+remove it: it replaces it with a list of origins the administrator declares.
+With that list empty, nothing changes.
 
-HACE UNA SOLA COSA, Y ESO ES EL DISEÑO. Permite el frame, y NADA MÁS: no toca
-la cookie de sesión. Que la sesión viaje adentro del iframe no es trabajo de
-este módulo — es consecuencia de servir el panel en el MISMO SITIO que este
-Odoo (mismo dominio registrable, aunque sea otro host). ``SameSite`` se define
-por sitio, no por origen, así que la cookie normal de Odoo entra al iframe sola.
+IT DOES ONE THING, AND THAT IS THE DESIGN. It allows the frame, and NOTHING
+else: it does not touch the session cookie. The session travelling into the
+iframe is not this module's doing — it follows from serving the panel on the
+SAME SITE as this Odoo (same registrable domain, even under another host).
+``SameSite`` is defined per site, not per origin, so Odoo's normal cookie walks
+into the iframe on its own.
 
-POR QUÉ ESTO NO AFLOJA LA COOKIE, Y POR QUÉ IMPORTA. Una versión anterior
-reemitía la sesión con ``SameSite=None`` para que viajara a un panel de OTRO
-sitio. Medido: eso abría dos canales que CORS no cubre —un WebSocket
-cross-origin que lee el bus en vivo del usuario, y un ``<img>`` a
-``/web/become`` que escala a superusuario sin un clic—. Se probó
-``Partitioned`` (CHIPS) como mitigante y cierra el ``<img>``, pero rompe el
-panel: al reabrirlo en otra pestaña, Odoo entra en bucle infinito contra
-``/web/login``. Ambas cosas están medidas antes/después contra Chrome real.
+WHY THIS DOES NOT LOOSEN THE COOKIE, AND WHY THAT MATTERS. An earlier version
+reissued the session with ``SameSite=None`` so it would travel to a panel on
+ANOTHER site. Measured: that opened two channels CORS does not cover — a
+cross-origin WebSocket reading the user's live bus, and an ``<img>`` to
+``/web/become`` escalating to superuser with no click. ``Partitioned`` (CHIPS)
+was tried as a mitigation and it does close the ``<img>``, but it breaks the
+panel: reopening it in another tab sends Odoo into an infinite loop against
+``/web/login``. Both were measured before and after against a real Chrome.
 
-La salida no fue un mitigante mejor: fue sacarle el problema de encima. Con el
-panel servido same-site, no hay nada que aflojar, así que esos dos vectores
-nunca se abren. El README tiene el detalle y la precondición de despliegue.
+The way out was not a better mitigation, it was removing the problem. With the
+panel served same-site there is nothing to loosen, so neither vector ever
+opens. The README carries the detail and the deployment precondition.
 """
 
 import logging
@@ -39,12 +40,12 @@ from odoo.http import request
 
 _logger = logging.getLogger(__name__)
 
-#: Parámetro que enciende el módulo. Lista de orígenes separados por espacios,
-#: exactamente como los espera ``frame-ancestors``:
+#: The parameter that turns the module on. A space-separated list of origins,
+#: exactly as ``frame-ancestors`` expects them:
 #:
 #:     tuqui.embed_origins = "https://tuqui.com https://staging.tuqui.com"
 #:
-#: Vacío o ausente (el default) = Odoo se comporta como siempre.
+#: Empty or absent (the default) = Odoo behaves as it always did.
 EMBED_ORIGINS_PARAM = "tuqui.embed_origins"
 
 
@@ -53,50 +54,58 @@ class IrHttp(models.AbstractModel):
 
     @classmethod
     def _tuqui_embed_origins(cls):
-        """Los orígenes autorizados a embeber, o ``None`` si está apagado.
+        """The origins allowed to frame us, or ``None`` when switched off.
 
-        Se lee por request y no se cachea a propósito: revocar un permiso de
-        embeber tiene que surtir efecto cuando el administrador lo saca, no
-        cuando alguien reinicie el servidor.
+        Read per request, but ``get_param`` is ormcached: on a multi-worker
+        deployment, revoking the permission may take a while to reach workers
+        that already had it cached. Measured: with the value changed by another
+        process, this kept answering with the previous one until a restart. If
+        revocation has to be immediate, the cache has to be invalidated — not
+        caching here is not enough.
         """
         try:
             value = request.env["ir.config_parameter"].sudo().get_param(EMBED_ORIGINS_PARAM)
         except Exception:
-            # Todavía no hay env (rutas ``auth='none'``, errores tempranos del
-            # dispatch). Sin poder leer la lista, el default es no permitir.
+            # No env yet (``auth='none'`` routes, early dispatch errors). Unable
+            # to read the list, the default is to allow nothing.
             return None
         value = (value or "").strip()
         return value or None
 
     def session_info(self):
-        """Apagar los tours cuando esta pantalla se está mostrando embebida.
+        """Switch tours off when this screen is being shown framed.
 
-        POR QUÉ, Y ES UN BUG DE ODOO. Con un tour de onboarding pendiente, el
-        webclient dentro de un iframe de otro origen **le crashea la pestaña**:
-        el puntero del tour busca el documento del padre, eso tira
-        ``SecurityError`` en bucle y explota la memoria del renderer. Medido:
-        con un solo tour pendiente el navegador se cae; con ese tour consumido,
-        anda perfecto.
+        WHY, AND IT IS AN ODOO BUG. With a pending onboarding tour, the web
+        client inside a cross-origin iframe **kills the browser tab**: the tour
+        pointer reaches for the parent document, that throws ``SecurityError``
+        in a loop and blows up the renderer's memory. Measured: with a single
+        pending tour the browser goes down; with that tour consumed, it runs
+        fine.
 
-        Odoo YA intenta evitarlo — ``tour_service.js`` arranca los tours dentro
-        de ``if (!window.frameElement)`` —, pero ``window.frameElement``
-        devuelve ``null`` cuando el padre es de OTRO origen, así que la guarda
-        se cumple justo en el caso que quería prevenir. Es una línea, y es de
-        Odoo, no nuestra: corresponde reportarla arriba.
+        Odoo ALREADY tries to prevent this — ``tour_service.js`` starts tours
+        inside ``if (!window.frameElement)`` — but ``window.frameElement``
+        returns ``null`` when the parent is of ANOTHER origin, so the guard
+        holds precisely in the case it meant to prevent. It is one line, and it
+        is Odoo's, not ours: it belongs upstream.
 
-        Mientras tanto, acá se corta de raíz: si el pedido es la navegación de
-        un iframe, el ``session_info`` sale con los tours apagados. Se apagan
-        las DOS puertas —``tour_enabled`` y ``current_tour``— porque el JS
-        arranca un tour por cualquiera de las dos.
+        THE EMBED SWITCH IS NOT CONSULTED, and that is deliberate. The crash is
+        Odoo's and happens to anyone showing this web client inside a frame,
+        whether this module authorised it or not. Gating it on
+        ``tuqui.embed_origins`` left the client-side half (which cannot read a
+        server parameter) applying always and the server-side half applying only
+        sometimes: two halves of one fix under different rules.
 
-        NO se toca la preferencia guardada del usuario: esto es por pedido, así
-        que su Odoo de siempre sigue mostrándole el onboarding igual.
+        There is a single rule: if the request is a frame's navigation, the
+        ``session_info`` goes out with tours off. Both doors are shut —
+        ``tour_enabled`` and ``current_tour`` — because the JS starts a tour
+        through either.
+
+        The user's stored preference is NOT touched: this is per request, so
+        their everyday Odoo keeps showing them the onboarding.
         """
         info = super().session_info()
-        if not self._tuqui_embed_origins():
-            return info
-        # `Sec-Fetch-Dest` lo pone el browser y no se puede falsificar desde
-        # JS. `iframe` es exactamente "esta navegación es la de un frame".
+        # `Sec-Fetch-Dest` is set by the browser and cannot be forged from JS.
+        # `iframe` means exactly "this navigation is a frame's".
         if (request.httprequest.headers.get("Sec-Fetch-Dest") or "").lower() != "iframe":
             return info
         if "tour_enabled" in info:
@@ -112,36 +121,51 @@ class IrHttp(models.AbstractModel):
         if not origins:
             return
         try:
-            # 1. QUIÉN puede embeber. `frame-ancestors` le gana a X-Frame-Options
-            #    en los browsers actuales, pero igual se saca el XFO: un browser
-            #    que sólo entienda XFO tiene que ver la lista, no un DENY.
-            response.headers.pop("X-Frame-Options", None)
-            # `'self'` VA SIEMPRE. Odoo embebe sus propias páginas en iframes del
-            # mismo origen —el visor de PDF y de texto (`file_viewer.xml`) y el
-            # preview de reportes— y una lista sin `'self'` los deja en blanco
-            # para TODA la base en cuanto se prende el switch. El default de Odoo
-            # es, justamente, `frame-ancestors 'self'`.
+            # `'self'` IS ALWAYS THERE. Odoo frames its own pages same-origin —
+            # the PDF and text viewer (`file_viewer.xml`) and the report preview
+            # — and a list without `'self'` leaves those blank for the WHOLE
+            # database the moment the switch goes on. Odoo's own default is,
+            # precisely, `frame-ancestors 'self'`.
             #
-            # Y la CSP se COMPLETA, no se reemplaza: `set_csp` le pone
-            # `default-src 'none'` a toda respuesta `image/*` (odoo/http.py), que
-            # es lo que sandboxea un SVG subido como adjunto. Sobrescribir el
-            # header dejaba ese SVG ejecutando script en el origen de Odoo — un
-            # agujero que no tiene nada que ver con embeber, y que aparecía en
-            # todas las respuestas, no sólo en las embebidas.
-            csp = response.headers.get("Content-Security-Policy") or ""
-            directivas = [
-                d.strip() for d in csp.split(";") if d.strip() and not d.strip().lower().startswith("frame-ancestors")
+            # And the CSP is COMPLETED, not replaced: `set_csp` puts
+            # `default-src 'none'` on every `image/*` response (odoo/http.py),
+            # which is what sandboxes an SVG uploaded as an attachment.
+            # Overwriting the header left that SVG running script in Odoo's
+            # origin — a hole with nothing to do with embedding, present on
+            # every response and not only on framed ones.
+            #
+            # `getlist` and not `get`: werkzeug headers are multi-valued and
+            # `get` returns only the first, so a second CSP set by another
+            # module was silently dropped on reassignment.
+            previous = "; ".join(v for v in response.headers.getlist("Content-Security-Policy") if v)
+            directives = [
+                d.strip()
+                for d in previous.split(";")
+                if d.strip() and not d.strip().lower().startswith("frame-ancestors")
             ]
-            directivas.append("frame-ancestors 'self' %s" % origins)
-            response.headers["Content-Security-Policy"] = "; ".join(directivas)
+            directives.append("frame-ancestors 'self' %s" % origins)
+            policy = "; ".join(directives)
 
-            # Y LA COOKIE NO SE TOCA. Ver el docstring del módulo: la sesión
-            # viaja porque el panel se sirve en el MISMO SITIO que este Odoo, no
-            # porque acá se afloje nada. `tests/test_cookie_is_never_touched.py`
-            # fija ese invariante, y está calibrado por mutación: reintroducir
-            # la reemisión pone en rojo sus tres tests, y sólo esos.
+            # Order matters: the value is built BEFORE any header is touched.
+            # The other way round, an exception between the `pop` and the
+            # assignment left the response with no XFO and no `frame-ancestors`
+            # — that is, with no framing protection at all, which is worse than
+            # having done nothing.
+            #
+            # The XFO is dropped as well as setting the CSP: `frame-ancestors`
+            # wins over X-Frame-Options in current browsers, but a browser that
+            # only understands XFO has to see the list, not a DENY.
+            response.headers.pop("X-Frame-Options", None)
+            response.headers["Content-Security-Policy"] = policy
+
+            # AND THE COOKIE IS NOT TOUCHED. See the module docstring: the
+            # session travels because the panel is served on the SAME SITE as
+            # this Odoo, not because anything is loosened here.
+            # `tests/test_cookie_is_never_touched.py` pins that invariant, and
+            # it is mutation-calibrated: reintroducing the reissue turns its
+            # three tests red, and only those.
         except Exception:
-            # Un módulo de conveniencia no puede tumbar una respuesta de Odoo.
-            # Tampoco fallar callado: sin el log, "el panel se ve en blanco" no
-            # tendría dónde investigarse.
-            _logger.exception("tuqui_embed: no se pudo aplicar la política de embed")
+            # A convenience module cannot take down an Odoo response. Nor fail
+            # quietly: without the log, "the panel came up blank" would have
+            # nowhere to be investigated.
+            _logger.exception("tuqui_embed: could not apply the embed policy")

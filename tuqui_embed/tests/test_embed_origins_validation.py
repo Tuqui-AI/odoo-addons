@@ -39,24 +39,24 @@ class TestEmbedOriginsValidation(TransactionCase):
         self.assertEqual(param.value, "http://localhost:5173")
 
     def test_accepts_http_on_a_localhost_subdomain(self):
-        """`.localhost` está reservado para loopback (RFC 6761), así que
-        cualquier subdominio suyo es tan local como `localhost` a secas."""
+        """`.localhost` is reserved for loopback (RFC 6761), so any subdomain
+        of it is as local as bare `localhost`."""
         param = self._param("")
         param.write({"value": "http://panel.localhost:9400"})
         self.assertEqual(param.value, "http://panel.localhost:9400")
 
     def test_accepts_a_plain_http_origin_when_this_odoo_is_also_plain_http(self):
-        """El caso que faltaba, y que apareció usando el módulo.
+        """The missing case, and it turned up while using the module.
 
-        El diseño nuevo pide que el panel sea del MISMO SITIO que Odoo — dos
-        nombres bajo un dominio común—, y eso en local no se arma sólo con
-        `localhost` (los subdominios de `.localhost` el browser los trata como
-        sitios distintos). Con la regla anterior, un panel de desarrollo en
-        `http://panel.midominio.test` era imposible de declarar, o sea que
-        desarrollar la propia feature exigía TLS local.
+        The new design requires the panel to be on the SAME SITE as Odoo — two
+        names under a common domain — and that cannot be assembled locally with
+        `localhost` alone (browsers treat `.localhost` subdomains as separate
+        sites). Under the previous rule, a development panel at
+        `http://panel.mydomain.test` was impossible to declare, so developing
+        the feature itself required local TLS.
 
-        Si este Odoo ya se sirve por http, la sesión viaja en claro de todos
-        modos: exigirle https al embebedor no protegía nada.
+        If this Odoo is already served over http, the session travels in the
+        clear anyway: demanding https from the embedder protected nothing.
         """
         self.env["ir.config_parameter"].sudo().set_param("web.base.url", "http://odoo.midominio.test:8069")
         param = self._param("")
@@ -64,20 +64,21 @@ class TestEmbedOriginsValidation(TransactionCase):
         self.assertEqual(param.value, "http://panel.midominio.test:9400")
 
     def test_rejects_plain_http_when_this_odoo_is_https(self):
-        """El discriminador del test de arriba: la misma dirección, rechazada
-        cuando el deployment sí es https. Sin este par, la cláusula de
-        desarrollo sería un agujero y no una excepción."""
+        """The discriminator for the test above: the same address, rejected
+        when the deployment IS https. Without this pair, the development clause
+        would be a hole rather than an exception."""
         self.env["ir.config_parameter"].sudo().set_param("web.base.url", "https://odoo.midominio.test")
         param = self._param("")
         with self.assertRaises(ValidationError):
             param.write({"value": "http://panel.midominio.test:9400"})
 
     def test_rejects_plain_http_when_the_base_url_says_nothing(self):
-        """Sin un `web.base.url` que diga qué es el deployment, el default
-        tiene que ser el estricto.
+        """With no `web.base.url` saying what the deployment is, the default
+        has to be the strict one.
 
-        Se vacía en vez de borrarse porque Odoo no deja borrar ese registro
-        (`unlink_default_parameters`), y vacío ejerce el mismo camino.
+        It is emptied rather than deleted because Odoo does not allow deleting
+        that record (`unlink_default_parameters`), and empty exercises the same
+        path.
         """
         self.env["ir.config_parameter"].sudo().set_param("web.base.url", "")
         param = self._param("")
@@ -102,13 +103,12 @@ class TestEmbedOriginsValidation(TransactionCase):
             param.write({"value": "https:"})
 
     def test_rejects_plain_http_on_a_real_host(self):
-        """En un deployment https, `http://` fuera de loopback entrega el
-        permiso de framing a un host que nadie puede autenticar.
+        """On an https deployment, `http://` outside loopback hands framing
+        permission to a host nobody can authenticate.
 
-        El `web.base.url` se fija explícitamente: una base de test suele
-        traerlo en `http://localhost:8069`, y con eso la cláusula de
-        desarrollo dejaría pasar cualquier http — el test aprobaría sin medir
-        nada.
+        `web.base.url` is set explicitly: a test database usually carries it as
+        `http://localhost:8069`, and with that the development clause would let
+        any http through — the test would pass while measuring nothing.
         """
         self.env["ir.config_parameter"].sudo().set_param("web.base.url", "https://odoo.example.com")
         param = self._param("")

@@ -1,20 +1,20 @@
 {
     "name": "Tuqui Embed",
-    "summary": "Dejar que Tuqui muestre la pantalla de Odoo dentro de su panel",
+    "summary": "Let Tuqui show the Odoo screen inside its panel",
     "version": "19.0.1.0.0",
     "category": "Hidden",
     "author": "Tuqui-AI",
     "website": "https://tuqui.com",
     "license": "LGPL-3",
-    # `web_tour` está para poder apagarle los tours a una pantalla embebida
-    # (ver `static/src/no_tours_when_framed.js`). No agrega peso: es
-    # `auto_install: True` y sólo depende de `web`, así que ya está instalado
-    # en cualquier Odoo con webclient. Declararlo además fija el orden de
-    # carga del asset: el nuestro tiene que correr DESPUÉS del suyo.
+    # `web_tour` is here so an embedded screen can have its tours switched off
+    # (see `static/src/no_tours_when_framed.js`). It adds no weight: it is
+    # `auto_install: True` and depends only on `web`, so it is already installed
+    # in any Odoo with a web client. Declaring it also pins the asset load
+    # order: ours has to run AFTER theirs.
     "depends": ["base", "web", "tuqui", "web_tour"],
-    # En `demo` no: es configuración real. Va con la clave vacía, así que
-    # instalarlo no habilita nada — sólo hace visible el parámetro y su
-    # explicación en Ajustes → Técnico.
+    # Not under `demo`: this is real configuration. It ships with an empty
+    # value, so installing it enables nothing — it only makes the parameter and
+    # its explanation visible under Settings → Technical.
     "data": [
         "data/ir_config_parameter.xml",
     ],

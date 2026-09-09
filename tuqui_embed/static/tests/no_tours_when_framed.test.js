@@ -8,43 +8,44 @@ import { tourState } from "@web_tour/js/tour_state";
 import { framing } from "@tuqui_embed/no_tours_when_framed";
 
 /**
- * La red del guard que evita que un tour se reanude dentro del panel.
+ * The net under the guard that keeps a tour from resuming inside the panel.
  *
- * Por qué tiene test propio: su falla es SILENCIOSA. Si alguien lo rompe, nada
- * se pone rojo — simplemente vuelve a crashearse la pestaña de quien tenga un
- * onboarding a medias, y eso se descubre en un cliente. Lo que se fija acá es
- * el par completo, porque las dos mitades importan igual: dentro del frame no
- * se reanuda, y FUERA del frame se sigue reanudando. Un guard que apagara los
- * tours siempre pasaría la mitad del test y rompería el onboarding de todos.
+ * Why it earns its own test: its failure is SILENT. If someone breaks it,
+ * nothing turns red — the tab simply starts dying again for whoever has a
+ * half-finished onboarding, and that gets discovered at a customer. What is
+ * pinned here is the complete pair, because both halves matter equally: inside
+ * the frame it does not resume, and OUTSIDE the frame it still does. A guard
+ * that switched tours off always would pass half of this test and break
+ * everyone's onboarding.
  */
-describe("tuqui_embed: no reanudar tours dentro de un frame", () => {
-    test("dentro de un frame, no hay tour para reanudar", () => {
+describe("tuqui_embed: do not resume tours inside a frame", () => {
+    test("inside a frame there is no tour to resume", () => {
         patchWithCleanup(framing, { isFramed: () => true });
-        patchWithCleanup(browser.localStorage, { getItem: () => "un_tour_a_medias" });
+        patchWithCleanup(browser.localStorage, { getItem: () => "a_half_finished_tour" });
 
         expect(tourState.getCurrentTour()).toBe(null);
     });
 
-    test("fuera de un frame, el tour guardado se sigue reanudando", () => {
+    test("outside a frame the stored tour still resumes", () => {
         patchWithCleanup(framing, { isFramed: () => false });
-        patchWithCleanup(browser.localStorage, { getItem: () => "un_tour_a_medias" });
+        patchWithCleanup(browser.localStorage, { getItem: () => "a_half_finished_tour" });
 
-        expect(tourState.getCurrentTour()).toBe("un_tour_a_medias");
+        expect(tourState.getCurrentTour()).toBe("a_half_finished_tour");
     });
 
-    test("el progreso guardado NO se borra por estar embebido", () => {
-        // El guard miente hacia arriba, no destruye: si borrara el
-        // `localStorage`, el usuario perdería el avance de su onboarding en su
-        // propio Odoo. Se verifica que nadie llame a los `removeItem`.
-        const borrados = [];
+    test("stored progress is NOT erased by being embedded", () => {
+        // The guard lies upwards, it does not destroy: if it cleared
+        // `localStorage`, the user would lose their onboarding progress in
+        // their own Odoo. We check that nobody calls the `removeItem`s.
+        const removed = [];
         patchWithCleanup(framing, { isFramed: () => true });
         patchWithCleanup(browser.localStorage, {
-            getItem: () => "un_tour_a_medias",
-            removeItem: (clave) => borrados.push(clave),
+            getItem: () => "a_half_finished_tour",
+            removeItem: (key) => removed.push(key),
         });
 
         tourState.getCurrentTour();
 
-        expect(borrados).toEqual([]);
+        expect(removed).toEqual([]);
     });
 });

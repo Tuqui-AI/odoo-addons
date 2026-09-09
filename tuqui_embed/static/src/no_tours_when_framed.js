@@ -1,61 +1,66 @@
 /** @odoo-module **/
 
 /**
- * No reanudar tours cuando esta pantalla se está mostrando dentro de otro sitio.
+ * Do not resume tours while this screen is being shown inside another site.
  *
- * EL PROBLEMA, MEDIDO. Con un tour de onboarding en curso, el webclient dentro
- * de un iframe de otro origen **le crashea la pestaña**: el puntero del tour
- * busca el documento del padre, eso tira `SecurityError` en bucle (59 contados
- * en pocos segundos) y se lleva la memoria del renderer.
+ * THE PROBLEM, MEASURED. With an onboarding tour in progress, the web client
+ * inside a cross-origin iframe **kills the browser tab**: the tour pointer
+ * reaches for the parent document, that throws `SecurityError` in a loop (59
+ * counted within seconds) and takes the renderer's memory with it.
  *
- * Y el tour no arranca en el panel: arranca en el Odoo de siempre. El usuario
- * entra, el tour empieza y deja su estado en `localStorage`; después abre el
- * panel —mismo origen, mismo `localStorage`— y el tour se REANUDA adentro del
- * iframe. Por eso apagarlo del lado del servidor no alcanza: la reanudación
- * lee `localStorage`, no el `session_info`.
+ * And the tour does not start in the panel: it starts in the everyday Odoo. The
+ * user goes in, the tour begins and leaves its state in `localStorage`; later
+ * they open the panel — same origin, same `localStorage` — and the tour is
+ * RESUMED inside the iframe. Which is why switching it off server-side is not
+ * enough: resumption reads `localStorage`, not `session_info`.
  *
- * ES UN BUG DE ODOO, Y ESTÁ EN UNA LÍNEA. `tour_service.js` ya intenta evitar
- * esto: arranca y reanuda tours dentro de `if (!window.frameElement)`. Pero
- * `window.frameElement` devuelve `null` cuando el padre es de OTRO origen, así
- * que la guarda se cumple justo en el caso que quería prevenir. La condición
- * que sí funciona cross-origin es `window.top !== window.self`, la de acá.
- * Corresponde reportarlo arriba.
+ * IT IS AN ODOO BUG, AND IT IS ONE LINE. `tour_service.js` already tries to
+ * prevent this: it starts and resumes tours inside `if (!window.frameElement)`.
+ * But `window.frameElement` returns `null` when the parent is of ANOTHER
+ * origin, so the guard holds precisely in the case it meant to prevent. The
+ * condition that does work cross-origin is `window.top !== window.self`, the
+ * one used here. It belongs upstream.
  *
- * POR QUÉ SE PARCHEA `tourState` Y NO SE SACA EL SERVICIO. Sacar
- * `tour_service` del registry rompería a quien lo pide: el widget de
- * onboarding y el POS hacen `useService("tour_service")` y reventarían al
- * renderizar. Devolviendo `null` acá, el servicio sigue vivo y `startTour`
- * queda disponible para quien lo llame a mano; sólo se corta la reanudación
- * automática.
+ * IT IS NOT GATED ON THE EMBED SWITCH, and that is deliberate. The crash is
+ * Odoo's and happens to anyone framing this web client. This half could not
+ * read a server parameter anyway, so gating the server half on it left the two
+ * halves of one fix under different rules.
  *
- * Y NO SE BORRA EL PROGRESO DEL USUARIO. Se devuelve `null` sólo dentro del
- * frame: el `localStorage` queda intacto, así que en su Odoo de siempre el
- * tour sigue donde lo dejó.
+ * WHY `tourState` IS PATCHED AND THE SERVICE IS NOT REMOVED. Removing
+ * `tour_service` from the registry would break whoever asks for it: the
+ * onboarding widget and the POS call `useService("tour_service")` and would
+ * blow up on render. Returning `null` here keeps the service alive and
+ * `startTour` available to anyone calling it by hand; only automatic
+ * resumption is cut. That matters beyond politeness — Tuqui drives the pointer
+ * on purpose inside the panel, and that has to keep working.
  *
- * TAMBIÉN SE DESCARTÓ falsificar `window.frameElement` para que la guarda de
- * Odoo funcionara sola. Es una línea y es tentador, pero hay código de
- * `website` y del editor que USA ese elemento (`dispatchEvent`,
- * `ownerDocument`): habría cambiado un crash de tours por roturas en otro
- * lado.
+ * AND THE USER'S PROGRESS IS NOT ERASED. `null` is returned only inside the
+ * frame: `localStorage` is left intact, so in their everyday Odoo the tour
+ * carries on where they left it.
+ *
+ * FAKING `window.frameElement` WAS ALSO DISCARDED, so Odoo's own guard would
+ * work by itself. It is one line and it is tempting, but `website` and the
+ * editor USE that element (`dispatchEvent`, `ownerDocument`): it would have
+ * traded a tour crash for breakage elsewhere.
  */
 
 import { patch } from "@web/core/utils/patch";
 import { tourState } from "@web_tour/js/tour_state";
 
 /**
- * Vive en un objeto —y no como función suelta— para que el test pueda
- * sustituirlo. El patch se aplica SIEMPRE y la decisión se toma en cada
- * llamada: así no depende del estado del frame al momento de importar, que es
- * justamente lo que no se puede simular en un test.
+ * It lives on an object — rather than as a loose function — so the test can
+ * substitute it. The patch is applied ALWAYS and the decision is taken on every
+ * call: that way it does not depend on the frame's state at import time, which
+ * is precisely what cannot be simulated in a test.
  */
 export const framing = {
-    /** ¿Esta página está dentro de un frame? Vale también cross-origin. */
+    /** Is this page inside a frame? Holds cross-origin too. */
     isFramed() {
         try {
             return window.top !== window.self;
         } catch {
-            // Leer `window.top` cross-origin no tira, pero si algún día lo
-            // hiciera, estar enmarcado es la respuesta conservadora.
+            // Reading `window.top` cross-origin does not throw, but if it ever
+            // did, being framed is the conservative answer.
             return true;
         }
     },
