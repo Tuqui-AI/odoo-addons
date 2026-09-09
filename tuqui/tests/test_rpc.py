@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from odoo.addons.tuqui.controllers.rpc import (
     _DEFAULT_STATEMENT_TIMEOUT_MS,
+    _ONLY_AS_A_USER,
     _classify,
     _statement_timeout_ms,
 )
@@ -219,18 +220,25 @@ class TestTuquiRpcGateway(HttpCase):
         untyped_reads = (
             "get_view",  # integrations/odoo/search_view.py
             "check_access_rights",  # integrations/odoo/adapter.py ← open_odoo_view
-            "has_group",  # workspaces/service.py
         )
-        # Not called yet, but on the list because they are the natural vector of
-        # the view-metadata work (#73440). Asserted one by one on purpose: a
-        # tuple that lists three of thirteen is a guard that does not guard —
-        # dropping any of the others would leave the suite green.
+        # Not called through THIS gateway yet, so they are here to be classified
+        # right the day they are. Asserted one by one on purpose: a tuple that
+        # lists three of fourteen is a guard that does not guard — dropping any
+        # of the others would leave the suite green.
+        #
+        # `has_group` belongs here and not above: workspaces/service.py does call
+        # it, but through `build_adapter(...)` → JsonRpcTransport, which never
+        # posts to /tuqui/rpc. Listing it as a live call site of this gateway
+        # justified the entry with a route that does not exist.
         untyped_reads_ahead = (
             "get_views",
             "has_access",
+            "has_group",
             "has_groups",
             "get_metadata",
             "get_property_definition",
+            "get_formview_id",
+            "get_formview_action",
             "web_read",
             "web_search_read",
             "web_read_group",
@@ -239,6 +247,22 @@ class TestTuquiRpcGateway(HttpCase):
             self.assertEqual(_classify(method), "read", f"{method} must classify as a read")
         for method in writes:
             self.assertEqual(_classify(method), "write", f"{method} must classify as a write")
+
+    def test_only_as_a_user_entries_classify_as_read(self):
+        """Every `_ONLY_AS_A_USER` name must also be in `_READ_METHODS`.
+
+        Otherwise its branch in `_evaluate_policy` is dead code: the
+        `op_type != "read"` return fires first and the call is refused as
+        `connection_read_only`, so the audit log carries a reason that hides
+        WHY it was really refused. Nothing about the shape of the two sets
+        makes this hold on its own.
+        """
+        for method in _ONLY_AS_A_USER:
+            self.assertEqual(
+                _classify(method),
+                "read",
+                f"{method} is in _ONLY_AS_A_USER but does not classify as a read — its gate is dead code",
+            )
 
     # ─── Perimeter ───────────────────────────────────────────────────
 
@@ -614,8 +638,16 @@ class TestTuquiRpcGateway(HttpCase):
         # Exercised with `has_access`, not with the method the backend calls
         # today: `check_access_rights` is @api.deprecated in 19, so dispatching
         # it logs a DeprecationWarning and the runbot fails the build on it.
-        # Same classification, same gate, same code path — and `has_access` is
-        # where the caller has to end up anyway (see the note in rpc.py).
+        #
+        # Same classification and same gate — but NOT the same code path, and
+        # that is worth being honest about: `_dispatch` branches on
+        # `method._api_model`, which is exactly where the two differ
+        # (`has_access` is a record method taking `[[], "read"]`).
+        # The @api.model dispatch of `check_access_rights` therefore has no
+        # end-to-end coverage here. Deliberate: the deprecation warning it
+        # raises fails the build, and the caller is migrating off it anyway
+        # (Tuqui-AI/tuqui#884 moves adapter.py to `has_access` on 18+), so this
+        # entry stays only for backends that have not updated yet.
         resp = self._rpc("res.partner", "has_access", args=[[], "read"], expect_status=200)
         self.assertTrue(resp.json()["ok"])
 
@@ -632,12 +664,16 @@ class TestTuquiRpcGateway(HttpCase):
         refused here, with a reason that says why instead of handing back an
         answer that means nothing.
         """
-        for method, args in (
-            ("check_access_rights", ["read"]),
-            ("has_access", [[], "unlink"]),
-            ("has_group", [[], "base.group_system"]),
+        # `has_group` lives on res.users, not on res.partner. The gate fires
+        # before `_dispatch`, so asking the wrong model passes either way — and
+        # that is the problem: the test could not tell "refused by policy" from
+        # "wrong model", and would break confusingly the day the gate is relaxed.
+        for model, method, args in (
+            ("res.partner", "check_access_rights", ["read"]),
+            ("res.partner", "has_access", [[], "unlink"]),
+            ("res.users", "has_group", [[], "base.group_system"]),
         ):
-            resp = self._rpc("res.partner", method, args=args, connection=True, expect_status=403)
+            resp = self._rpc(model, method, args=args, connection=True, expect_status=403)
             self.assertEqual(
                 resp.json()["error"]["code"],
                 "requires_acting_user",

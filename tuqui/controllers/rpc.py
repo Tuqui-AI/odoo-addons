@@ -122,6 +122,11 @@ _READ_METHODS = frozenset(
         "has_groups",
         "get_metadata",
         "get_property_definition",
+        # Which form/action opens a record. Pure metadata, and the natural
+        # vector of the view-context work (#73440) — a caller asking "where
+        # does this record open" must not be told it tried to execute something.
+        "get_formview_id",
+        "get_formview_action",
         # web_* are the web client's read entrypoints; they don't match the
         # search/read prefix because of that prefix of their own.
         "web_read",
@@ -139,12 +144,19 @@ _READ_PREFIXES = ("search", "read")
 #         return self.env.su or not self._check_access(operation)
 #
 # As superuser that is an unconditional True, for any operation, `unlink`
-# included. A caller would read "yes, allowed" and act on it. `has_group`
-# is the same shape: `res.users` only allows the cross-user question when
-# `env.su`, so on that path a token holder could enumerate anyone's groups.
+# included. A caller would read "yes, allowed" and act on it. `has_group` is
+# the same shape — as superuser it answers about whoever is asked for rather
+# than about the caller. Note this is about a MEANINGLESS answer, not about
+# confidentiality: the connection path has no model allowlist, so group
+# membership is already reachable there with a plain `search_read`.
 #
 # So they classify as `read` (which is the honest audit label) and are still
 # refused on the connection path, with a reason of their own that says why.
+#
+# Every entry MUST also be in `_READ_METHODS`, or its branch below is dead
+# code: `_evaluate_policy` returns `connection_read_only` for a non-read
+# before it ever looks here, and the audit log would carry the wrong reason.
+# `test_only_as_a_user_entries_classify_as_read` holds that invariant.
 _ONLY_AS_A_USER = frozenset({"check_access_rights", "has_access", "has_group", "has_groups"})
 
 
@@ -181,7 +193,10 @@ def _evaluate_policy(read_only: bool, method: str, op_type: str, *, is_connectio
        record rules, so it is locked to reads UNCONDITIONALLY — anything that
        can mutate is refused with ``connection_read_only``. Keeps the blast
        radius of a stolen token to read-only on workspace-level/system traffic.
-    4. Member path: when the connection is flagged ``read_only``, anything that
+    4. Connection path, second cut: a read in ``_ONLY_AS_A_USER`` asks about
+       the CALLER, and as superuser there is no caller to ask about — refused
+       with ``requires_acting_user`` rather than answered with a useless True.
+    5. Member path: when the connection is flagged ``read_only``, anything that
        can mutate is refused with ``read_only_mode``.
     """
     if _is_absolutely_blocked(method):
