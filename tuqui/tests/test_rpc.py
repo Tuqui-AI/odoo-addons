@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from odoo.addons.tuqui.controllers.rpc import (
     _DEFAULT_STATEMENT_TIMEOUT_MS,
+    _ONLY_AS_A_USER,
     _classify,
     _statement_timeout_ms,
 )
@@ -191,11 +192,19 @@ class TestTuquiRpcGateway(HttpCase):
             )
 
     def test_classify_covers_companion_transport_surface(self):
-        """Contract guard: every typed method CompanionTransport posts to
-        /tuqui/rpc must classify as intended. Mirror of
+        """Contract guard: every method Tuqui posts to /tuqui/rpc must classify
+        as intended. Mirror of
         tuqui_core/integrations/odoo/transports/companion.py — when its method
         surface changes, update this list and _READ_METHODS/_WRITE_METHODS
-        together."""
+        together.
+
+        The ``untyped`` group is the one that matters: those calls go through
+        the transport's generic ``execute()`` / ``execute_method()`` instead of
+        a method of their own, so nothing about them is greppable from the
+        transport's signatures. This guard only mirrored the typed surface, and
+        that is precisely how ``get_view`` and ``check_access_rights`` reached
+        production classified as ``execute`` — refused on every read-only
+        companion. Add the method here when a new call site appears."""
         reads = (
             "search_read",
             "read",
@@ -206,10 +215,54 @@ class TestTuquiRpcGateway(HttpCase):
             "get_view",
         )
         writes = ("create", "write", "unlink", "copy")
-        for method in reads:
+        # Reached through the generic execute()/execute_method(), not through a
+        # typed method — see the docstring.
+        untyped_reads = (
+            "get_view",  # integrations/odoo/search_view.py
+            "check_access_rights",  # integrations/odoo/adapter.py ← open_odoo_view
+        )
+        # Not called through THIS gateway yet, so they are here to be classified
+        # right the day they are. Asserted one by one on purpose: a tuple that
+        # lists three of fourteen is a guard that does not guard — dropping any
+        # of the others would leave the suite green.
+        #
+        # `has_group` belongs here and not above: workspaces/service.py does call
+        # it, but through `build_adapter(...)` → JsonRpcTransport, which never
+        # posts to /tuqui/rpc. Listing it as a live call site of this gateway
+        # justified the entry with a route that does not exist.
+        untyped_reads_ahead = (
+            "get_views",
+            "has_access",
+            "has_group",
+            "has_groups",
+            "get_metadata",
+            "get_property_definition",
+            "get_formview_id",
+            "get_formview_action",
+            "web_read",
+            "web_search_read",
+            "web_read_group",
+        )
+        for method in reads + untyped_reads + untyped_reads_ahead:
             self.assertEqual(_classify(method), "read", f"{method} must classify as a read")
         for method in writes:
             self.assertEqual(_classify(method), "write", f"{method} must classify as a write")
+
+    def test_only_as_a_user_entries_classify_as_read(self):
+        """Every `_ONLY_AS_A_USER` name must also be in `_READ_METHODS`.
+
+        Otherwise its branch in `_evaluate_policy` is dead code: the
+        `op_type != "read"` return fires first and the call is refused as
+        `connection_read_only`, so the audit log carries a reason that hides
+        WHY it was really refused. Nothing about the shape of the two sets
+        makes this hold on its own.
+        """
+        for method in _ONLY_AS_A_USER:
+            self.assertEqual(
+                _classify(method),
+                "read",
+                f"{method} is in _ONLY_AS_A_USER but does not classify as a read — its gate is dead code",
+            )
 
     # ─── Perimeter ───────────────────────────────────────────────────
 
@@ -567,6 +620,65 @@ class TestTuquiRpcGateway(HttpCase):
             expect_status=200,
         )
         self.assertTrue(resp.json()["ok"])
+
+    def test_read_only_member_allows_the_access_check(self):
+        """``check_access_rights`` answers "may this user do X" and reads no
+        records, so a read-only member must get through.
+
+        Classified as ``execute`` it was refused, and this one fails loudly:
+        its only caller is ``open_odoo_view`` in ``mode='new'``, an embed-only
+        tool — so it runs exclusively over the companion. On a read-only one
+        (the default right after activation) asking the embedded chat to create
+        a record answered "Could not verify Odoo access rights", blaming the
+        user's permissions for a refusal of ours.
+
+        The connection path is the opposite case — see the next test.
+        """
+        self.client.write({"read_only": True})
+        # Exercised with `has_access`, not with the method the backend calls
+        # today: `check_access_rights` is @api.deprecated in 19, so dispatching
+        # it logs a DeprecationWarning and the runbot fails the build on it.
+        #
+        # Same classification and same gate — but NOT the same code path, and
+        # that is worth being honest about: `_dispatch` branches on
+        # `method._api_model`, which is exactly where the two differ
+        # (`has_access` is a record method taking `[[], "read"]`).
+        # The @api.model dispatch of `check_access_rights` therefore has no
+        # end-to-end coverage here. Deliberate: the deprecation warning it
+        # raises fails the build, and the caller is migrating off it anyway
+        # (Tuqui-AI/tuqui#884 moves adapter.py to `has_access` on 18+), so this
+        # entry stays only for backends that have not updated yet.
+        resp = self._rpc("res.partner", "has_access", args=[[], "read"], expect_status=200)
+        self.assertTrue(resp.json()["ok"])
+
+    def test_connection_path_refuses_the_questions_about_the_caller(self):
+        """An access check run as superuser answers about nobody, and answers YES.
+
+        ``has_access`` is literally ``self.env.su or not self._check_access(op)``:
+        on the connection path that is an unconditional True, for any operation,
+        ``unlink`` included — a caller would read "allowed" and act on it. Same
+        shape for ``has_group``, whose cross-user question ``res.users`` only
+        permits when ``env.su``.
+
+        So they stay classified as reads (the honest audit label) and are still
+        refused here, with a reason that says why instead of handing back an
+        answer that means nothing.
+        """
+        # `has_group` lives on res.users, not on res.partner. The gate fires
+        # before `_dispatch`, so asking the wrong model passes either way — and
+        # that is the problem: the test could not tell "refused by policy" from
+        # "wrong model", and would break confusingly the day the gate is relaxed.
+        for model, method, args in (
+            ("res.partner", "check_access_rights", ["read"]),
+            ("res.partner", "has_access", [[], "unlink"]),
+            ("res.users", "has_group", [[], "base.group_system"]),
+        ):
+            resp = self._rpc(model, method, args=args, connection=True, expect_status=403)
+            self.assertEqual(
+                resp.json()["error"]["code"],
+                "requires_acting_user",
+                f"{method} answers about the caller; as superuser it must be refused",
+            )
 
     def test_read_only_paths_allow_the_view_metadata_read(self):
         """``get_view`` is a read, and both restricted paths must let it through.
