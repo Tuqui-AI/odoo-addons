@@ -1,6 +1,9 @@
+import difflib
 import json
 import logging
+import re
 import time
+from collections import Counter
 from collections.abc import Mapping
 
 import psycopg2
@@ -211,6 +214,210 @@ def _dispatch(model, method_name: str, args: list, kwargs: dict):
         result = result.ids
 
     return result
+
+
+# ─── Model name suggestions ──────────────────────────────────────────
+# A caller that guesses a model name gets nothing back today, so it guesses
+# again: prod logged one session trying `adhoc.pull.request`, `pull.request`
+# and `adhoc.pull` within four seconds, for a model actually named
+# `saas.pull.request`. The registry is right here on the failure path, so
+# answer the question the caller is really asking — what is it called?
+#
+# Every threshold below was set against the real corpus — the 60-odd names
+# production asked for and did not get, scored over a real registry. See
+# ``test_suggests_the_model_production_actually_wanted``: it is the reason
+# these are the numbers they are, and the thing to re-run before touching one.
+
+_MAX_MODEL_SUGGESTIONS = 3
+# Stricter than difflib's usual 0.5, because this pool only has to catch the
+# typos that share no whole word (`saleorder` → `sale.order`, ratio 0.95). The
+# guesses that ARE far apart textually — `adhoc.pull` scores 0.44 against
+# `saas.pull.request` — come in through the word pool instead. Below 0.65 the
+# corpus starts pairing unrelated names of similar shape (`ir.property` →
+# `kpi.provider`, ratio 0.61); above it nothing real is lost.
+_MODEL_MATCH_CUTOFF = 0.7
+_MODEL_FUZZY_POOL = 12
+# How close to the best candidate a second or third name has to be to be worth
+# saying at all. Two axes because they answer different objections: segment
+# score keeps the module prefix from dragging unrelated models in, ratio keeps
+# a sibling of the right model from riding on the same shared segment.
+_MODEL_KEEP_SEGMENTS = 0.5
+_MODEL_KEEP_RATIO = 0.8
+# Absolute floor, on top of the relative gate: a candidate has to be either
+# textually close or share a word that means something. Without it, sharing a
+# crowded prefix is enough to get named — `ir.property` came back as "did you
+# mean ir.cron", which only shares `ir` with 18 other models. Silence is a
+# better answer than a model that does something else.
+_MODEL_MIN_RATIO = 0.6
+# In units of 1/occurrences, so it only means anything when ``known`` is the
+# COMPLETE registry. Scoring the corpus over a hand-trimmed registry inflates
+# every weight — roughly 5x for a fifth of the models — and quietly lifts
+# candidates over this line: the same corpus read 54/61 trimmed and 49/61
+# whole, and the extra "passes" were confident wrong answers, not silence.
+# Production always passes the whole registry; the test fixture must too.
+_MODEL_MIN_SEGMENTS = 0.25
+# Hard ceiling on the name we are willing to score. Both difflib passes are
+# linear in the length of the name, and a long name made of many real words
+# makes EVERY model a word-sharing candidate, so cost grows faster than
+# linearly: measured over the 1368-model registry, 12 chars costs 7.9 ms, 4 KB
+# costs 3.4 s and 29 KB does not finish inside 30 s. `model` is only validated
+# as a non-empty string, so without this a handful of POSTs with a valid token
+# pins every worker — and the statement_timeout guard cannot help, since this
+# is pure Python and runs before the cursor budget is set. Twice the longest
+# name in a real registry (56 chars) is all the headroom this needs.
+_MAX_SUGGESTIBLE_NAME = 128
+
+
+def _segments(name):
+    """Split a model name into its words, on dots AND underscores.
+
+    Odoo mixes both separators inside one name — `saas.database.custom_domain`,
+    `helpdesk.ticket.customer_note`, `saas.odoo.major_version` — and the caller
+    that guesses one usually writes the other. Splitting on dots alone made
+    `saas.database.custom.domain` share three words with the model it wanted
+    and lose to `saas.database.egress.domain`, which shared the same three.
+    """
+    return set(re.split(r"[._]", name))
+
+
+def _last_word(name):
+    """The final word of a model name — the one that says what it is."""
+    return re.split(r"[._]", name)[-1]
+
+
+def _segment_weights(known):
+    """Map each word to how much matching it says about intent.
+
+    Rarity is the whole point. Guessing `adhoc.pull` shares `adhoc` with every
+    model of the module and `pull` with almost nothing, so a plain count of
+    shared words ranks `adhoc.product` above `saas.pull.request` — the common
+    prefix outvoting the one word that carries the meaning.
+    """
+    counts = Counter(segment for name in known for segment in _segments(name))
+    return {segment: 1.0 / count for segment, count in counts.items()}
+
+
+def _rank_model_candidates(bad_name, known):
+    """Model names closest to ``bad_name``, most likely intent first.
+
+    Two pools, because neither alone covers the guesses prod actually makes:
+    names sharing a dotted segment (`adhoc.pull` → `saas.pull.request`, too far
+    apart textually for difflib) and difflib's own matches (`crm.leed` →
+    `crm.lead`, a typo that shares no whole segment).
+
+    Only candidates comparable to the best one survive. Filling the list up to
+    the cap makes the message actively worse: `adhoc.pull.request` scores 2.00
+    against `saas.pull.request` and 0.25 against `adhoc.module`, which shares
+    nothing but the module prefix — offering it invites the caller to try a
+    model that has no relation to what it asked for. Real ambiguity does
+    survive: `account.moves` still returns `account.move` AND
+    `account.move.line`.
+    """
+    wanted = _segments(bad_name)
+    weights = _segment_weights(known)
+    head_word = _last_word(bad_name)
+    pool = {name for name in known if wanted & _segments(name)}
+    pool.update(difflib.get_close_matches(bad_name, known, n=_MODEL_FUZZY_POOL, cutoff=_MODEL_MATCH_CUTOFF))
+    pool.discard(bad_name)
+
+    scored = sorted(
+        (
+            (
+                sum(weights[segment] for segment in wanted & _segments(name)),
+                # Tie-break only. The last word names the thing and the ones
+                # before it qualify it, so between two candidates that share
+                # the SAME words, the one that IS that thing wins:
+                # `stock.orderpoint` shares both its words with
+                # `stock.orderpoint.snooze` (a wizard about orderpoints) and
+                # with `stock.warehouse.orderpoint` (the orderpoint itself).
+                # Folded into the score instead, it was a wash — a generic
+                # ending like `request` or `client` then outvoted a rare shared
+                # word and cost as many cases as it won.
+                _last_word(name) == head_word,
+                difflib.SequenceMatcher(None, bad_name, name).ratio(),
+                name,
+            )
+            for name in pool
+        ),
+        # Ties broken by name so the message is reproducible: the pool is a
+        # set, and a test asserting on the second suggestion would flake.
+        key=lambda candidate: (-candidate[0], not candidate[1], -candidate[2], candidate[3]),
+    )
+    scored = [(segments, ratio, name) for segments, _head, ratio, name in scored]
+    scored = [
+        candidate for candidate in scored if candidate[1] >= _MODEL_MIN_RATIO or candidate[0] >= _MODEL_MIN_SEGMENTS
+    ]
+    if not scored:
+        return []
+    best_segments, best_ratio, _ = scored[0]
+    return [
+        name
+        for segments, ratio, name in scored
+        if segments >= _MODEL_KEEP_SEGMENTS * best_segments and ratio >= _MODEL_KEEP_RATIO * best_ratio
+    ]
+
+
+def _suggest_models(env, bad_name, acting_user):
+    """Existing model names close to ``bad_name`` that the caller may read.
+
+    A name longer than ``_MAX_SUGGESTIBLE_NAME`` is refused outright, before
+    any scoring: that is the cost guard, and no real model name comes close.
+
+    Abstract models are dropped (`mail.thread` helps nobody) and the rest are
+    filtered by the acting user's model-level ACL, so the suggestion never
+    sends the caller at something it will only get a 403 from. The connection
+    path runs as superuser and needs no filtering.
+
+    Args:
+        env: Request environment, before the acting identity is adopted.
+        bad_name: The model name the caller asked for and that does not exist.
+        acting_user: The vetted member, or None on the connection path.
+
+    Returns:
+        Up to ``_MAX_MODEL_SUGGESTIONS`` model names, best guess first. Empty
+        when nothing is close enough, or when the name is absurdly long.
+    """
+    if len(bad_name) > _MAX_SUGGESTIBLE_NAME:
+        return []
+    access = env["ir.model.access"]
+    if acting_user is not None:
+        access = access.with_user(acting_user)
+    suggestions = []
+    for name in _rank_model_candidates(bad_name, list(env.registry)):
+        if env[name]._abstract:
+            continue
+        if acting_user is not None and not access.check(name, "read", raise_exception=False):
+            continue
+        suggestions.append(name)
+        if len(suggestions) == _MAX_MODEL_SUGGESTIONS:
+            break
+    return suggestions
+
+
+def _unknown_model_message(env, bad_name, acting_user):
+    """The 400 body for a model that does not exist, with a way forward.
+
+    Best-effort: any failure while ranking falls back to the bare message
+    rather than turning a recoverable 400 into a 500.
+    """
+    try:
+        suggestions = _suggest_models(env, bad_name, acting_user)
+    except Exception:  # noqa: BLE001 — a suggestion is never worth an error
+        # Roll back like every other error branch on this route. The ACL check
+        # runs SQL, and a failed statement leaves the cursor aborted: we would
+        # answer a well-formed 400 and then have Odoo's own commit raise, so
+        # the caller gets the opaque 500 HTML page instead — the exact failure
+        # mode #70932 was about. Callers of this helper must not have written
+        # their audit row yet, or the rollback would discard it.
+        env.cr.rollback()
+        _LOG.warning("tuqui.rpc: could not build model suggestions for %r", bad_name, exc_info=True)
+        suggestions = []
+    if suggestions:
+        return f"Unknown model: {bad_name!r}. Did you mean: {', '.join(repr(name) for name in suggestions)}?"
+    return (
+        f"Unknown model: {bad_name!r}. No installed model has a similar name — "
+        "search 'ir.model' on its 'model' field to find the right one."
+    )
 
 
 # ─── HTTP helpers ────────────────────────────────────────────────────
@@ -513,8 +720,11 @@ class TuquiRpc(http.Controller):
 
         # ─── Dispatch ──────────────────────────────────────────────────────
         if model_name not in env:
+            # Build the message BEFORE the audit row: on failure it rolls the
+            # cursor back, which would otherwise take the row with it.
+            message = _unknown_model_message(env, model_name, acting_user)
             emit(policy_allowed=True, success=False, error_code="validation_error")
-            return _error("validation_error", f"Unknown model: {model_name!r}", status=400)
+            return _error("validation_error", message, status=400)
 
         # Member path runs under the member's ACL; connection path runs as
         # SUPERUSER (already gated read-only above).
