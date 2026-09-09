@@ -6,6 +6,24 @@ _DEFAULT_MAX_ROWS = 10000
 # before classification — we still want a stable, queryable value.
 _UNKNOWN_OPERATION_TYPE = "any"
 
+# Cap for the two indexed fields that carry request-supplied text. Well under
+# Postgres' ~2704-byte btree entry limit, and far above any real model or
+# method name, so a genuine row is never altered — see the field comments.
+_MAX_AUDIT_CHARS = 256
+
+
+def _clip(value):
+    """Bound a request-supplied string so the audit INSERT cannot fail.
+
+    An audit row that raises takes the whole request with it, replacing a
+    composed error response with Odoo's 500 page. Losing the tail of an absurd
+    name costs nothing; losing the row and the response costs the caller its
+    answer and us the trace.
+    """
+    if not value:
+        return value
+    return value[:_MAX_AUDIT_CHARS]
+
 
 class TuquiAccessLog(models.Model):
     """Audit log for every call routed through ``/tuqui/rpc``.
@@ -41,6 +59,13 @@ class TuquiAccessLog(models.Model):
             "superuser with no per-member identity."
         ),
     )
+    # Both come straight off the request body, which the gateway only checks
+    # for "non-empty string" — and both are indexed. A btree entry cannot
+    # exceed about 2704 bytes, so a caller asking for a 20 KB model name made
+    # the audit INSERT fail, and with it the whole request: the client got
+    # Odoo's 500 HTML page instead of the 400 the gateway had already composed.
+    # Truncated in ``log`` rather than declared with ``size``, so the cap is
+    # enforced for every caller and an existing column needs no migration.
     model_name = fields.Char(string="Model", index=True)
     method = fields.Char(required=True, index=True)
     operation_type = fields.Selection(
@@ -116,8 +141,8 @@ class TuquiAccessLog(models.Model):
         """
         rec = self.sudo().create(
             {
-                "method": method,
-                "model_name": model_name or False,
+                "method": _clip(method),
+                "model_name": _clip(model_name) or False,
                 "operation_type": operation_type,
                 "acting_user_id": acting_user_id or False,
                 "policy_allowed": policy_allowed,
