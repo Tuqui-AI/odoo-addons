@@ -1,13 +1,17 @@
 import json
+import re
 import secrets
 import time
 from unittest.mock import patch
 
 from odoo.addons.tuqui.controllers.rpc import (
     _DEFAULT_STATEMENT_TIMEOUT_MS,
+    _MAX_SUGGESTIBLE_NAME,
     _classify,
+    _rank_model_candidates,
     _statement_timeout_ms,
 )
+from odoo.addons.tuqui.tests import model_guess_corpus as corpus
 from odoo.tests import HttpCase, tagged
 from odoo.tools import mute_logger
 
@@ -319,6 +323,152 @@ class TestTuquiRpcGateway(HttpCase):
     def test_unknown_acting_uid(self):
         resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid=99999999, expect_status=403)
         self.assertEqual(resp.json()["error"]["code"], "forbidden_acting_user")
+
+    # ─── Model name suggestions ───────────────────────────────────────
+
+    def test_suggests_the_model_production_actually_wanted(self):
+        """The whole corpus of names production guessed, over a real registry.
+
+        Not a sample: every distinct ``Unknown model`` the backend answered
+        between 2026-06-01 and 2026-09-08, scored against real ``ir.model``
+        output. The thresholds in ``rpc.py`` were set by re-running this — an
+        earlier suite of eight hand-picked names scored 8/8 while the ranker
+        was right on barely half of the real input.
+
+        Known misses are allowed but not forgotten: the failing set has to stay
+        inside ``KNOWN_MISSES``, so fixing one is free and breaking a new one
+        fails here.
+        """
+        # The floor in rpc.py is in units of 1/occurrences, so a trimmed
+        # registry inflates every weight and this suite silently gets easier.
+        # That already happened once, at 279 models: 54/61 instead of 49/61.
+        self.assertGreater(
+            len(corpus.REGISTRY),
+            1000,
+            "REGISTRY must be a COMPLETE registry — trimming it inflates the word "
+            "weights and lifts wrong answers over _MODEL_MIN_SEGMENTS",
+        )
+        missed = {
+            guess
+            for guess in corpus.GUESSES
+            if not corpus.verdict(guess, _rank_model_candidates(guess, corpus.REGISTRY))
+        }
+        regressions = missed - corpus.KNOWN_MISSES
+        self.assertFalse(
+            regressions,
+            "these used to resolve and no longer do: "
+            + ", ".join(
+                f"{guess} -> {_rank_model_candidates(guess, corpus.REGISTRY)[:3]} " f"(wanted {corpus.GUESSES[guess]})"
+                for guess in sorted(regressions)
+            ),
+        )
+
+    def test_the_repeated_guesses_all_resolve(self):
+        """The names production got wrong over and over, pinned one by one.
+
+        The long tail can stay imperfect; these cannot. Between them they are
+        most of the volume — the pull request family alone was 82 calls — and
+        each one broke for its own reason, so a single assertion over the set
+        would not say which rule stopped working.
+        """
+        expected = {
+            # difflib alone ranks `adhoc.product` (ratio 0.70) over
+            # `saas.pull.request` (0.44). The rare shared word decides.
+            "adhoc.pull": "saas.pull.request",
+            "adhoc.pull.request": "saas.pull.request",
+            "pull.request": "saas.pull.request",
+            "github.pull.request": "saas.pull.request",
+            "project.pull.request": "saas.pull.request",
+            # Underscore in the real name, dot in the guess.
+            "adhoc.pull_request": "saas.pull.request",
+            "saas.database.custom.domain": "saas.database.custom_domain",
+            "helpdesk.ticket.customer.note": "helpdesk.ticket.customer_note",
+            # Same words as a wizard about the thing; the thing itself wins.
+            "stock.orderpoint": "stock.warehouse.orderpoint",
+        }
+        for guess, intended in expected.items():
+            with self.subTest(guess=guess):
+                self.assertEqual(_rank_model_candidates(guess, corpus.REGISTRY)[:1], [intended])
+
+    def test_says_nothing_when_no_real_name_is_close(self):
+        """Silence is an answer. Naming a model that does something else is not."""
+        for guess in ("school.school", "alerta", "runbot.branch", "runbot.build"):
+            with self.subTest(guess=guess):
+                self.assertEqual(_rank_model_candidates(guess, corpus.REGISTRY), [])
+
+    def test_an_absurdly_long_model_name_is_not_scored_at_all(self):
+        """Cost guard, and the reason it is a hard cap rather than a budget.
+
+        Both difflib passes are linear in the length of the name, and a long
+        name built from real words makes every model a candidate, so the cost
+        grows faster than linearly: over a 1368-model registry a normal name
+        costs ~8 ms, 4 KB costs ~3.4 s and 29 KB does not finish in 30 s.
+        ``model`` is only validated as a non-empty string, so a handful of
+        POSTs with a valid token would pin every worker. The statement_timeout
+        does not cover this: pure Python, and set later in the request.
+
+        Asserted through the endpoint, not the helper, because the guard has to
+        hold where the untrusted string actually arrives.
+        """
+        words = sorted({w for name in corpus.REGISTRY for w in re.split(r"[._]", name)})
+        hostile = ".".join(words * 4)[:20_000]
+        self.assertGreater(len(hostile), _MAX_SUGGESTIBLE_NAME)
+
+        started = time.monotonic()
+        resp = self._rpc(hostile, "search_read", args=[[]], expect_status=400)
+        elapsed = time.monotonic() - started
+
+        error = resp.json()["error"]
+        self.assertEqual(error["code"], "validation_error")
+        self.assertNotIn("Did you mean", error["message"])
+        # Generous: the assertion is "did not walk the registry", and an
+        # unguarded run takes tens of seconds for this input.
+        self.assertLess(elapsed, 10, "the long name was scored instead of refused")
+
+        # And the 400 has to survive being audited. `model_name` is indexed,
+        # a btree entry cannot exceed ~2704 bytes, so before the audit row
+        # clipped it this exact call answered 500 HTML: the INSERT raised
+        # after the gateway had already composed its 400.
+        row = self._latest_log(error_code="validation_error")
+        self.assertTrue(row, "the refusal was not audited")
+        self.assertTrue(hostile.startswith(row.model_name))
+        self.assertLess(len(row.model_name), len(hostile))
+
+    def test_rank_model_candidates_never_suggests_the_name_asked_for(self):
+        """Guard for the caller that hits this branch on an uninstalled model:
+        echoing its own string back reads as "it exists, try again"."""
+        known = ["sale.order", "sale.subscription"]
+        self.assertNotIn("sale.subscription", _rank_model_candidates("sale.subscription", known))
+
+    def test_unknown_model_suggests_the_real_name(self):
+        resp = self._rpc("res.parner", "search_read", args=[[]], expect_status=400)
+        error = resp.json()["error"]
+        self.assertEqual(error["code"], "validation_error")
+        self.assertIn("'res.partner'", error["message"])
+
+    def test_unknown_model_with_no_close_name_points_at_ir_model(self):
+        """Nothing to suggest is still an answer — without it the caller has
+        only the name it already knows is wrong."""
+        resp = self._rpc("zzz", "search_read", args=[[]], expect_status=400)
+        message = resp.json()["error"]["message"]
+        self.assertNotIn("Did you mean", message)
+        self.assertIn("ir.model", message)
+
+    def test_unknown_model_never_suggests_what_the_member_cannot_read(self):
+        """The suggestion runs under the acting member's ACL, so it cannot turn
+        into a listing of the models that user is not allowed to see.
+
+        ``tuqui.access.log`` is this module's own model, restricted to
+        ``base.group_system`` — the admin gets it suggested, a plain internal
+        user must not.
+        """
+        as_admin = self._rpc("tuqui.access.logs", "search_read", args=[[]], expect_status=400)
+        self.assertIn("'tuqui.access.log'", as_admin.json()["error"]["message"])
+
+        as_basic = self._rpc(
+            "tuqui.access.logs", "search_read", args=[[]], acting_uid=self.basic_user.id, expect_status=400
+        )
+        self.assertNotIn("'tuqui.access.log'", as_basic.json()["error"]["message"])
 
     # ─── Acting-user vetting (member path) ────────────────────────────
 
