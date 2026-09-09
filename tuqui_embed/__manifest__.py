@@ -1,6 +1,6 @@
 {
     "name": "Tuqui Embed",
-    "summary": "Let Tuqui show the Odoo screen inside its panel",
+    "summary": "Dejar que Tuqui muestre la pantalla de Odoo dentro de su panel",
     "version": "19.0.1.0.0",
     "category": "Hidden",
     "author": "Tuqui-AI",
