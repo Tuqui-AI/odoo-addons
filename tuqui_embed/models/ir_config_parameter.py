@@ -24,27 +24,46 @@ this is a deliberate administrator action. What makes the line auditable is
 that it says who, when and from what to what, not its severity level.
 """
 
+import ipaddress
 import logging
+import re
 from urllib.parse import urlsplit
 
 from odoo import api, models
 from odoo.exceptions import ValidationError
 
+from .ir_http import EMBED_ORIGINS_PARAM
+
 _logger = logging.getLogger(__name__)
 
-EMBED_ORIGINS_PARAM = "tuqui.embed_origins"
-
-#: Loopback names and addresses, where `http://` is always fine because the
-#: traffic never leaves the machine. `.localhost` is reserved for loopback by
-#: RFC 6761, so any subdomain of it counts.
-_LOOPBACK_HTTP_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
+#: A DNS host: labels of letters, digits and hyphens, separated by dots. It is
+#: deliberately narrow, because what is being validated is not a display string
+#: — it is the text that lands verbatim inside a `Content-Security-Policy`
+#: header. `urlsplit` is happy to keep a `;` inside the host (`a.com;sandbox`
+#: parses as scheme `https`, netloc `a.com;sandbox`, no path), and the browser
+#: reads that `;` as the end of the directive: `frame-ancestors 'self'
+#: https://a.com` followed by a brand new `sandbox` directive, applied to every
+#: response of the database. Anything outside this alphabet is rejected.
+_HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
 
 
 def _is_loopback_host(host):
+    """Is `host` a name or address that never leaves this machine?
+
+    `.localhost` is reserved for loopback by RFC 6761, so any subdomain of it
+    counts. Addresses go through `ipaddress` rather than a prefix test: the
+    previous `startswith("127.")` accepted `127.evil.com`, a perfectly public
+    host, as if it were loopback.
+    """
     if not host:
         return False
     host = host.lower()
-    return host in _LOOPBACK_HTTP_HOSTS or host == "localhost" or host.endswith(".localhost") or host.startswith("127.")
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _deployment_is_plain_http(env):
@@ -68,11 +87,13 @@ def _validate_embed_origin_token(token, allow_plain_http=False):
     access-control entry. A wildcard, a bare scheme, or a plain-http host
     would open the frame to more than whoever typed the value meant to.
 
-    Plain strings, not `odoo._()`: this runs on every `write`/`create`,
-    including from plain `TransactionCase` tests with no request/lang in
-    context, and `_()` logs a WARNING there ("no translation language
-    detected") — the exact kind of noise this module already learned to
-    keep out of its own test run (see `_log_embed_change` below).
+    Plain strings, not `_()`: this is a module-level function with no `env` in
+    the frame, and the bare `_()` resolves the language from there — it would log
+    a WARNING on every call ("no translation language detected"), the noise this
+    module already learned to keep out of its own test run (see
+    `_log_embed_change` below). They stay untranslated on purpose for now; the
+    fix is `env._()`, which takes the language explicitly, and it needs `env`
+    threaded down from `_validate_embed_origins`.
     """
     if "*" in token:
         return "wildcards are not accepted: %r" % token
@@ -81,7 +102,31 @@ def _validate_embed_origin_token(token, allow_plain_http=False):
         return "must start with https:// (or http:// for local development): %r" % token
     if not parsed.netloc:
         return "the host is missing: %r" % token
-    if parsed.scheme == "http" and not (allow_plain_http or _is_loopback_host(parsed.hostname)):
+    if parsed.username or parsed.password:
+        # Not a valid CSP source expression: the panel would come up blank with
+        # nothing saying why.
+        return "must carry no user or password: %r" % token
+    try:
+        port = parsed.port
+    except ValueError:
+        return "the port is not a number: %r" % token
+    host = (parsed.hostname or "").lower()
+    # The host has to be a host and NOTHING else. See `_HOST_RE`: this is the
+    # check that stops a `;` from opening a second CSP directive.
+    try:
+        is_address = bool(ipaddress.ip_address(host))
+    except ValueError:
+        is_address = False
+    if not is_address and not _HOST_RE.match(host):
+        return "the host has characters that do not belong in one: %r" % token
+    # And the netloc has to be exactly that host and port, rebuilt. Checking the
+    # hostname alone is not enough — `urlsplit` hands back the same hostname for
+    # a netloc carrying extra text around it.
+    bracketed = "[%s]" % host if ":" in host else host
+    expected = bracketed if port is None else "%s:%d" % (bracketed, port)
+    if parsed.netloc.lower() != expected:
+        return "must be scheme and host only: %r" % token
+    if parsed.scheme == "http" and not (allow_plain_http or _is_loopback_host(host)):
         return (
             "must be https:// — http:// is only accepted on loopback, or when this "
             "Odoo is itself served over http (web.base.url): %r" % token
@@ -135,17 +180,39 @@ class IrConfigParameter(models.Model):
             )
 
     def write(self, vals):
-        if "value" in vals:
-            # `vals` may CARRY the key: renaming any parameter to
-            # `tuqui.embed_origins` turned it into the switch without going
-            # through validation. It is an odd path, but what validates cannot
-            # depend on which door the value came in through.
-            becomes_the_switch = vals.get("key") == EMBED_ORIGINS_PARAM
-            for parameter in self:
-                if becomes_the_switch or parameter.key == EMBED_ORIGINS_PARAM:
-                    _validate_embed_origins(self.env, vals["value"])
-            self._log_embed_change(vals["value"])
+        # A record BECOMES the switch when the write carries the key, and IS the
+        # switch when it already holds it. Both have to be validated and logged,
+        # and the value to check is whichever one the record ends up with: the
+        # one in `vals` when the write brings a new one, its current one when it
+        # does not.
+        #
+        # Hanging all of this off `if "value" in vals` was the hole. A bare
+        # `write({"key": "tuqui.embed_origins"})` renamed some other parameter
+        # into the switch carrying whatever unvalidated text it already held,
+        # and left no line in the log either — the comment here used to claim
+        # that path was closed while it was open one `vals` key away.
+        becomes_the_switch = vals.get("key") == EMBED_ORIGINS_PARAM
+        for parameter in self:
+            if not becomes_the_switch and parameter.key != EMBED_ORIGINS_PARAM:
+                continue
+            new_value = vals["value"] if "value" in vals else parameter.value
+            _validate_embed_origins(self.env, new_value)
+            parameter._log_embed_change(new_value)
         return super().write(vals)
+
+    def unlink(self):
+        """Deleting the parameter switches the embed off, so it gets logged too.
+
+        Not a corner case: `set_param(key, False)` DELETES the record (core
+        `ir.config_parameter.set_param`), so "switch the embed off" lands here
+        and never in `write`. Without this, the one state change that leaves no
+        trace is the one an incident starts from — "it stopped working, when did
+        somebody turn it off?".
+        """
+        for parameter in self:
+            if parameter.key == EMBED_ORIGINS_PARAM:
+                parameter._log_embed_change("")
+        return super().unlink()
 
     @api.model_create_multi
     def create(self, vals_list):

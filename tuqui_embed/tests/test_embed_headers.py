@@ -30,7 +30,12 @@ class TestEmbedHeaders(HttpCase):
         more exposed."""
         resp = self._get()
         self.assertIn("X-Frame-Options", resp.headers)
-        self.assertNotIn("frame-ancestors %s" % TUQUI, resp.headers.get("Content-Security-Policy", ""))
+        # `frame-ancestors` and not `frame-ancestors <origin>`: the switched-ON
+        # header is `frame-ancestors 'self' <origin>`, so looking for the pair
+        # without `'self'` in between finds nothing either way. The assertion
+        # could not fail, and the whole "off means off" guarantee was resting on
+        # the line above it.
+        self.assertNotIn("frame-ancestors", resp.headers.get("Content-Security-Policy", ""))
 
     def test_switched_on_it_allows_only_the_declared_origins(self):
         self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
@@ -56,8 +61,9 @@ class TestEmbedHeaders(HttpCase):
         """`'self'` is not a courtesy: Odoo shows its own pages in same-origin
         iframes — the PDF and text viewer, the report preview — and a list
         without `'self'` leaves those blank for the WHOLE database the moment
-        the switch goes on. Odoo's default is exactly `frame-ancestors 'self'`;
-        this WIDENS it, it does not replace it."""
+        the switch goes on. (Odoo's default is NOT `frame-ancestors 'self'` — the
+        web client ships `X-Frame-Options: DENY` and nothing else — but `'self'`
+        is still the floor this has to keep.)"""
         self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
         self.assertIn("'self'", self._get().headers.get("Content-Security-Policy", ""))
 
@@ -105,11 +111,11 @@ class TestEmbedCapability(HttpCase):
     def test_switched_off_it_does_not_announce_itself_as_embeddable(self):
         """Installed and unconfigured, this Odoo keeps saying no. That is the
         truth: with no origins loaded it does not allow the frame."""
-        assert "embed.frame" not in self._caps()
+        self.assertNotIn("embed.frame", self._caps())
 
     def test_switched_on_it_announces_itself(self):
         self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
-        assert "embed.frame" in self._caps()
+        self.assertIn("embed.frame", self._caps())
 
     def test_inherited_endpoints_are_re_decorated(self):
         """An override without `@http.route()` works fine and turns the build red.
@@ -130,9 +136,10 @@ class TestEmbedCapability(HttpCase):
                 )
                 if not inherits_a_route:
                     continue
-                assert hasattr(method, "original_routing"), (
+                self.assertTrue(
+                    hasattr(method, "original_routing"),
                     "%s.%s overrides a routed endpoint without re-decorating it with @http.route()"
-                    % (cls.__name__, name)
+                    % (cls.__name__, name),
                 )
 
     def test_it_does_not_overwrite_what_was_already_announced(self):
@@ -140,5 +147,5 @@ class TestEmbedCapability(HttpCase):
         `rpc.execute_kw` would leave Tuqui believing it cannot read anything."""
         self.env["ir.config_parameter"].sudo().set_param(PARAM, TUQUI)
         caps = self._caps()
-        assert "rpc.execute_kw" in caps
-        assert "access_log" in caps
+        self.assertIn("rpc.execute_kw", caps)
+        self.assertIn("access_log", caps)

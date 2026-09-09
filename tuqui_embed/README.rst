@@ -24,8 +24,17 @@ Under *Settings → Technical → System Parameters*, create:
 
 Several origins go space-separated. The value goes verbatim into
 ``frame-ancestors``, so it has to be the full origin (scheme + host + port),
-with no trailing slash. It is validated on save: no wildcards, no scheme
-without a host, no ``http://`` outside ``localhost``/``127.0.0.1``.
+with no trailing slash.
+
+It is validated on save, and the validation is strict on purpose — what is
+being checked is not a display string, it is text that lands inside a security
+header. Rejected: wildcards; a scheme with no host; a trailing slash, path,
+query or fragment; user or password in the address; anything outside the
+alphabet of a hostname (a ``;`` was enough to close ``frame-ancestors`` and open
+a second directive of the attacker's choosing, applied to every response of the
+database); and ``http://`` unless the host is real loopback (``localhost``, any
+``*.localhost`` per RFC 6761, or a loopback address) **or** this Odoo is itself
+served over http — see ``web.base.url`` in the next section.
 
 To switch it off: clear the parameter or leave it empty.
 
@@ -42,9 +51,12 @@ is not an extra but the difference between "it shows" and "it can be used" — s
 
 The ``'self'`` IS ALWAYS THERE. Odoo frames its own pages same-origin —the PDF
 and text viewer, the report preview— and a list without ``'self'`` leaves those
-blank for the WHOLE database the moment the switch goes on. Odoo's default is,
-precisely, ``frame-ancestors 'self'``: this widens the list, it does not replace
-it.
+blank for the WHOLE database the moment the switch goes on.
+
+(Odoo's own default is *not* ``frame-ancestors 'self'``, as this README used to
+say: the web client ships ``X-Frame-Options: DENY`` and nothing else, and
+``frame-ancestors 'self'`` appears only on ``/web/login``. ``'self'`` is still
+the right floor to keep — it is just not a quote of the default.)
 
 And the CSP is **completed**, not replaced. ``set_csp`` puts
 ``default-src 'none'`` on every ``image/*`` response (``odoo/http.py``), which is
@@ -180,8 +192,15 @@ Two decisions worth not reverting without reading this:
 
 - **``tour_service`` is not removed from the registry**, though it would be more
   direct: the onboarding widget and the POS call ``useService("tour_service")``
-  and would blow up on render. Keeping the service alive also matters beyond
-  politeness — Tuqui drives the pointer on purpose inside the panel.
+  and would blow up on render.
+- **A deliberate ``startTour`` still runs inside the frame**, and that took a
+  flag rather than a flat ``null``. ``startTour`` ends in ``resumeTour``, which
+  reads the tour back through ``getCurrentTour`` — so blocking that read
+  unconditionally also blocked the manual start, silently: Tuqui asking for the
+  pointer inside the panel would have done nothing and said nothing. What tells
+  the two apart is that only ``startTour`` WRITES the current tour before
+  reading it; an automatic resume finds it already there. The flag follows that,
+  and ``clear()`` resets it.
 - **The user's progress is not erased.** ``null`` is returned only inside the
   frame; ``localStorage`` is left intact, so in their everyday Odoo the tour
   carries on where they left it. There is a test pinning exactly that.
@@ -199,8 +218,12 @@ reopens itself if it was open before. Tuqui shows Odoo, that Odoo opens its own
 Tuqui, that Tuqui restores its panel with Odoo, and so on: every level loads a
 full web client and **the whole browser goes down**, not just the tab.
 
-That guard lives in ``tuqui_assistant``
-(``static/src/nested_guard.js``), not here. An earlier version lived in this
+That guard lives in ``tuqui_assistant`` (``static/src/nested_guard.js``), not
+here. It clears the per-tab state and hides the systray button; it deliberately
+does **not** clear the shared ``localStorage`` open signal, because that one
+belongs to every tab of that Odoo and eating it would leave a legitimate
+top-level tab without the panel it was promised — the service skips reading it
+while nested instead. An earlier version lived in this
 module and could not hold: to run before that panel it had to declare
 ``('before', 'tuqui_assistant/…')``, which made this module impossible to
 install without the assistant. It belongs with the behaviour being suppressed —
@@ -293,10 +316,12 @@ Decisions taken
 Notes
 =====
 
-- The parameter is read on every request, but ``get_param`` is ormcached, so on
-  a multi-worker deployment revoking the permission may take a while to reach
-  workers that already had it cached. Measured: with the value changed by
-  another process, this module kept answering with the previous one until a
-  restart. If revocation has to be immediate, the invalidation has to be forced.
+- The parameter is read on every request. ``get_param`` is ormcached, but core
+  ``ir.config_parameter`` clears that cache on every ``create``, ``write`` and
+  ``unlink``, and the registry signals the other workers — so revoking through
+  Settings takes effect without a restart. An earlier version of this README
+  said the opposite; the measurement behind it must have changed the value
+  behind the ORM (raw SQL, or another session), which is the one case where it
+  does stay cached.
 - A ``frame-ancestors`` carrying the list is NOT the same as allowing anyone: it
   is the only thing that separates this from removing clickjacking protection.

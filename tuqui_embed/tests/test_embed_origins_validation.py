@@ -141,6 +141,65 @@ class TestEmbedOriginsValidation(TransactionCase):
         with self.assertRaises(ValidationError):
             self.env["ir.config_parameter"].sudo().create({"key": PARAM, "value": "*"})
 
+    def test_rejects_a_semicolon_that_would_open_a_second_csp_directive(self):
+        """The one that matters, and it looked like a valid origin.
+
+        `urlsplit("https://a.com;sandbox")` gives scheme `https`, netloc
+        `a.com;sandbox` and no path — so it walked past every check. The browser
+        reads that `;` as the end of the directive: `frame-ancestors 'self'
+        https://a.com` followed by a brand new `sandbox` directive, which is the
+        strictest sandbox there is, applied to EVERY response of the database.
+        """
+        param = self._param("")
+        with self.assertRaises(ValidationError):
+            param.write({"value": "https://a.com;sandbox"})
+        self.assertFalse(param.value, "a rejected write must not partially apply")
+
+    def test_rejects_a_comma_too(self):
+        """Same family: a CSP source list is whitespace-separated, so a comma
+        inside one token is not a separator anybody parses the way it looks."""
+        param = self._param("")
+        with self.assertRaises(ValidationError):
+            param.write({"value": "https://a.com,https://b.com"})
+
+    def test_rejects_userinfo(self):
+        """`https://u:p@a.com` is not a valid CSP source expression: the panel
+        would come up blank with nothing saying why."""
+        param = self._param("")
+        with self.assertRaises(ValidationError):
+            param.write({"value": "https://u:p@a.com"})
+
+    def test_a_public_host_that_merely_starts_with_127_is_not_loopback(self):
+        """`127.evil.com` is a perfectly public name. The previous check was
+        `startswith("127.")`, so it handed the http exemption to anyone who
+        registered one."""
+        self.env["ir.config_parameter"].sudo().set_param("web.base.url", "https://odoo.example.com")
+        param = self._param("")
+        with self.assertRaises(ValidationError):
+            param.write({"value": "http://127.evil.com"})
+
+    def test_real_loopback_addresses_are_still_accepted(self):
+        """The control for the test above: tightening the check must not have
+        cost the case it exists for."""
+        param = self._param("")
+        param.write({"value": "http://127.0.0.1:8069"})
+        self.assertEqual(param.value, "http://127.0.0.1:8069")
+
+    def test_renaming_a_parameter_into_the_switch_is_validated(self):
+        """The door that stayed open after the first fix.
+
+        Everything hung off `if "value" in vals`, so a bare
+        `write({"key": ...})` renamed some other parameter into the switch
+        carrying whatever unvalidated text it already held — and left no line in
+        the log either.
+        """
+        other = (
+            self.env["ir.config_parameter"].sudo().create({"key": "tuqui.some_other", "value": "https://a.com;sandbox"})
+        )
+        self.env["ir.config_parameter"].sudo().search([("key", "=", PARAM)]).unlink()
+        with self.assertRaises(ValidationError):
+            other.write({"key": PARAM})
+
     # ── scope ──────────────────────────────────────────────────────────────
 
     def test_unrelated_parameters_are_not_validated(self):

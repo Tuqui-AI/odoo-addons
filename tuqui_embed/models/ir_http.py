@@ -56,12 +56,17 @@ class IrHttp(models.AbstractModel):
     def _tuqui_embed_origins(cls):
         """The origins allowed to frame us, or ``None`` when switched off.
 
-        Read per request, but ``get_param`` is ormcached: on a multi-worker
-        deployment, revoking the permission may take a while to reach workers
-        that already had it cached. Measured: with the value changed by another
-        process, this kept answering with the previous one until a restart. If
-        revocation has to be immediate, the cache has to be invalidated — not
-        caching here is not enough.
+        Read per request. ``get_param`` is ormcached, but core
+        ``ir.config_parameter`` clears that cache on every ``create``, ``write``
+        and ``unlink`` (``registry.clear_cache('stable')``), and the registry
+        signals the other workers — so revoking through the ORM, which is what
+        Settings does, takes effect without a restart.
+
+        An earlier version of this docstring claimed the opposite, on the
+        strength of a measurement that must have changed the value out of band
+        (raw SQL, or another session). It is worth writing down because it is
+        the kind of claim somebody builds an incident response on: a value
+        changed BEHIND the ORM does stay cached, and that is the only case.
         """
         try:
             value = request.env["ir.config_parameter"].sudo().get_param(EMBED_ORIGINS_PARAM)
@@ -124,8 +129,13 @@ class IrHttp(models.AbstractModel):
             # `'self'` IS ALWAYS THERE. Odoo frames its own pages same-origin —
             # the PDF and text viewer (`file_viewer.xml`) and the report preview
             # — and a list without `'self'` leaves those blank for the WHOLE
-            # database the moment the switch goes on. Odoo's own default is,
-            # precisely, `frame-ancestors 'self'`.
+            # database the moment the switch goes on.
+            #
+            # (Odoo's own default is NOT `frame-ancestors 'self'`, as this
+            # comment used to say: the web client ships `X-Frame-Options: DENY`
+            # and nothing else, and `frame-ancestors 'self'` shows up only on
+            # `/web/login` — `web/controllers/home.py`. `'self'` is still the
+            # right floor, it is just not a quote of the default.)
             #
             # And the CSP is COMPLETED, not replaced: `set_csp` puts
             # `default-src 'none'` on every `image/*` response (odoo/http.py),

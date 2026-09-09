@@ -33,6 +33,48 @@ describe("tuqui_embed: do not resume tours inside a frame", () => {
         expect(tourState.getCurrentTour()).toBe("a_half_finished_tour");
     });
 
+    test("a tour started ON PURPOSE inside the frame still runs", () => {
+        // This is the half a flat `null` broke. `startTour` writes the tour and
+        // then reads it back through `resumeTour`; with the read always empty,
+        // Tuqui asking for the pointer inside the panel did nothing at all and
+        // said nothing either. The write is what tells a deliberate start from
+        // an automatic resume.
+        patchWithCleanup(framing, { isFramed: () => true });
+        const stored = { value: "a_half_finished_tour" };
+        patchWithCleanup(browser.localStorage, {
+            getItem: () => stored.value,
+            setItem: (_key, value) => (stored.value = value),
+            removeItem: () => {},
+        });
+
+        expect(tourState.getCurrentTour()).toBe(null);
+        tourState.setCurrentTour("the_one_tuqui_asked_for");
+        expect(tourState.getCurrentTour()).toBe("the_one_tuqui_asked_for");
+
+        // The "started here" flag lives in the module, and `patchWithCleanup`
+        // does not know about it. Left set, it would leak into whatever test
+        // runs next and quietly turn its guard off — the sort of coupling that
+        // only shows up the day somebody reorders the file.
+        tourState.clear();
+    });
+
+    test("and when it ends, automatic resumption is blocked again", () => {
+        // Without resetting on `clear`, one deliberate tour would leave the
+        // guard off for the rest of the page's life — and the next reload
+        // inside the frame would resume and crash the tab again.
+        patchWithCleanup(framing, { isFramed: () => true });
+        patchWithCleanup(browser.localStorage, {
+            getItem: () => "a_half_finished_tour",
+            setItem: () => {},
+            removeItem: () => {},
+        });
+
+        tourState.setCurrentTour("the_one_tuqui_asked_for");
+        tourState.clear();
+
+        expect(tourState.getCurrentTour()).toBe(null);
+    });
+
     test("stored progress is NOT erased by being embedded", () => {
         // The guard lies upwards, it does not destroy: if it cleared
         // `localStorage`, the user would lose their onboarding progress in

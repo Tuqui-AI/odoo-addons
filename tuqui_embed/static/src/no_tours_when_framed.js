@@ -29,10 +29,19 @@
  * WHY `tourState` IS PATCHED AND THE SERVICE IS NOT REMOVED. Removing
  * `tour_service` from the registry would break whoever asks for it: the
  * onboarding widget and the POS call `useService("tour_service")` and would
- * blow up on render. Returning `null` here keeps the service alive and
- * `startTour` available to anyone calling it by hand; only automatic
- * resumption is cut. That matters beyond politeness — Tuqui drives the pointer
- * on purpose inside the panel, and that has to keep working.
+ * blow up on render.
+ *
+ * AND WHY A FLAG, NOT A FLAT `null`. Blocking `getCurrentTour` outright also
+ * blocks a DELIBERATE start, which is not a detail: `startTour` ends in
+ * `resumeTour`, and that reads the tour back through `getCurrentTour`
+ * (`tour_service.js`). With a flat `null` the read comes back empty, the tour
+ * is not in the registry, and the call returns without a word — so Tuqui asking
+ * for the pointer inside the panel would do nothing at all, silently.
+ *
+ * `startTour` is the only path that WRITES the current tour before reading it
+ * back, so writing it is what tells the two apart: an automatic resume finds
+ * the name already in `localStorage` and never calls the setter. The flag
+ * follows that, and `clear()` puts it back.
  *
  * AND THE USER'S PROGRESS IS NOT ERASED. `null` is returned only inside the
  * frame: `localStorage` is left intact, so in their everyday Odoo the tour
@@ -66,11 +75,26 @@ export const framing = {
     },
 };
 
+/** Whether a tour was started ON PURPOSE in this page, as opposed to found
+ *  half-finished in `localStorage` from another one. */
+let startedHere = false;
+
 patch(tourState, {
+    setCurrentTour(tourName) {
+        // The only caller is `startTour`. Reaching here means somebody asked
+        // for this tour, in this page, right now.
+        startedHere = true;
+        return super.setCurrentTour(tourName);
+    },
     getCurrentTour() {
-        if (framing.isFramed()) {
+        if (framing.isFramed() && !startedHere) {
             return null;
         }
         return super.getCurrentTour();
+    },
+    clear() {
+        // The tour is over: the next read is an automatic resume again.
+        startedHere = false;
+        return super.clear();
     },
 });

@@ -45,19 +45,22 @@ describe("Odoo shown inside something else", () => {
     test("when nested, the panel stops opening on its own", () => {
         const win = fakeWindow({ nested: true });
         expect(silenceAssistantWhenNested(win)).toBe(true);
-        // BOTH doors the panel opens itself through:
         expect(win._session[PANEL_STATE_KEY]).toBe(undefined);
-        expect(win._local[OPEN_SIGNAL_KEY]).toBe(undefined);
     });
 
-    test("the localStorage signal is cleared too, and that is the real case", () => {
-        // `sessionStorage` is per tab, but the open signal lives in
-        // `localStorage`, shared across EVERY tab and iframe of this Odoo. That
-        // is why merely having used the panel in another tab was enough for the
-        // embedded Odoo to open its own.
+    test("the shared signal is LEFT ALONE, and that is deliberate", () => {
+        // `sessionStorage` is per tab, so clearing it costs nobody anything. The
+        // open signal is not: it lives in `localStorage`, shared with every tab
+        // of this Odoo. An embedded frame loading inside the signal's 5s window
+        // would eat the one a legitimate top-level tab was about to consume, and
+        // that tab would come up without the panel it was promised.
+        //
+        // The service skips READING it while nested instead. Same outcome here,
+        // no collateral there — and this test is what stops someone from
+        // "tidying up" by deleting it again.
         const win = fakeWindow({ nested: true });
         silenceAssistantWhenNested(win);
-        expect(win._local[OPEN_SIGNAL_KEY]).toBe(undefined);
+        expect(win._local[OPEN_SIGNAL_KEY]).toBe('{"at":1}');
     });
 
     test("and the button is hidden, or they would open it by hand anyway", () => {
@@ -74,6 +77,8 @@ describe("Odoo shown inside something else", () => {
         expect(win._session[PANEL_STATE_KEY]).toBe('{"panelOpen":true}');
         expect(win._local[OPEN_SIGNAL_KEY]).toBe('{"at":1}');
         expect(win._classes).toEqual([]);
+        // Same values as the nested case for the signal — which is the point:
+        // that one is never touched either way.
     });
 
     test("if we cannot even look at who contains us, assume nested", () => {
@@ -93,9 +98,6 @@ describe("Odoo shown inside something else", () => {
         // through the door next to it.
         const win = fakeWindow({ nested: true });
         win.sessionStorage.removeItem = () => {
-            throw new Error("SecurityError");
-        };
-        win.localStorage.removeItem = () => {
             throw new Error("SecurityError");
         };
         expect(silenceAssistantWhenNested(win)).toBe(true);

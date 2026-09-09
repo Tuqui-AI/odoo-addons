@@ -26,7 +26,11 @@
  * two places: `sessionStorage` (it was open in this tab) and a signal in
  * `localStorage` (shared across ALL tabs and iframes of this Odoo — which is
  * why having used the panel in another tab was enough to trigger the loop).
- * When nested, both are cleared before the panel reads them.
+ *
+ * Only the first is cleared here. The second is shared, so clearing it would
+ * eat a signal meant for a legitimate top-level tab; the service skips reading
+ * it while nested instead. Same outcome for this page, no collateral for the
+ * others.
  *
  * AND THE BUTTON IS HIDDEN TOO, because clearing state only prevents the
  * automatic open: the systray button would still open it by hand, with the same
@@ -47,7 +51,7 @@
 
 // Safe to import despite the ordering rule above: `storage_keys` holds nothing
 // but constants, so evaluating it does not pull in the service or the panel.
-import { OPEN_SIGNAL_KEY, PANEL_STATE_KEY } from "@tuqui_assistant/storage_keys";
+import { PANEL_STATE_KEY } from "@tuqui_assistant/storage_keys";
 
 /** The class that hides the button. See `nested_guard.scss`. */
 const NESTED_CLASS = "o-tuqui-nested";
@@ -76,12 +80,12 @@ export function silenceAssistantWhenNested(win = window) {
         // Private browsing or blocked storage: the panel will not be able to
         // read its state either, so it starts closed all the same.
     }
-    try {
-        win.localStorage?.removeItem(OPEN_SIGNAL_KEY);
-    } catch {
-        // Same. And we carry on: hiding the button is the half that does not
-        // depend on storage, and returning here would leave it undone.
-    }
+    // The open signal is NOT removed, on purpose. It lives in `localStorage`,
+    // shared with every tab of this Odoo, so deleting it here would eat the one
+    // a legitimate top-level tab was about to consume — leaving that tab
+    // without the panel it was promised. The service skips reading it while
+    // nested instead: the decision belongs to the reader, not to whoever
+    // happens to load first.
     win.document?.documentElement?.classList?.add(NESTED_CLASS);
     return true;
 }

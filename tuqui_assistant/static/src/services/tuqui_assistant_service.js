@@ -10,6 +10,7 @@ import {
 } from "@web/core/l10n/dates";
 import { evaluateBooleanExpr } from "@web/core/py_js/py";
 import { OPEN_SIGNAL_KEY, PANEL_STATE_KEY } from "@tuqui_assistant/storage_keys";
+import { isNested } from "@tuqui_assistant/nested_guard";
 
 // Luxon es un global en Odoo, no un import ESM — igual que en
 // web/static/src/core/l10n/dates.js.
@@ -638,7 +639,13 @@ export const tuquiAssistantService = {
         const _OPEN_SIGNAL_TTL = 5000;
         let _openSignalFresh = false;
         try {
-            const raw = localStorage.getItem(_OPEN_SIGNAL_KEY);
+            // NOT consumed when nested. The signal lives in `localStorage`, so it
+            // is shared with every other tab of this Odoo — and an embedded
+            // frame loading inside the 5s window would eat the one a legitimate
+            // top-level tab was about to use, leaving that tab without the panel
+            // it was promised. Skipping the read here leaves the signal for its
+            // real addressee; the guard no longer deletes it for the same reason.
+            const raw = isNested() ? null : localStorage.getItem(_OPEN_SIGNAL_KEY);
             if (raw) {
                 localStorage.removeItem(_OPEN_SIGNAL_KEY);
                 const signal = JSON.parse(raw);

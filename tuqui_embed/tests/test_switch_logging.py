@@ -85,3 +85,20 @@ class TestSwitchLogging(TransactionCase):
     def test_creating_another_parameter_is_not_logged(self):
         with self.assertNoLogs(LOGGER, logging.INFO):
             self.env["ir.config_parameter"].sudo().create({"key": "tuqui.yet_another_thing", "value": "something"})
+
+    def test_deleting_the_parameter_is_logged_as_switching_it_off(self):
+        """`set_param(key, False)` DELETES the record, so "switch the embed off"
+        never reaches `write`.
+
+        That left the one state change an incident starts from — "it stopped
+        working, when did somebody turn it off?" — as the only one with no trace.
+        """
+        self._parameter(TUQUI)
+        with self.assertLogs(LOGGER, logging.INFO) as captured:
+            self.env["ir.config_parameter"].sudo().set_param(PARAM, False)
+        self.assertIn(PARAM, "\n".join(captured.output))
+
+    def test_deleting_another_parameter_is_not_logged(self):
+        other = self.env["ir.config_parameter"].sudo().create({"key": "tuqui.unrelated", "value": "x"})
+        with self.assertNoLogs(LOGGER, logging.INFO):
+            other.unlink()
