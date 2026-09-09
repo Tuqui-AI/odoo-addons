@@ -196,6 +196,14 @@ class IrConfigParameter(models.Model):
             if not becomes_the_switch and parameter.key != EMBED_ORIGINS_PARAM:
                 continue
             new_value = vals["value"] if "value" in vals else parameter.value
+            # Nothing to check when the value is not moving. Beyond being work
+            # for nothing, validating reads `web.base.url`, and a `get_param`
+            # flushes `ir.config_parameter` — a flush of this very model from
+            # inside its own `write`, before `super()`. Harmless when it happens
+            # on a real change; not worth doing on every unrelated write that
+            # merely touches this record.
+            if not becomes_the_switch and new_value == parameter.value:
+                continue
             _validate_embed_origins(self.env, new_value)
             parameter._log_embed_change(new_value)
         return super().write(vals)
