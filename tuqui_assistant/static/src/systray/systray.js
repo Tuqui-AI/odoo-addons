@@ -1,13 +1,14 @@
 /** @odoo-module **/
-import { Component } from "@odoo/owl";
+import { Component, useState } from "@odoo/owl";
+import { _t } from "@web/core/l10n/translation";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 
 /**
- * Botón en el systray del asistente Tuqui. Click → SIEMPRE abre el panel en un
- * chat NUEVO (item CTO #4): ya no togglea. Cerrar/minimizar vive en los botones
- * propios de la card. openFreshChat resuelve el caso "ya abierto" sin remontar
- * el iframe (no gasta un 2º nonce SSO).
+ * Tuqui assistant systray button. A switch: click shows the panel, click again
+ * puts it away — and since the bubble launcher is gone, this icon is the only
+ * way in and out. Bringing it back restores the conversation that was left
+ * there; starting a new chat lives inside the panel.
  */
 export class TuquiSystray extends Component {
     static props = {};
@@ -15,10 +16,24 @@ export class TuquiSystray extends Component {
 
     setup() {
         this.tuquiAssistant = useService("tuquiAssistant");
+        this.state = useState(this.tuquiAssistant.state);
+    }
+
+    /** True while the card is in front of the user — the click would put it away. */
+    get showing() {
+        return this.state.panelOpen && !this.state.minimized;
+    }
+
+    get showLabel() {
+        return _t("Open Tuqui");
+    }
+
+    get hideLabel() {
+        return _t("Hide Tuqui");
     }
 
     onClick() {
-        this.tuquiAssistant.openFreshChat();
+        this.tuquiAssistant.toggleVisibility();
     }
 }
 
