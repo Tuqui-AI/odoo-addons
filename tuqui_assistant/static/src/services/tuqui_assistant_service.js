@@ -618,7 +618,7 @@ export const tuquiAssistantService = {
     dependencies: ["notification", "orm", "action"],
     start(env, { notification, orm, action }) {
         // Persist panel UI state across Ctrl+R, per-tab (sessionStorage is tab-scoped).
-        // panelOpen / minimized / expanded survive reload; context and newChatRequest
+        // panelOpen / minimized / expanded survive reload; context
         // are ephemeral (rebuilt from the current Odoo view on mount).
         const _SESSION_KEY = "tuqui_panel_state";
         let _savedState = {};
@@ -665,11 +665,6 @@ export const tuquiAssistantService = {
             minimized: Boolean(_savedState.minimized),
             expanded: Boolean(_savedState.expanded),
             context: null,
-            // Nonce-counter that the systray increments to ask an already-open panel
-            // to start a NEW chat without remounting the iframe (a remount would spend
-            // a second SSO nonce → 401). The panel observes changes and posts
-            // `new-chat` to the SPA. See openFreshChat / systray.
-            newChatRequest: 0,
         });
 
         function _saveState() {
@@ -677,8 +672,15 @@ export const tuquiAssistantService = {
                 sessionStorage.setItem(
                     _SESSION_KEY,
                     JSON.stringify({
-                        panelOpen: state.panelOpen,
-                        minimized: state.minimized,
+                        // Hidden is saved as CLOSED. In this tab hiding keeps the
+                        // iframe alive on purpose (a remount spends a second
+                        // single-use SSO nonce → 401), but a reload unmounts it
+                        // anyway, and coming back up mounting a card the user put
+                        // away would spend that nonce on every page load for
+                        // nothing. The conversation still comes back: the path is
+                        // in localStorage.
+                        panelOpen: state.panelOpen && !state.minimized,
+                        minimized: false,
                         expanded: state.expanded,
                     })
                 );
@@ -885,36 +887,30 @@ export const tuquiAssistantService = {
             }
         }
 
-        function togglePanel() {
-            state.panelOpen = !state.panelOpen;
-            // On close/reopen from the systray, start with the card visible: minimized
-            // state is per-open and must not survive a toggle.
-            state.minimized = false;
-            _saveState();
-        }
 
-        // Systray click (CTO item #4): ALWAYS opens the panel on a NEW chat
-        // (closing is handled by the card's minimize/close buttons, no longer toggles).
-        //   - Panel closed → opening mounts the iframe at `/embed/:slug`, which IS
-        //     already a new chat: showing the card is enough (nothing posted; the
-        //     iframe is not yet mounted/hydrated).
-        //   - Panel already open (or minimized: iframe still mounted) → do NOT remount
-        //     the iframe (would spend a second SSO nonce → 401): restore the card and
-        //     increment newChatRequest so the panel posts `new-chat` to the SPA
-        //     (internal navigation to a new chat).
-        function openFreshChat() {
-            const wasOpen = state.panelOpen;
-            state.panelOpen = true;
-            state.minimized = false;
-            if (wasOpen) {
-                state.newChatRequest += 1;
+        // The systray icon is a SWITCH: it shows the panel, and if the panel is
+        // already in front of you it puts it away. It used to always open a new
+        // chat (CTO item #4), which made the icon the one control that could
+        // destroy what you were reading — and with the bubble gone it is also the
+        // only way back, so it has to be able to bring the conversation back
+        // untouched. Starting a new chat lives inside the panel, where the rest
+        // of the conversation controls are.
+        //
+        // Never remounts the iframe while the panel is open: a remount would
+        // spend a second single-use SSO nonce → 401. Hiding is CSS only.
+        function toggleVisibility() {
+            if (!state.panelOpen) {
+                state.panelOpen = true;
+                state.minimized = false;
+            } else {
+                state.minimized = !state.minimized;
             }
             _saveState();
         }
 
-        // Minimize to bubble / restore the card. Does NOT close the panel: the iframe
-        // stays mounted (the card is hidden via CSS, not unmounted) — a remount would
-        // spend a second single-use SSO nonce → 401. See panel.xml.
+        // Hide / show the card. Does NOT close the panel: the iframe stays mounted
+        // (the card is hidden via CSS, not unmounted) — a remount would spend a
+        // second single-use SSO nonce → 401. See panel.xml.
         function minimize() {
             state.minimized = true;
             _saveState();
@@ -1690,8 +1686,7 @@ export const tuquiAssistantService = {
             refreshRecordContext,
             setSearchContext,
             clearContext,
-            togglePanel,
-            openFreshChat,
+            toggleVisibility,
             minimize,
             restore,
             expand,
