@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <templates xml:space="preserve">
     <t t-name="tuqui_assistant.Systray">
+        <!-- The icon is a switch and, with the bubble gone, the only way in and
+             out: it has to say which one the next click is. `aria-pressed` for
+             screen readers, `o-active` for the eye. -->
         <button class="o_nav_entry o-tuqui-systray-btn" t-on-click="onClick"
-                title="Tuqui" aria-label="Tuqui">
+                t-att-class="{ 'o-active': showing }"
+                t-att-aria-pressed="showing ? 'true' : 'false'"
+                t-att-title="showing ? hideLabel : showLabel"
+                t-att-aria-label="showing ? hideLabel : showLabel">
             <img class="o-tuqui-systray-icon"
                  src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
         </button>
