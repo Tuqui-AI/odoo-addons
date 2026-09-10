@@ -1,6 +1,6 @@
 {
     "name": "Tuqui Assistant",
-    "version": "19.0.1.8.0",
+    "version": "19.0.1.9.0",
     "category": "Productivity",
     "summary": "Asistente Tuqui embebido en Odoo: chat contextual + propose-then-apply sobre el formulario",
     "author": "Tuqui-AI",
@@ -15,6 +15,14 @@
     ],
     "assets": {
         "web.assets_backend": [
+            # Named ahead of the glob so it is FIRST in the bundle, which is
+            # belt to the braces: what actually guarantees the ordering is that
+            # the service imports `nested_guard`, and a module is evaluated
+            # before whoever imports it. Bundle position alone would not do it —
+            # Odoo's loader starts a job when its dependencies are ready, not in
+            # file order — and the guard has to run before the service reads the
+            # storage keys it clears.
+            "tuqui_assistant/static/src/nested_guard.js",
             "tuqui_assistant/static/src/**/*",
         ],
         # Tests de interacción (Hoot). Corren con el runner del propio Odoo, sin
