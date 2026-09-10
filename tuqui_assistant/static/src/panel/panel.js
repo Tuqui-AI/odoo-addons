@@ -2,8 +2,36 @@
 import { Component, useState, useRef, useEffect, onWillStart, onMounted, onWillUnmount } from "@odoo/owl";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
+import { listenSizeChange, MEDIAS_BREAKPOINTS, SIZES } from "@web/core/ui/ui_service";
 import { _t } from "@web/core/l10n/translation";
 
+/**
+ * The size Odoo would report for a viewport of `width`.
+ *
+ * Asked of Odoo's own table instead of a copy of it: the index into
+ * MEDIAS_BREAKPOINTS IS the SIZES value (that is how `utils.getSize` reads it),
+ * and the table is not the same across versions — 18.0 has seven bands and puts
+ * XXL at 1534, 19.0 has six and puts it at 1400. A mirrored list would give the
+ * wrong answer on the other version while looking perfectly right.
+ *
+ * @returns {number} one of SIZES
+ */
+export function sizeForWidth(width) {
+    // Floored on the way in: the widths this gets come from
+    // `getBoundingClientRect`, which is fractional, and Odoo's table leaves a
+    // 1px hole between bands (…1199 | 1200…). A width of 1199.4 matched no band
+    // at all, `findIndex` returned -1 and a wide screen was reported as the
+    // smallest size. The observer samples every frame of the 340ms morph, so on
+    // a 1920px screen the remaining room travels 1528→1152 and lands in that
+    // hole on the way.
+    const floored = Math.floor(width);
+    const index = MEDIAS_BREAKPOINTS.findIndex(
+        ({ minWidth, maxWidth }) =>
+            (minWidth === undefined || floored >= minWidth) &&
+            (maxWidth === undefined || floored <= maxWidth)
+    );
+    return index === -1 ? SIZES.XS : index;
+}
 
 /**
  * Panel lateral del asistente Tuqui.
@@ -26,7 +54,6 @@ import { _t } from "@web/core/l10n/translation";
  * Protocolo postMessage (alineado con el hook `useEmbedBridge` del SPA):
  *  Odoo → SPA: { source: "tuqui-odoo", type: "auth",     payload: { client_id, nonce } }
  *              { source: "tuqui-odoo", type: "context",  payload: PageContext }
- *              { source: "tuqui-odoo", type: "new-chat" }
  *              { source: "tuqui-odoo", type: "resume",   payload: { path } }
  *  SPA → Odoo: { source: "tuqui-spa",  type: "ready" }
  *              { source: "tuqui-spa",  type: "apply",    payload: { changes, rationale } }
@@ -64,6 +91,8 @@ export class TuquiPanel extends Component {
             storedPath: null,
         });
         this.iframeRef = useRef("iframe");
+        this.panelRef = useRef("panel");
+        this.uiService = useService("ui");
 
         const _storageKey = () => this.ui.slug ? `tuqui_embed_path_${this.ui.slug}` : null;
 
@@ -94,6 +123,9 @@ export class TuquiPanel extends Component {
                     this._authPosted = false;
                     this._lastSpaPath = null;
                     void loadBootstrap();
+                    if (this._panelObserver && this.panelRef.el) {
+                        this._panelObserver.observe(this.panelRef.el);
+                    }
                 } else {
                     // Panel closed → iframe unmounted → safe to update stored path.
                     if (this.ui.slug) {
@@ -154,8 +186,83 @@ export class TuquiPanel extends Component {
         };
         this._chatHubObserver = null;
 
+        // Odoo lays out for the VIEWPORT, not for the room it actually has. The
+        // chatter sits beside the form only while `ui.size` is XXL (see
+        // `mail/…/chatter/web/form_renderer.js`), and expanding the panel does not
+        // change the viewport — it only takes width away through the body padding.
+        // The chatter therefore stayed on the side and got squeezed together with
+        // the breadcrumb and the pager. Reporting the size of what is LEFT makes
+        // Odoo lay out for that instead: the chatter drops below the form, exactly
+        // as it would in a narrower window, and every other view follows.
+        //
+        // The ui service recomputes `size` on every window resize, so this has to
+        // run again after it — hence listenSizeChange, which fires once the
+        // service has already written its own value.
+        //
+        // And it cannot be measured once: the card takes 340ms to travel from
+        // floating to docked, so a single read right after the click returns the
+        // width it is LEAVING. On a 1920px screen that was 392 instead of 768 —
+        // 1528px of room instead of 1152 — which reads as XXL and left the
+        // chatter on the side, exactly the case this whole thing exists for. A
+        // ResizeObserver on the card answers on every frame of the morph, and
+        // keeps answering if the width ever changes for another reason.
+        // Three things this has to get right, and each one bit:
+        //
+        //  - `isSmall` is a plain field of the same reactive, not derived from
+        //    `size`: the service writes both together and `env.isSmall` reads
+        //    that field. Writing only `size` left ~480 call sites across addons
+        //    reading a stale boolean that now contradicts the size.
+        //  - Nobody re-renders on `size` alone. The chatter redraws on a
+        //    debounce hung off the window `resize`, so a value written after the
+        //    first frame — which is every value the observer produces while the
+        //    card travels — reached no one without saying so.
+        //  - The dispatch would loop: the service recomputes from the viewport,
+        //    finds a different value, writes it and fires the bus, which calls
+        //    this back. Announcing only when OUR value actually changed breaks
+        //    the cycle while still re-asserting the value the service just
+        //    overwrote.
+        let _lastAnnounced = null;
+        const _applySize = (size) => {
+            const changed = size !== _lastAnnounced;
+            _lastAnnounced = size;
+            if (this.uiService.size !== size) {
+                this.uiService.size = size;
+            }
+            const small = size <= SIZES.SM;
+            if (this.uiService.isSmall !== small) {
+                this.uiService.isSmall = small;
+            }
+            if (changed) {
+                window.dispatchEvent(new Event("resize"));
+            }
+        };
+
+        this._sizeOverridden = false;
+        const _syncHostSize = () => {
+            const covering = this.state.expanded && !this.state.minimized;
+            if (!covering) {
+                if (this._sizeOverridden) {
+                    this._sizeOverridden = false;
+                    _applySize(sizeForWidth(window.innerWidth));
+                }
+                return;
+            }
+            const panelWidth = this.panelRef.el?.getBoundingClientRect().width || 0;
+            this._sizeOverridden = true;
+            _applySize(sizeForWidth(Math.max(0, window.innerWidth - panelWidth)));
+        };
+
         onMounted(() => {
             window.addEventListener("message", this._onMessage);
+            this._stopListeningSize = listenSizeChange(_syncHostSize);
+            // The bus is not enough: the service compares against the value WE
+            // wrote, so when the real size happens to equal the override it
+            // never fires — and the panel would keep reporting a stale one.
+            window.addEventListener("resize", _syncHostSize);
+            this._panelObserver = new ResizeObserver(_syncHostSize);
+            if (this.panelRef.el) {
+                this._panelObserver.observe(this.panelRef.el);
+            }
             // A chat window opening/closing adds or removes nodes under <body>,
             // changing the ChatHub footprint — re-measure on any such mutation.
             _syncChatOffset();
@@ -165,6 +272,15 @@ export class TuquiPanel extends Component {
         });
         onWillUnmount(() => {
             window.removeEventListener("message", this._onMessage);
+            this._stopListeningSize?.();
+            window.removeEventListener("resize", _syncHostSize);
+            this._panelObserver?.disconnect();
+            // Give Odoo its real size back: leaving the override in place would
+            // keep the chatter below the form after the panel is gone.
+            if (this._sizeOverridden) {
+                this._sizeOverridden = false;
+                _applySize(sizeForWidth(window.innerWidth));
+            }
             document.documentElement.classList.remove("o-tuqui-expanded");
             this._chatHubObserver?.disconnect();
             window.removeEventListener("resize", _scheduleSyncChatOffset);
@@ -185,20 +301,6 @@ export class TuquiPanel extends Component {
             () => [this._contextKey()]
         );
 
-        // Systray "new chat" (CTO item #4): systray increments newChatRequest
-        // when the panel is already open. Post `new-chat` to the SPA so it
-        // navigates internally (no iframe remount → no second SSO nonce spent).
-        // Gated by embedReady: if the iframe hasn't posted "ready" yet, the SPA
-        // has no listener; the "just opened" case starts a new chat anyway.
-        useEffect(
-            () => {
-                if (this.state.newChatRequest > 0 && this.ui.connected && this.ui.embedReady) {
-                    this._postNewChat();
-                }
-            },
-            () => [this.state.newChatRequest]
-        );
-
         // Manage the split-screen class on <html> via a useEffect so it fires
         // AFTER OWL has updated the DOM (panel already has o-tuqui-expanded class
         // and its expanded layout). If classList.add were called in expand() directly,
@@ -206,18 +308,12 @@ export class TuquiPanel extends Component {
         // is still in its small position → layout doesn't reflow correctly on the
         // first expand (Ctrl+R was needed to fix it).
         //
-        // After applying the class, dispatch a "resize" event inside rAF so Odoo's
-        // JS-layout components (form columns, chatter, list view) re-measure within
-        // the updated body width. Without this, those components keep the widths they
-        // computed at page load and don't react to the body padding-right change.
-        // rAF ensures the CSS has painted (body is visually narrowed) before the
-        // resize handlers run.
         // The split-screen gutter only makes sense while the card is visible.
-        // Minimizing to the bubble hides the card (d-none) but leaves `expanded`
-        // set so restore() brings the expanded layout back — so the gutter must be
-        // released on minimize and re-applied on restore. Gating on !minimized (and
-        // depending on it) fixes the reserved empty space that lingered when
-        // minimizing from the expanded state.
+        // Hiding the card keeps `expanded` set so showing it again brings the
+        // expanded layout back — so the gutter has to be released on hide and
+        // re-applied on show. Gating on !minimized (and depending on it) fixes
+        // the reserved empty space that lingered when hiding from the expanded
+        // state.
         useEffect(
             () => {
                 if (this.state.expanded && !this.state.minimized) {
@@ -225,7 +321,13 @@ export class TuquiPanel extends Component {
                 } else {
                     document.documentElement.classList.remove("o-tuqui-expanded");
                 }
-                requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+                requestAnimationFrame(() => {
+                    // First read after the class lands; the ResizeObserver keeps
+                    // reading through the morph. Both go through _applySize,
+                    // which announces the change itself.
+                    _syncHostSize();
+                    window.dispatchEvent(new Event("resize"));
+                });
             },
             () => [this.state.expanded, this.state.minimized]
         );
@@ -361,21 +463,6 @@ export class TuquiPanel extends Component {
         }
     }
 
-    _postNewChat() {
-        // Ask the SPA (already mounted and hydrated) to open a new chat as an
-        // INTERNAL navigation (no src change → no second SSO nonce spent). Handled
-        // in the SPA via useEmbedBridge (onNewChat). Concrete origin like all other
-        // posts (never "*").
-        const win = this.iframeRef.el?.contentWindow;
-        if (!win) {
-            return;
-        }
-        try {
-            win.postMessage({ source: "tuqui-odoo", type: "new-chat" }, this._spaOrigin);
-        } catch {
-            // different origin / iframe not yet navigated: next click retries.
-        }
-    }
 
     _handleMessage(ev) {
         const data = ev.data;
@@ -481,11 +568,8 @@ export class TuquiPanel extends Component {
     get openInTuquiLabel() {
         return _t("Open in Tuqui");
     }
-    get minimizeLabel() {
-        return _t("Minimize");
-    }
-    get closeLabel() {
-        return _t("Close");
+    get hideLabel() {
+        return _t("Hide");
     }
     get expandLabel() {
         return _t("Expand");
@@ -493,22 +577,13 @@ export class TuquiPanel extends Component {
     get contractLabel() {
         return _t("Contract");
     }
-    get restoreLabel() {
-        return _t("Open Tuqui");
-    }
 
-    close() {
-        this.tuquiAssistant.togglePanel();
-    }
-
-    // Minimize to bubble: hides the card via CSS (does NOT unmount the iframe →
-    // no second SSO nonce spent). Restore shows it again.
-    minimize() {
+    // Hides the card via CSS (it does NOT unmount the iframe → no second SSO
+    // nonce spent, and the conversation is still there when it comes back). The
+    // systray icon brings it back: there is no bubble launcher any more, so the
+    // corner is left to Odoo's own chat windows.
+    hide() {
         this.tuquiAssistant.minimize();
-    }
-
-    restore() {
-        this.tuquiAssistant.restore();
     }
 
     expand() {
