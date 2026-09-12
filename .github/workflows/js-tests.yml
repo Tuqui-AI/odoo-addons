@@ -48,6 +48,12 @@ on:
 jobs:
   hoot:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Un addon por corrida, y no todos juntos en un filtro: así el rojo
+        # dice CUÁL suite se rompió, y un addon sin browser no tapa al otro.
+        addon: [tuqui_assistant, tuqui_embed]
     services:
       postgres:
         image: postgres:16
@@ -93,7 +99,7 @@ jobs:
           google-chrome --version
           python3 -c "import websocket"
 
-      - name: Run the addon's Hoot suite
+      - name: Run the addon's Hoot suite (${{ matrix.addon }})
         run: |
           set -o pipefail
           odoo \
@@ -101,10 +107,10 @@ jobs:
             --addons-path "/usr/lib/python3/dist-packages/odoo/addons,${GITHUB_WORKSPACE}/addons/tuqui-ai" \
             --data-dir /tmp/odoo-data \
             -d hoot_test \
-            -i tuqui_assistant -u web \
+            -i ${{ matrix.addon }} -u web \
             --without-demo=True \
             --test-enable \
-            --test-tags "/web:WebSuite.test_unit_desktop[@tuqui_assistant]" \
+            --test-tags "/web:WebSuite.test_unit_desktop[@${{ matrix.addon }}]" \
             --stop-after-init \
             --log-level=test 2>&1 | tee /tmp/hoot.log
 
@@ -113,11 +119,11 @@ jobs:
         # websocket-client o si el filtro dejó de matchear (por un rename del
         # addon o de los archivos de test), arriba no falla nada. Acá sí.
         run: |
-          if ! grep -q '\[HOOT\] "@tuqui_assistant" ended' /tmp/hoot.log; then
-            echo "::error::El suite Hoot de tuqui_assistant no se ejecutó."
+          if ! grep -q '\[HOOT\] "@${{ matrix.addon }}" ended' /tmp/hoot.log; then
+            echo "::error::El suite Hoot de ${{ matrix.addon }} no se ejecutó."
             echo "Revisá si el job se salteó los tests (browser o websocket-client"
             echo "ausentes) o si el filtro --test-tags dejó de matchear."
             grep -iE 'skip|not installed' /tmp/hoot.log || true
             exit 1
           fi
-          grep '\[HOOT\] "@tuqui_assistant" ended' /tmp/hoot.log
+          grep '\[HOOT\] "@${{ matrix.addon }}" ended' /tmp/hoot.log
