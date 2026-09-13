@@ -1,0 +1,35 @@
+/* La gota — el puntero de Odoo teñido de salvia.
+ *
+ * Se tiñe redefiniendo LAS VARIABLES QUE EL PROPIO PUNTERO EXPONE, no pisando
+ * sus reglas: así la forma de gota, el rebote, el degradé y la expansión del
+ * globo siguen siendo los de Odoo, y una mejora suya nos llega gratis. Lo único
+ * nuestro es el color, que es lo que dice QUIÉN te está señalando.
+ */
+.o_tour_pointer.o_tuqui_gota {
+    --TourPointer__color: #344e41;
+    --TourPointer__color-accent: #3f5e4e;
+    --TourPointer__text-color: #ffffff;
+
+    .o_tour_pointer_content {
+        // El globo del hover, en salvia oscuro con texto blanco. El default de
+        // Odoo es claro con texto negro: contra la gota verde se leería como dos
+        // piezas distintas en vez de una sola marca.
+        background-color: var(--TourPointer__color);
+        color: var(--TourPointer__text-color);
+    }
+
+    &.o_open {
+        // Y LA FLECHITA TAMBIÉN. Al abrirse, el `tip` deja de ser la gota y pasa
+        // a ser el triangulito que señala el campo, y Odoo lo pinta blanco con
+        // borde gris —igual que el fondo del globo, que acá ya no es gris—. Sin
+        // esto la punta salía blanca colgando de un cartel verde. Va también el
+        // borde de la raíz, que es el marco del globo.
+        border-color: var(--TourPointer__color);
+        background-color: var(--TourPointer__color);
+
+        .o_tour_pointer_tip {
+            background: var(--TourPointer__color);
+            border-color: var(--TourPointer__color);
+        }
+    }
+}
