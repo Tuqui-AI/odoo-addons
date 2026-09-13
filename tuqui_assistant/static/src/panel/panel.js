@@ -4,6 +4,7 @@ import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 import { runOdooAction } from "@tuqui_assistant/odoo_actions";
+import { isNested } from "@tuqui_assistant/nested_guard";
 import { OPEN_SIGNAL_KEY } from "@tuqui_assistant/storage_keys";
 
 
@@ -528,4 +529,12 @@ export class TuquiPanel extends Component {
 
 }
 
-registry.category("main_components").add("tuqui_assistant.Panel", { Component: TuquiPanel });
+// El panel no se monta cuando este Odoo está siendo mostrado adentro de otra
+// página. Es la garantía DURA contra el bucle —Tuqui muestra Odoo, ese Odoo abre
+// su Tuqui, ese Tuqui vuelve a mostrar Odoo— que cuelga el navegador entero, no
+// sólo la pestaña: sin componente no hay iframe que cargar, sin depender de que
+// el estado guardado diga que estaba cerrado. Lo demás del módulo sigue vivo, y
+// eso es a propósito: la capa de guía tiene que funcionar precisamente acá.
+if (!isNested()) {
+    registry.category("main_components").add("tuqui_assistant.Panel", { Component: TuquiPanel });
+}

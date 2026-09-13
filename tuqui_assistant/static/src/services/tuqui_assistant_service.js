@@ -750,76 +750,23 @@ function sanitizeChatterBody(html) {
  * respuesta: si no lo podemos ni mirar, es de otro. Por eso el catch devuelve
  * `true` en vez de tragarse el error.
  */
-function estamosAnidados() {
-    try {
-        return window.top !== window.self;
-    } catch {
-        return true;
-    }
-}
-
-/**
- * El asistente, apagado. Misma forma que el servicio real, sin hacer nada.
- *
- * POR QUÉ EXISTE. Odoo se puede ver DENTRO del panel de Tuqui. Ahí el asistente
- * no tiene sentido —la conversación ya está del otro lado de la pantalla— y
- * además **cuelga el hilo principal de la pestaña entera** a los dos segundos de
- * entrar al menú de aplicaciones. Reproducido en 5 s; con el módulo
- * desinstalado, 28 s sin problema.
- *
- * Se devuelve un servicio inerte y no se corta la carga del módulo porque los
- * controladores de vistas lo piden por dependencia: si no existiera, sus parches
- * romperían el cliente web que estamos tratando de mostrar.
- *
- * Todo lo que devuelve es lo que el resto del módulo espera encontrar. `state`
- * es el que mira el systray para decidir si dibuja algo: con `panelOpen` en
- * false y sin contexto, no dibuja nada.
- */
-function servicioApagado() {
-    const nada = () => {};
-    return {
-        state: reactive({
-            panelOpen: false,
-            minimized: false,
-            expanded: false,
-            context: null,
-            newChatRequest: 0,
-        }),
-        setRecordContext: nada,
-        refreshRecordContext: () => false,
-        setSearchContext: nada,
-        clearContext: nada,
-        togglePanel: nada,
-        openFreshChat: nada,
-        minimize: nada,
-        restore: nada,
-        expand: nada,
-        contract: nada,
-        applyProposal: async () => false,
-        proposeChatter: async () => false,
-        navigate: async () => false,
-        reloadView: async () => false,
-        saveRecord: async () => false,
-        spotlight: async () => false,
-        spotlightOrWarn: async () => false,
-        getEmbedBootstrap: async () => null,
-        getSsoAuth: async () => null,
-        getContextPayload: () => ({ kind: "none" }),
-        getActiveRecord: () => null,
-        consumeResumeOnOpen: () => false,
-    };
-}
-
-
 export const tuquiAssistantService = {
     // `action` is needed to open the standard composer (doAction) from proposeChatter.
     dependencies: ["notification", "orm", "action", "overlay"],
     start(env, { notification, orm, action, overlay }) {
-        // Odoo mostrado adentro de otra página (el panel de Tuqui) es una VISTA:
-        // el asistente no se monta ahí. Ver `servicioApagado`.
-        if (estamosAnidados()) {
-            return servicioApagado();
-        }
+        // Odoo mostrado adentro del panel de Tuqui NO abre su propia conversación
+        // —ya está del otro lado de la pantalla, y abrirla colgaba el navegador
+        // entero: Tuqui muestra Odoo, ese Odoo abre su Tuqui, y así. Pero lo que
+        // no se monta es LA CONVERSACIÓN, no el servicio.
+        //
+        // Antes se devolvía un servicio inerte, y con él se apagaba también la
+        // capa de guía: la marca, el contexto de la pantalla y las acciones que
+        // el chat de afuera pide sobre ESTA pantalla — que es justo donde más
+        // falta hacen. `nested_guard` ya corta el bucle donde corresponde (el
+        // panel no se restaura solo, el botón del systray no se ve, y la señal
+        // compartida no se consume acá: ver `isNested()` abajo), y lo hace con
+        // sus propios tests. Dos remedios para lo mismo, y el viejo apagaba de
+        // más; queda el fino.
         // Persist panel UI state across Ctrl+R, per-tab (sessionStorage is tab-scoped).
         // panelOpen / minimized / expanded survive reload; context and newChatRequest
         // are ephemeral (rebuilt from the current Odoo view on mount).
