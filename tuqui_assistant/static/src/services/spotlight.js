@@ -75,9 +75,51 @@ const ACCIONES_DE_LA_INTERFAZ = {
     new: ".o_list_button_add, .o_form_button_create",
 };
 
-/** Cuánto queda la marca antes de apagarse sola. Una marca que no se va deja de
- *  leerse como "acá, ahora" y pasa a ser decoración de la pantalla. */
-export const SPOTLIGHT_MS = 15000;
+/**
+ * Avisar cuando la persona HAGA lo que se le marcó.
+ *
+ * Es la señal que cierra el paso: hasta ahora la marca sólo se iba por reloj o
+ * porque la pantalla cambiaba, y quedaba puesta encima de algo que la persona ya
+ * había hecho — un dedo señalando un botón recién apretado.
+ *
+ * SE ESCUCHA EL DOCUMENTO, no el elemento, por dos razones medidas en Odoo: el
+ * clic real cae casi siempre en un HIJO de lo marcado (el ícono adentro del
+ * botón, el input adentro del campo), y el nodo marcado lo reemplaza Odoo cuando
+ * re-renderiza, así que un listener pegado a él se pierde en el primer cambio.
+ * Con `contains` las dos cosas se resuelven solas.
+ *
+ * @param {HTMLElement} objetivo lo que se marcó
+ * @param {() => void} alHacerlo
+ * @returns {() => void} para dejar de escuchar
+ */
+export function escucharElClic(objetivo, alHacerlo) {
+    if (!objetivo) {
+        return () => {};
+    }
+    const mirar = (ev) => {
+        if (objetivo.contains?.(ev.target) || ev.target === objetivo) {
+            alHacerlo();
+        }
+    };
+    document.addEventListener("click", mirar, true);
+    return () => document.removeEventListener("click", mirar, true);
+}
+
+/**
+ * La red de seguridad, no el mecanismo: cuánto queda la marca si NO pasa nada.
+ *
+ * Lo que apaga una marca es que deje de ser cierta — la persona hizo lo que le
+ * señalaron, se fue a otra pantalla, o llegó una marca nueva. El reloj está para
+ * el caso en que no pasa ninguna de las tres: alguien que se levantó de la silla
+ * y vuelve mañana no tiene que encontrar un dedo apuntando algo que ya olvidó.
+ *
+ * ERAN 15 SEGUNDOS, Y ERA POCO — medido acompañando de a pasos: un turno de
+ * conversación completo (escribir, esperar la respuesta, leerla) lleva unos 40,
+ * así que la marca no sobrevivía ni a una pregunta en el medio. La persona
+ * preguntaba algo, volvía a la pantalla y no había nada; pedía la marca de nuevo
+ * y ahí aparecía el otro problema, el de repetirse.
+ */
+export const SPOTLIGHT_MS = 90000;
 
 /** Cada cuánto se vuelve a mirar mientras la persona scrollea. El propio
  *  `tour_interactive` usa 50 ms para lo mismo. */
@@ -434,6 +476,7 @@ export function makeSpotlight(overlay, deps = {}) {
     let pointer = null;
     let removeOverlay = null;
     let timer = null;
+    let dejarDeEscucharElClic = null;
     /** Para despegar los listeners de la gota anterior al mover la marca. */
     let desatar = null;
     /**
@@ -619,6 +662,13 @@ export function makeSpotlight(overlay, deps = {}) {
             }
         });
         timer = setTimeout(apagar, SPOTLIGHT_MS);
+        // Y se apaga cuando la persona HACE lo que se le marcó, que es la razón
+        // por la que la marca existía. Va en captura y sobre el documento porque
+        // el clic puede caer en un hijo de lo señalado (el ícono adentro del
+        // botón, el input adentro del campo) y porque el nodo marcado se
+        // reemplaza solo cuando Odoo re-renderiza: escuchar sobre el elemento lo
+        // perdería, escuchar sobre el documento no.
+        dejarDeEscucharElClic = escucharElClic(el, apagar);
         return true;
     }
 
@@ -633,6 +683,8 @@ export function makeSpotlight(overlay, deps = {}) {
      */
     function apagar() {
         clearTimeout(timer);
+        dejarDeEscucharElClic?.();
+        dejarDeEscucharElClic = null;
         apagarVigilancia();
         desatar?.();
         desatar = null;

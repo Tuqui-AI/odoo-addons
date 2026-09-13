@@ -6,7 +6,7 @@ import { mountWithCleanup } from "@web/../tests/web_test_helpers";
 
 import { Gota } from "@tuqui_assistant/spotlight/gota";
 
-import { findSpotlightTarget, makeSpotlight } from "@tuqui_assistant/services/spotlight";
+import { findSpotlightTarget, makeSpotlight, escucharElClic } from "@tuqui_assistant/services/spotlight";
 
 /**
  * Dónde cae la gota.
@@ -982,5 +982,75 @@ describe("el ancla no puede alimentar al loop", () => {
 
         handle.destroy();
         form.remove();
+    });
+});
+
+describe("la marca se va cuando deja de ser cierta", () => {
+    test("hacer lo que se marcó la apaga", async () => {
+        // La razón por la que la marca existía ya se cumplió: dejarla puesta es
+        // un dedo señalando un botón recién apretado.
+        const objetivo = document.createElement("button");
+        objetivo.textContent = "Confirmar";
+        document.body.appendChild(objetivo);
+        let apagada = false;
+        const dejar = escucharElClic(objetivo, () => (apagada = true));
+
+        objetivo.click();
+        expect(apagada).toBe(true);
+
+        dejar();
+        objetivo.remove();
+    });
+
+    test("el clic cae en un hijo y cuenta igual", async () => {
+        // En Odoo el clic real casi siempre cae en el ícono de adentro del botón
+        // o en el input de adentro del campo. Escuchar al elemento exacto perdía
+        // justo el caso normal.
+        const objetivo = document.createElement("button");
+        const icono = document.createElement("i");
+        objetivo.appendChild(icono);
+        document.body.appendChild(objetivo);
+        let apagada = false;
+        const dejar = escucharElClic(objetivo, () => (apagada = true));
+
+        icono.click();
+        expect(apagada).toBe(true);
+
+        dejar();
+        objetivo.remove();
+    });
+
+    test("un clic en otra cosa no la apaga", async () => {
+        // El control negativo: si cualquier clic la apagara, la marca duraría lo
+        // que tarda la persona en tocar la pantalla en cualquier lado.
+        const objetivo = document.createElement("button");
+        const otro = document.createElement("button");
+        document.body.append(objetivo, otro);
+        let apagada = false;
+        const dejar = escucharElClic(objetivo, () => (apagada = true));
+
+        otro.click();
+        expect(apagada).toBe(false);
+
+        dejar();
+        objetivo.remove();
+        otro.remove();
+    });
+
+    test("dejar de escuchar deja de avisar", async () => {
+        const objetivo = document.createElement("button");
+        document.body.appendChild(objetivo);
+        let veces = 0;
+        const dejar = escucharElClic(objetivo, () => (veces += 1));
+        dejar();
+
+        objetivo.click();
+        expect(veces).toBe(0);
+
+        objetivo.remove();
+    });
+
+    test("sin nada marcado no revienta", async () => {
+        expect(typeof escucharElClic(null, () => {})).toBe("function");
     });
 });
