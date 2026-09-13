@@ -3,6 +3,7 @@ import { Component, useState, useRef, useEffect, onWillStart, onMounted, onWillU
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
+import { OPEN_SIGNAL_KEY } from "@tuqui_assistant/storage_keys";
 
 
 /**
@@ -510,7 +511,7 @@ export class TuquiPanel extends Component {
                 // guards against stale signals in case the user opens a new Odoo tab
                 // independently later.
                 try {
-                    localStorage.setItem("tuqui_open_signal", JSON.stringify({ at: Date.now() }));
+                    localStorage.setItem(OPEN_SIGNAL_KEY, JSON.stringify({ at: Date.now() }));
                 } catch {
                     // Private browsing or quota exceeded — skip silently.
                 }
