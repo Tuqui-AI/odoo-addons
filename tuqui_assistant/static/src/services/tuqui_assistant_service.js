@@ -801,6 +801,7 @@ function servicioApagado() {
         reloadView: async () => false,
         saveRecord: async () => false,
         spotlight: async () => false,
+        spotlightOrWarn: async () => false,
         getEmbedBootstrap: async () => null,
         getSsoAuth: async () => null,
         getContextPayload: () => ({ kind: "none" }),
@@ -1781,6 +1782,49 @@ export const tuquiAssistantService = {
         });
         const spotlight = async (payload) => spotlightHandle.spotlight(payload);
 
+        /**
+         * Poner la gota, y si no cae, decírselo a QUIEN PUEDE HACER ALGO.
+         *
+         * El aviso va a la persona y no de vuelta al agente, por lo que dice el
+         * comentario de arriba: quien mira la pantalla es el único que puede
+         * moverse a la vista correcta.
+         *
+         * Vive acá y no en quien recibe el pedido porque los que lo reciben ya
+         * son DOS, y van a ser los mismos dos para cada cosa que se maneje desde
+         * el chat: el panel, cuando Tuqui está adentro de Odoo, y el puente
+         * anidado, cuando Odoo está adentro de Tuqui. La marca es la misma y el
+         * aviso también; lo único que cambia es por dónde entró el pedido.
+         */
+        async function spotlightOrWarn(payload) {
+            // El try NO es defensa por si acaso: a esta función se la llama sin
+            // `await` (no hay a quién devolverle el resultado), así que un throw
+            // adentro se volvía un unhandled rejection y la persona se quedaba
+            // sin marca Y sin aviso — que es exactamente lo que esto existe para
+            // evitar. Un error señalando es indistinguible, para quien mira, de
+            // una marca que no cayó.
+            let marcado = false;
+            try {
+                // Es `await` porque la marca puede tener que abrir una pestaña
+                // del formulario para llegar al campo, y eso pasa por un render.
+                marcado = await spotlight(payload);
+            } catch (error) {
+                console.warn("tuqui_assistant: falló al señalar en la pantalla", error);
+            }
+            if (marcado) {
+                return true;
+            }
+            // `String()` porque el payload lo escribe el modelo: un objeto ahí
+            // imprimía "[object Object]" en el cartel que lee la persona.
+            const que = String(payload.label || payload.field || payload.action || "");
+            notification.add(
+                que
+                    ? _t('Tuqui quiso señalarte "%s", pero no está en esta pantalla.', que)
+                    : _t("Tuqui quiso señalarte algo, pero no está en esta pantalla."),
+                { type: "warning" }
+            );
+            return false;
+        }
+
         async function reloadView() {
             const viewModel = _owner?.model;
             if (!viewModel) {
@@ -1973,6 +2017,7 @@ export const tuquiAssistantService = {
             reloadView,
             saveRecord,
             spotlight,
+            spotlightOrWarn,
             getEmbedBootstrap,
             getSsoAuth,
             getContextPayload,

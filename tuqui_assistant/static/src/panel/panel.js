@@ -3,6 +3,7 @@ import { Component, useState, useRef, useEffect, onWillStart, onMounted, onWillU
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
+import { runOdooAction } from "@tuqui_assistant/odoo_actions";
 import { OPEN_SIGNAL_KEY } from "@tuqui_assistant/storage_keys";
 
 
@@ -338,44 +339,6 @@ export class TuquiPanel extends Component {
         }
     }
 
-    /**
-     * Poner la gota, y si no cae, decírselo a QUIEN PUEDE HACER ALGO.
-     *
-     * El aviso va al usuario y no de vuelta al agente, y es una decisión, no una
-     * omisión: quien está mirando la pantalla es el único que puede moverse a la
-     * vista correcta. El agente, además, ya sabe de antemano dónde está parado —
-     * el contexto de la página viaja en cada mensaje — así que lo que hay que
-     * evitar es que la persona se quede buscando una marca que nunca apareció.
-     */
-    async _spotlight(payload) {
-        // El try NO es defensa por si acaso: es la única forma de que la promesa
-        // valga. A esta función se la llama sin `await` (no hay a quién
-        // devolverle el resultado), así que un throw adentro se volvía un
-        // unhandled rejection: la persona se quedaba sin marca Y sin aviso, que
-        // es exactamente lo que este método existe para evitar. Un error
-        // señalando es indistinguible, para quien mira, de una marca que no cayó.
-        let marcado = false;
-        try {
-            // Es `await` porque la marca puede tener que abrir una pestaña del
-            // formulario para llegar al campo, y eso pasa por un render de Owl.
-            marcado = await this.tuquiAssistant.spotlight(payload);
-        } catch (error) {
-            console.warn("tuqui_assistant: falló al señalar en la pantalla", error);
-        }
-        if (marcado) {
-            return;
-        }
-        // `String()` porque el payload lo escribe el modelo: un objeto ahí
-        // imprimía "[object Object]" en el cartel que lee la persona.
-        const que = String(payload.label || payload.field || payload.action || "");
-        this.notification.add(
-            que
-                ? _t('Tuqui quiso señalarte "%s", pero no está en esta pantalla.', que)
-                : _t("Tuqui quiso señalarte algo, pero no está en esta pantalla."),
-            { type: "warning" }
-        );
-    }
-
     _postContext() {
         const win = this.iframeRef.el?.contentWindow;
         if (!win) {
@@ -439,49 +402,19 @@ export class TuquiPanel extends Component {
         if (!spaOrigin || ev.origin !== spaOrigin) {
             return;
         }
+        // Lo que el chat le pide a ESTE Odoo lo resuelve el despachador que
+        // comparten las dos direcciones del puente. Lo que queda abajo es lo
+        // que sólo tiene sentido para quien MUESTRA el chat: dónde está
+        // parada la conversación, un link que se va a abrir, el iframe
+        // avisando que ya montó.
+        if (runOdooAction(this.tuquiAssistant, data.type, data.payload || {})) {
+            return;
+        }
         switch (data.type) {
             case "ready":
                 this.ui.embedReady = true;
                 this._postAuth(); // SSO: send nonce + client_id to iframe (before context)
                 this._postContext();
-                break;
-            case "apply":
-                // `baseRevision` (opcional): la revisión del contexto sobre la que
-                // el SPA razonó. Con eso el servicio detecta si el usuario tocó
-                // alguno de esos campos después y no lo pisa en silencio.
-                this.tuquiAssistant.applyProposal(data.payload?.changes || {}, {
-                    baseRevision: data.payload?.baseRevision,
-                });
-                break;
-            case "chatter":
-                // Chatter content proposal: opens the standard Odoo composer
-                // pre-filled (user reviews and sends). NEVER posted silently —
-                // human dispatch is structural.
-                this.tuquiAssistant.proposeChatter(data.payload || {});
-                break;
-            case "save":
-                // El usuario pidió guardar. Odoo valida; si rechaza, el servicio
-                // lo dice en vez de cantar victoria.
-                this.tuquiAssistant.saveRecord();
-                break;
-            case "spotlight":
-                // La gota: señalar en la pantalla dónde hay que hacer algo, con
-                // el puntero de `web_tour` (el que la gente ya conoce del
-                // onboarding).
-                this._spotlight(data.payload || {});
-                break;
-            case "reload":
-                // El turno escribió en Odoo por atrás: los datos de la vista
-                // quedaron viejos. Relee sin recargar la página. El servicio se
-                // niega si el form está sucio — no le pisamos al usuario lo que
-                // está escribiendo por refrescar un dato.
-                this.tuquiAssistant.reloadView();
-                break;
-            case "navigate":
-                // Odoo navigation from chat: opens a NEW form (create) or a
-                // filtered list/pivot/graph via standard act_window (checks
-                // permissions). Does NOT write anything.
-                this.tuquiAssistant.navigate(data.payload || {});
                 break;
             case "location":
                 // The SPA reports its current standalone-equivalent path
