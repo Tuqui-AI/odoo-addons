@@ -1,0 +1,14 @@
+// An Odoo shown inside Tuqui is a VIEW: the assistant button does not belong
+// there, because the conversation is already on the other side of the screen.
+// Without this, the button would still open a Tuqui inside a Tuqui — the very
+// loop the guard exists to cut, only by hand.
+//
+// The selectors are the ones in the real markup (`systray.xml`, `panel.xml`),
+// with dashes: an earlier version used `o_tuqui_systray` / `o_tuqui_panel`,
+// which exist nowhere, so it hid nothing and failed silently.
+.o-tuqui-nested {
+    .o-tuqui-systray-btn,
+    .o-tuqui-panel {
+        display: none !important;
+    }
+}

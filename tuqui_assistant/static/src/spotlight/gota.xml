@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <!--
+        La gota es EL PUNTERO DE ODOO, en verde.
+
+        `t-inherit-mode="primary"` hace una COPIA modificada del template de
+        `web_tour` en vez de pisarlo: los tours de verdad de Odoo siguen intactos,
+        con su botón y todo. Si al revés lo modificáramos en su lugar, le
+        estaríamos sacando el "Stop Tour" a los tours reales.
+
+        Los dos cambios:
+
+        1. FUERA EL BOTÓN "Stop Tour". En un tour tiene sentido; acá no hay tour
+           que parar, y lo que hace es `switch_tour_enabled(false)` MÁS un reload
+           de la página: al que pase el mouse por encima le desactivaría los tours
+           de Odoo y le haría perder lo que estaba escribiendo. Y sin abrir el
+           tooltip no hay dónde poner el texto, que es la mitad del valor de la
+           gota — así que abrirlo no era opcional.
+
+        2. UNA CLASE PROPIA para teñirla de salvia. Cuando alguien te interviene
+           la pantalla, el color es lo que dice QUIÉN fue: con el look de Odoo se
+           leería como una función del sistema y no como "el asistente te está
+           señalando esto".
+    -->
+    <t t-name="tuqui_assistant.Gota" t-inherit="web_tour.TourPointer" t-inherit-mode="primary">
+        <xpath expr="//button[@t-on-click='onStopClicked']" position="replace" />
+        <!-- Por `t-ref` y no por clase: la clase del puntero se arma en
+             `t-attf-class`, y un xpath con `hasclass()` mira el atributo `class`,
+             que ahí no existe. -->
+        <xpath expr="//div[@t-ref='pointer']" position="attributes">
+            <attribute name="t-attf-class" add="o_tuqui_gota" separator=" " />
+        </xpath>
+    </t>
+</templates>
