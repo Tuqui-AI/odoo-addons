@@ -332,10 +332,20 @@ export async function porQueNoSePudoAbrir(e, model, orm) {
  * "Log note"—. Las dos terminan igual: el addon no encuentra nada, y el agente le
  * dice a la persona "te lo resalté" sobre una pantalla donde no hay nada.
  *
- * EL ALCANCE ES EL MISMO CON EL QUE SE BUSCAN, y eso no es un detalle: la marca
- * busca dentro de `.o_form_view` (ver `pantalla` en `spotlight.js`), así que
- * mandar botones de afuera ofrecería lo que después no se puede señalar. Por eso
- * entran también los del chatter, que viven ahí adentro y son de los más pedidos.
+ * EL ALCANCE ES EL MISMO CON EL QUE SE BUSCAN, y eso no es un detalle: mandar
+ * botones de afuera ofrecería lo que después no se puede señalar. La marca busca
+ * dentro de `.o_form_view` cuando hay un formulario y en todo el documento
+ * cuando no (ver `pantalla` en `spotlight.js`), y esto sigue esa misma línea: el
+ * formulario, y si no hay, la BARRA DE CONTROL. Por eso entran también los
+ * botones del chatter, que viven adentro del formulario y son de los más
+ * pedidos.
+ *
+ * Y POR QUÉ LA BARRA DE CONTROL, no la lista entera: una lista abierta tiene un
+ * botón por fila, y ninguno de esos es algo que alguien pida por su nombre — son
+ * de un registro, no de la pantalla. Los de la pantalla están arriba. Sin esto,
+ * una lista o un kanban viajaban SIN botones, y el modelo volvía a lo que hacía
+ * antes de que esta lista existiera: adivinar. Medido con la lista de pedidos
+ * abierta en el panel — pidió marcar "Nuevo" contra un botón que dice "New".
  *
  * LA LISTA PUEDE SER PARCIAL —hay un tope, y se filtra lo que no tiene nombre
  * que una persona pueda decir (un contador, una fecha)—, así que sirve para
@@ -344,7 +354,7 @@ export async function porQueNoSePudoAbrir(e, model, orm) {
  * @returns {Array<{text: string, name?: string}>}
  */
 function botonesEnPantalla() {
-    const vista = document.querySelector(".o_form_view");
+    const vista = document.querySelector(".o_form_view") || document.querySelector(".o_control_panel");
     if (!vista) {
         return [];
     }
@@ -1146,6 +1156,15 @@ export const tuquiAssistantService = {
                 return { kind: "none" };
             }
             const ctx = { ...state.context };
+            // Los BOTONES que la persona tiene delante, en CUALQUIER pantalla y no
+            // sólo en un formulario: una lista y un kanban también tienen botones
+            // que alguien pide por su nombre, y sin ellos el modelo los adivina.
+            //
+            // VA PRIMERO por el mismo motivo que `fieldState` va antes de los
+            // valores: el consumidor CORTA este objeto en 8000 caracteres, así que
+            // la última clave es la primera en desaparecer — y sería justo lo que
+            // no se puede reconstruir del otro lado. Pesa poco.
+            ctx.buttons = botonesEnPantalla();
             if (ctx.kind === "record" && activeRecord) {
                 ctx.dirty = Boolean(activeRecord.dirty);
                 // Qué se ve, qué se puede escribir y qué es obligatorio. Sin esto
@@ -1167,10 +1186,6 @@ export const tuquiAssistantService = {
                 if (!evaluadoresDisponibles(activeRecord)) {
                     ctx.fieldStateUnavailable = true;
                 }
-                // Los BOTONES que la persona tiene delante, por el mismo motivo
-                // de orden: van antes de los valores porque pesan poco y no se
-                // pueden reconstruir del otro lado.
-                ctx.buttons = botonesEnPantalla();
                 ctx.fields = serializeRecordFields(activeRecord);
             }
             // Aplanar a JSON puro: arranca los Proxies reactivos (domain/filters/

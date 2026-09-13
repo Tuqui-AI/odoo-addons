@@ -1,7 +1,12 @@
 /** @odoo-module **/
 import { describe, expect, test } from "@odoo/hoot";
 
-import { contextKey, isFromOurTuqui, tuquiOrigin } from "@tuqui_assistant/nested_bridge";
+import {
+    contextKey,
+    isFromOurTuqui,
+    makeOriginResolver,
+    tuquiOrigin,
+} from "@tuqui_assistant/nested_bridge";
 
 /**
  * Who may drive this screen, and when the other side gets told it changed.
@@ -132,5 +137,78 @@ describe("when the other side gets told the screen changed", () => {
         // own — and must not republish on every unrelated state change.
         expect(contextKey(null)).toBe("");
         expect(contextKey({ kind: "none" })).toBe("");
+    });
+});
+
+describe("resolving who we take orders from", () => {
+    test("a failed first answer is not remembered as 'nobody'", async () => {
+        // The measured failure: inside the panel the bridge asked at start-up,
+        // got nothing usable, and never listened again — while the same call a
+        // minute later, from the same frame, answered fine. The first second of
+        // a web client is the worst moment to depend on a round trip, and giving
+        // up for good on one is not a policy.
+        let intentos = 0;
+        const servicio = {
+            getEmbedBootstrap: async () => {
+                intentos += 1;
+                return intentos === 1 ? { connected: false } : { connected: true, base_url: "https://tuqui.com" };
+            },
+        };
+        const resolver = makeOriginResolver(servicio);
+
+        expect(await resolver()).toBe(null);
+        expect(await resolver()).toBe("https://tuqui.com");
+        expect(intentos).toBe(2);
+    });
+
+    test("a resolved origin is asked for only once", async () => {
+        // The other half: retrying forever would put a round trip on every
+        // message a framed page receives, and pages receive plenty.
+        let intentos = 0;
+        const servicio = {
+            getEmbedBootstrap: async () => {
+                intentos += 1;
+                return { connected: true, base_url: "https://tuqui.com" };
+            },
+        };
+        const resolver = makeOriginResolver(servicio);
+
+        expect(await resolver()).toBe("https://tuqui.com");
+        expect(await resolver()).toBe("https://tuqui.com");
+        expect(intentos).toBe(1);
+    });
+
+    test("two questions at once share one round trip", async () => {
+        // `ready` and the first context are posted back to back at start-up.
+        let intentos = 0;
+        const servicio = {
+            getEmbedBootstrap: async () => {
+                intentos += 1;
+                return { connected: true, base_url: "https://tuqui.com" };
+            },
+        };
+        const resolver = makeOriginResolver(servicio);
+
+        const [a, b] = await Promise.all([resolver(), resolver()]);
+        expect(a).toBe("https://tuqui.com");
+        expect(b).toBe("https://tuqui.com");
+        expect(intentos).toBe(1);
+    });
+
+    test("a call that throws is an answer of 'not yet', not a crash", async () => {
+        let intentos = 0;
+        const servicio = {
+            getEmbedBootstrap: async () => {
+                intentos += 1;
+                if (intentos === 1) {
+                    throw new Error("network");
+                }
+                return { connected: true, base_url: "https://tuqui.com" };
+            },
+        };
+        const resolver = makeOriginResolver(servicio);
+
+        expect(await resolver()).toBe(null);
+        expect(await resolver()).toBe("https://tuqui.com");
     });
 });

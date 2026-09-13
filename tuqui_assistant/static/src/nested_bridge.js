@@ -112,20 +112,57 @@ export function isFromOurTuqui(ev, origin, win = window) {
     return Boolean(ev.data) && ev.data.source === FROM_TUQUI;
 }
 
+/**
+ * Who this Odoo takes orders from, resolved when it is first needed and not once
+ * and forever at start-up.
+ *
+ * WHY LAZY. The origin comes from a call to the server, and the first second of
+ * a web client is the worst moment to depend on one. Resolving it eagerly and
+ * giving up on a falsy answer is what actually happened: inside the panel the
+ * bridge asked at start-up, got nothing usable, and never installed a listener —
+ * while the very same call, made a minute later from the same frame, answered
+ * fine. A decision that permanent should not be taken with one round trip.
+ *
+ * A resolved origin is remembered; a failure is NOT, so the next message asks
+ * again. That is the whole retry policy, and it needs no timer: messages only
+ * matter when one arrives.
+ */
+export function makeOriginResolver(tuquiAssistant) {
+    let known = null;
+    let pending = null;
+    return () => {
+        if (known) {
+            return Promise.resolve(known);
+        }
+        pending ??= Promise.resolve(tuquiAssistant.getEmbedBootstrap())
+            .then((bootstrap) => {
+                known = tuquiOrigin(bootstrap);
+                return known;
+            })
+            .catch(() => null)
+            .finally(() => {
+                pending = null;
+            });
+        return pending;
+    };
+}
+
 export const tuquiNestedBridgeService = {
     dependencies: ["tuquiAssistant"],
-    async start(env, { tuquiAssistant }) {
+    start(env, { tuquiAssistant }) {
         if (!isNested()) {
             return;
         }
-        const origin = tuquiOrigin(await tuquiAssistant.getEmbedBootstrap());
-        if (!origin) {
-            // No companion, or a base_url we cannot parse: there is nobody we
-            // would accept a message from, so there is no listener to install.
-            return;
-        }
+        const resolveOrigin = makeOriginResolver(tuquiAssistant);
 
-        const post = (type, payload) => {
+        const post = async (type, payload) => {
+            const origin = await resolveOrigin();
+            if (!origin) {
+                // No companion connected, or a base_url we cannot read: there is
+                // nobody to talk to. Not an error — an Odoo that is framed by
+                // something which is not its Tuqui is a normal state.
+                return;
+            }
             try {
                 window.parent.postMessage({ source: FROM_ODOO, type, payload }, origin);
             } catch (error) {
@@ -137,7 +174,14 @@ export const tuquiNestedBridgeService = {
             }
         };
 
-        window.addEventListener("message", (ev) => {
+        window.addEventListener("message", async (ev) => {
+            // Cheap shape check before anything else: every page gets messages
+            // from scripts that are none of our business, and the origin costs a
+            // round trip the first time.
+            if (!ev.data || ev.data.source !== FROM_TUQUI) {
+                return;
+            }
+            const origin = await resolveOrigin();
             if (!isFromOurTuqui(ev, origin)) {
                 return;
             }
