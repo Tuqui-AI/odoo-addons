@@ -1153,7 +1153,7 @@ export const tuquiAssistantService = {
                 // SIEMPRE un odoo_context, así el backend trata el turno como embed
                 // y expone open_odoo_view (navegar desde el home). Ver _build_odoo_
                 // context_note (rama kind=="none") y el panel (_postContext on open).
-                return { kind: "none" };
+                return ultimaMarca ? { kind: "none", lastMark: { ...ultimaMarca } } : { kind: "none" };
             }
             const ctx = { ...state.context };
             // Los BOTONES que la persona tiene delante, en CUALQUIER pantalla y no
@@ -1165,6 +1165,14 @@ export const tuquiAssistantService = {
             // la última clave es la primera en desaparecer — y sería justo lo que
             // no se puede reconstruir del otro lado. Pesa poco.
             ctx.buttons = botonesEnPantalla();
+            // Y si hay una marca puesta, si la persona ya la usó. Viaja acá y no
+            // por un canal propio porque no hace falta que llegue EN EL MOMENTO:
+            // sólo importa cuando el chat va a hablar, y eso siempre pasa después
+            // de un mensaje. Yendo con el contexto sirve a las dos direcciones
+            // del embebido sin una línea extra en ninguna.
+            if (ultimaMarca) {
+                ctx.lastMark = { ...ultimaMarca };
+            }
             if (ctx.kind === "record" && activeRecord) {
                 ctx.dirty = Boolean(activeRecord.dirty);
                 // Qué se ve, qué se puede escribir y qué es obligatorio. Sin esto
@@ -1735,14 +1743,41 @@ export const tuquiAssistantService = {
          * viaja en cada mensaje. Lo que hay que evitar es que la persona se quede
          * buscando una marca que nunca apareció.
          */
+        /**
+         * Lo último que se señaló, y si la persona ya lo hizo.
+         *
+         * ES UN DATO, NO UN DIARIO. Alcanza con la última marca porque es la
+         * única pregunta que el chat necesita contestada cuando le vuelven a
+         * hablar: ¿hizo lo que le pedí? Guardar una lista de todo lo que pasó
+         * sería más caro, más difícil de recortar, y respondería preguntas que
+         * nadie hace.
+         *
+         * Se limpia solo: cada marca nueva reemplaza a la anterior.
+         */
+        let ultimaMarca = null;
+
         const spotlightHandle = makeSpotlight(overlay, {
+            onStepDone: () => {
+                if (ultimaMarca) {
+                    ultimaMarca.done = true;
+                }
+            },
             // La marca es de UN registro. Si la persona se va a otro, el campo se
             // llama igual y la gota lo señalaría con confianza en el lugar
             // equivocado; con esto se apaga sola.
             recordKey: () =>
                 activeRecord ? `${activeRecord.resModel}:${activeRecord.resId}` : null,
         });
-        const spotlight = async (payload) => spotlightHandle.spotlight(payload);
+        const spotlight = async (payload) => {
+            const puesta = await spotlightHandle.spotlight(payload);
+            if (puesta) {
+                // Con el texto que se pidió señalar, no con un identificador: es
+                // lo que el chat va a poder nombrar al hablar de eso.
+                const que = String(payload?.action || payload?.label || payload?.field || "").slice(0, 60);
+                ultimaMarca = que ? { what: que, done: false } : null;
+            }
+            return puesta;
+        };
 
         /**
          * Poner la gota, y si no cae, decírselo a QUIEN PUEDE HACER ALGO.

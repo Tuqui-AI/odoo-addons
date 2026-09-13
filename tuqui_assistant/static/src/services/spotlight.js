@@ -458,7 +458,8 @@ function esDeUnAncla(m) {
  * nada.
  *
  * @param {object} overlay servicio `overlay` de Odoo
- * @param {object} [deps] sólo para tests: reemplaza el componente real
+ * @param {object} [deps] `onStepDone` avisa cuando la persona HIZO lo que se le
+ *   marcó; el resto es sólo para tests (reemplaza el componente real)
  */
 export function makeSpotlight(overlay, deps = {}) {
     const makePointer = deps.createPointerState || createPointerState;
@@ -668,7 +669,14 @@ export function makeSpotlight(overlay, deps = {}) {
         // botón, el input adentro del campo) y porque el nodo marcado se
         // reemplaza solo cuando Odoo re-renderiza: escuchar sobre el elemento lo
         // perdería, escuchar sobre el documento no.
-        dejarDeEscucharElClic = escucharElClic(el, apagar);
+        dejarDeEscucharElClic = escucharElClic(el, () => {
+            // Y ese mismo clic es la única noticia fiable de que el paso se
+            // cumplió. Hasta acá se usaba sólo para apagar la marca y se tiraba;
+            // quien lo necesita es el chat, que si no tiene que PREGUNTAR si ya
+            // lo hiciste —o peor, creerte cuando decís que sí sin haberlo hecho—.
+            deps.onStepDone?.(payload || {});
+            apagar();
+        });
         return true;
     }
 

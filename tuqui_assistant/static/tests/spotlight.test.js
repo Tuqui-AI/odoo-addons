@@ -1085,3 +1085,40 @@ describe("la marca se va cuando deja de ser cierta", () => {
         expect(typeof escucharElClic(null, () => {})).toBe("function");
     });
 });
+
+describe("el chat se entera de que la persona hizo el paso", () => {
+    test("el clic sobre lo marcado avisa, con lo que se había marcado", async () => {
+        // Sin esto el chat tiene que PREGUNTAR si ya lo hiciste — o, peor,
+        // creerte cuando decís que sí sin haberlo hecho. El clic ya se detectaba
+        // para apagar la marca; lo único que faltaba era no tirarlo.
+        const objetivo = document.createElement("button");
+        objetivo.textContent = "Confirmar";
+        document.body.appendChild(objetivo);
+        const avisos = [];
+        const dejar = escucharElClic(objetivo, () => avisos.push("hecho"));
+
+        objetivo.click();
+        expect(avisos).toEqual(["hecho"]);
+
+        dejar();
+        objetivo.remove();
+    });
+
+    test("un clic en cualquier otro lado no cuenta como el paso", async () => {
+        // El control negativo: si contara, el chat daría por hecho un paso sólo
+        // porque la persona tocó la pantalla en cualquier parte, y seguiría
+        // adelante dejándola atrás.
+        const objetivo = document.createElement("button");
+        const otro = document.createElement("button");
+        document.body.append(objetivo, otro);
+        const avisos = [];
+        const dejar = escucharElClic(objetivo, () => avisos.push("hecho"));
+
+        otro.click();
+        expect(avisos).toEqual([]);
+
+        dejar();
+        objetivo.remove();
+        otro.remove();
+    });
+});
