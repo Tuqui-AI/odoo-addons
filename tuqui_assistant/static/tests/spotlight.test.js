@@ -446,6 +446,37 @@ describe("la Gota real (template heredado de Odoo)", () => {
         expect(queryAllTexts("button")).not.toInclude("Stop Tour");
     });
 
+    test("cerrada lleva los dos puntos de la cara, y abierta la cara entera", async () => {
+        // Quién puso esa marca encima de la pantalla de alguien. Sin nada que lo
+        // diga se lee como una función del sistema; con la cara de Tuqui se lee
+        // como que el asistente está mostrando algo.
+        //
+        // Se mira el pseudo-elemento y no una clase, porque el dibujo ES el
+        // pseudo-elemento: si la regla deja de aplicar —por un cambio de
+        // template de `web_tour`, por una especificidad que la pise— la clase
+        // sigue estando y la cara no.
+        await montarGota({ isOpen: false });
+        const gota = queryAll(".o_tour_pointer")[0];
+        const cerrada = getComputedStyle(gota, "::after");
+        expect(cerrada.content).not.toBe("none");
+        expect(cerrada.backgroundImage).toInclude("svg");
+        // Los dos puntos y NADA más: a 28 px la curva del isotipo mide medio
+        // píxel, así que ahí no va.
+        expect(cerrada.backgroundImage).toInclude("circle");
+        expect(cerrada.backgroundImage).not.toInclude("path");
+    });
+
+    test("abierta, la cara entera acompaña al texto", async () => {
+        await montarGota({ isOpen: true });
+        const contenido = queryAll(".o_tour_pointer_content")[0];
+        const cara = getComputedStyle(contenido, "::before");
+        expect(cara.content).not.toBe("none");
+        // Acá sí entra la curva: el globo tiene lugar y la marca puede firmar
+        // lo que dice.
+        expect(cara.backgroundImage).toInclude("path");
+        expect(cara.backgroundImage).toInclude("circle");
+    });
+
     test("lleva la clase con la que se tiñe de salvia", async () => {
         // Sin la clase la gota sale con el color de Odoo, y ahí deja de decir
         // QUIÉN te está señalando: se lee como una función del sistema.

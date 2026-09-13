@@ -33,3 +33,75 @@
         }
     }
 }
+
+/* La cara de Tuqui sobre la marca — dos puntos cerrada, la cara entera al hablar.
+ *
+ * POR QUÉ NO ES DECORACIÓN. Esta marca aparece encima de la pantalla de otra
+ * persona, en medio de su trabajo. Sin nada que diga quién la puso, se lee como
+ * una función del sistema; con la cara de Tuqui se lee como que el asistente le
+ * está mostrando algo. Es lo mismo que decidió el color salvia, un paso más.
+ *
+ * CÓMO ES LA CARA, porque no es lo que uno supone: no son dos ojos arriba y una
+ * boca abajo. Son DOS PUNTOS GORDOS a los costados, a la misma altura, unidos
+ * por una curva que sube hacia ellos. Los puntos son grandes (radio 50 sobre un
+ * lienzo de 768) y la curva es fina (trazo 17). Esa proporción es la que decide
+ * todo lo de abajo.
+ *
+ * CERRADA VAN SÓLO LOS PUNTOS. A los 28 px de la gota, el radio 50 da 1,8 px:
+ * chicos pero existen. El trazo 17 da MEDIO PÍXEL — para que se viera habría que
+ * engordarlo tres veces, y entonces ya no sería la curva de la marca sino un
+ * dibujo nuevo que se le parece. Se pone lo que entra sin deformarse.
+ *
+ * Y HAY UNA RAZÓN DE FUNCIÓN, no sólo de fidelidad: la gota SEÑALA, su punta
+ * indica hacia dónde mirar. Dos puntos acompañan eso; una boca compite con eso.
+ *
+ * DÓNDE VAN, que costó una vuelta: la gota la dibuja el `tip`, y ese nodo está
+ * ROTADO 45 grados (es un cuadrado con una esquina en punta). Todo lo que se le
+ * ponga adentro sale torcido. Así que la cara va sobre la RAÍZ, que no rota.
+ */
+.o_tour_pointer.o_tuqui_gota {
+    &:not(.o_open)::after {
+        content: "";
+        position: absolute;
+        // Centrado sobre la parte redonda: la gota tiene la punta arriba, así
+        // que su centro óptico cae por debajo del centro de la caja.
+        left: 50%;
+        top: 56%;
+        width: 76%;
+        height: 76%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        // El encuadre deja sólo los dos puntos, sin el aire del isotipo: con el
+        // lienzo entero adentro de 21 px quedaban en 1,8 px y se los comía el
+        // antialias contra el verde.
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='140 320 490 110'%3E%3Ccircle cx='205' cy='375' r='52' fill='%23fff'/%3E%3Ccircle cx='564' cy='375' r='52' fill='%23fff'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: center;
+        background-size: contain;
+    }
+
+    &.o_open .o_tour_pointer_content {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+
+        // Acá sí la cara entera: al abrirse la marca además HABLA, y hay lugar
+        // para que firme lo que dice sin tapar nada.
+        //
+        // La curva va más gruesa que en el isotipo (33 en vez de 17), y es a
+        // propósito: a este tamaño el trazo original mide menos de un píxel y
+        // desaparece. Es la misma licencia que toma cualquier marca en su
+        // versión chica — el dibujo se ajusta para que siga leyéndose como lo
+        // que es. Los puntos, en cambio, van con su radio real.
+        &::before {
+            content: "";
+            flex: none;
+            width: 1.45rem;
+            height: 1.45rem;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='140 300 490 175'%3E%3Ccircle cx='205' cy='375' r='50' fill='%23fff'/%3E%3Ccircle cx='564' cy='375' r='50' fill='%23fff'/%3E%3Cpath d='M 230 399 C 343 458, 446 458, 538 399' stroke='%23fff' stroke-width='33' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: contain;
+        }
+    }
+}
