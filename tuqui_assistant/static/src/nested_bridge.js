@@ -147,6 +147,42 @@ export function makeOriginResolver(tuquiAssistant) {
     };
 }
 
+/** Cuántos elementos señalables hay dibujados ahora mismo. */
+function cuantosSeñalables(doc = document) {
+    return doc.querySelectorAll("button, a.btn").length;
+}
+
+/**
+ * Correr `fn` cuando la pantalla DEJE DE MOVERSE, no cuando el estado cambió.
+ *
+ * POR QUÉ NO ALCANZA UN FRAME. El aviso de que la pantalla cambió llega antes de
+ * que se dibuje, así que leerla ahí lee la anterior. Pero esperar un frame
+ * tampoco alcanza: en un formulario el chatter lo monta otro componente, más
+ * tarde. Medido en una ficha de contacto — lo que se publicaba era `["New"]`, el
+ * botón de la barra de alrededor, mientras el formulario tenía
+ * `["New", "Send message", "Log note", "Activity"]` un momento después. Con eso
+ * el agente no puede ofrecer "Log note", que es de los más pedidos.
+ *
+ * SE MIDE, NO SE ADIVINA. En vez de un número mágico de milisegundos, se mira si
+ * la cantidad de cosas señalables dejó de cambiar entre dos vistazos. Con tope,
+ * porque una pantalla que se mueve sola —un contador, un reloj— no puede
+ * postergar el aviso para siempre.
+ */
+function cuandoSeAsiente(fn, { pasos = 12, cada = 60 } = {}) {
+    let anterior = -1;
+    let quedan = pasos;
+    const mirar = () => {
+        const ahora = cuantosSeñalables();
+        if (ahora === anterior || quedan-- <= 0) {
+            fn();
+            return;
+        }
+        anterior = ahora;
+        setTimeout(mirar, cada);
+    };
+    requestAnimationFrame(mirar);
+}
+
 export const tuquiNestedBridgeService = {
     dependencies: ["tuquiAssistant"],
     start(env, { tuquiAssistant }) {
@@ -194,17 +230,41 @@ export const tuquiNestedBridgeService = {
         // every run: a callback that stops reading stops being called.
         let last = null;
         let first = true;
+        let agendado = false;
+
+        /** What is on screen, read AFTER the screen has been drawn.
+         *
+         *  The wait for the next frame is the load-bearing part. The reactive
+         *  callback fires the instant the state changes, which is BEFORE OWL
+         *  patches the DOM — so reading the screen there reads the screen that is
+         *  about to be replaced. Measured on a contact form: what got published
+         *  was `["New"]`, the button of the bar around it, while the form itself
+         *  had `["New", "Send message", "Log note", "Activity"]` a moment later.
+         *  The agent then reads that list as THE screen and offers to mark a
+         *  button the person does not have — or, worse, cannot offer "Log note",
+         *  which is one of the most asked for.
+         *
+         *  It also collapses bursts: opening a record moves several keys at once
+         *  and this publishes the end state, not each step towards it. */
         const publishIfChanged = () => {
-            const key = contextKey(observed.context);
-            // The first publish is unconditional: a screen that was already open
-            // when this started has the same key as "nothing open", and the other
-            // side has heard nothing yet.
-            if (!first && key === last) {
+            contextKey(observed.context); // read = subscribe, on every run
+            if (agendado) {
                 return;
             }
-            first = false;
-            last = key;
-            post("context", tuquiAssistant.getContextPayload());
+            agendado = true;
+            cuandoSeAsiente(() => {
+                agendado = false;
+                const key = contextKey(observed.context);
+                // The first publish is unconditional: a screen that was already
+                // open when this started has the same key as "nothing open", and
+                // the other side has heard nothing yet.
+                if (!first && key === last) {
+                    return;
+                }
+                first = false;
+                last = key;
+                post("context", tuquiAssistant.getContextPayload());
+            });
         };
         const observed = reactive(tuquiAssistant.state, publishIfChanged);
 
