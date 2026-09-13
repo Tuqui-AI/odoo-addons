@@ -47,13 +47,14 @@
  * lienzo de 768) y la curva es fina (trazo 17). Esa proporción es la que decide
  * todo lo de abajo.
  *
- * CERRADA VAN SÓLO LOS PUNTOS. A los 28 px de la gota, el radio 50 da 1,8 px:
- * chicos pero existen. El trazo 17 da MEDIO PÍXEL — para que se viera habría que
- * engordarlo tres veces, y entonces ya no sería la curva de la marca sino un
- * dibujo nuevo que se le parece. Se pone lo que entra sin deformarse.
+ * LOS PUNTOS ESTÁN SIEMPRE. Es marca, no una función de la interfaz: lo que hacen
+ * es decir de quién es esa cosa que apareció encima de la pantalla.
  *
- * Y HAY UNA RAZÓN DE FUNCIÓN, no sólo de fidelidad: la gota SEÑALA, su punta
- * indica hacia dónde mirar. Dos puntos acompañan eso; una boca compite con eso.
+ * LA CURVA NO ENTRA CERRADA, y el motivo es de tamaño y nada más. A los 28 px de
+ * la gota el radio 50 da 1,8 px: chicos pero existen. El trazo 17 da MEDIO PÍXEL
+ * — para que se viera habría que engordarlo tres veces, y ahí ya no sería la
+ * curva de la marca sino un dibujo nuevo que se le parece. Se pone lo que entra
+ * sin deformarse, y la curva vuelve apenas hay lugar.
  *
  * DÓNDE VAN, que costó una vuelta: la gota la dibuja el `tip`, y ese nodo está
  * ROTADO 45 grados (es un cuadrado con una esquina en punta). Todo lo que se le
@@ -85,8 +86,8 @@
         align-items: center;
         gap: 0.55rem;
 
-        // Acá sí la cara entera: al abrirse la marca además HABLA, y hay lugar
-        // para que firme lo que dice sin tapar nada.
+        // Acá entra la cara entera, simplemente porque hay lugar: los mismos
+        // puntos de siempre, ahora con su curva.
         //
         // La curva va más gruesa que en el isotipo (33 en vez de 17), y es a
         // propósito: a este tamaño el trazo original mide menos de un píxel y
