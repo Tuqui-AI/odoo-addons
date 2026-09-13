@@ -67,15 +67,19 @@
         // Centrado sobre la parte redonda: la gota tiene la punta arriba, así
         // que su centro óptico cae por debajo del centro de la caja.
         left: 50%;
-        top: 56%;
-        width: 76%;
-        height: 76%;
+        // El 72% no es tanteo: el `tip` que dibuja la gota está CORRIDO 8 px
+        // hacia abajo respecto de la caja de la raíz (y además escalado), así
+        // que el centro de la caja no es el centro del bulbo. Centrando en la
+        // caja, los puntos quedaban flotando arriba del dibujo.
+        top: 72%;
+        width: 58%;
+        height: 58%;
         transform: translate(-50%, -50%);
         pointer-events: none;
         // El encuadre deja sólo los dos puntos, sin el aire del isotipo: con el
         // lienzo entero adentro de 21 px quedaban en 1,8 px y se los comía el
         // antialias contra el verde.
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='140 320 490 110'%3E%3Ccircle cx='205' cy='375' r='52' fill='%23fff'/%3E%3Ccircle cx='564' cy='375' r='52' fill='%23fff'/%3E%3C/svg%3E");
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='120 320 528 110'%3E%3Ccircle cx='205' cy='375' r='62' fill='%23fff'/%3E%3Ccircle cx='564' cy='375' r='62' fill='%23fff'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: center;
         background-size: contain;
