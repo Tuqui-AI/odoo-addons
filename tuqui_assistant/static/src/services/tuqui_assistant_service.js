@@ -9,6 +9,7 @@ import {
     serializeDateTime,
 } from "@web/core/l10n/dates";
 import { evaluateBooleanExpr } from "@web/core/py_js/py";
+import { user } from "@web/core/user";
 import { OPEN_SIGNAL_KEY, PANEL_STATE_KEY } from "@tuqui_assistant/storage_keys";
 import { isNested } from "@tuqui_assistant/nested_guard";
 
@@ -320,6 +321,42 @@ export async function porQueNoSePudoAbrir(e, model, orm) {
         }
     }
     return motivo;
+}
+
+/**
+ * Which company the person is looking at, and which others they could switch to.
+ *
+ * WHY IT TRAVELS WITH EVERY SCREEN: half of Odoo's configuration is
+ * company-dependent, so the SAME url shows different blocks depending on the
+ * active company. Without this, the assistant describes a section that is not
+ * on their screen and has no way of telling why. Measured on a certificate
+ * renewal: the active company was a US one, the Argentinian localization only
+ * renders for an Argentinian company, and the whole conversation went looking
+ * for a button that could not be there. The person said it outright — "you are
+ * sending me somewhere that does not exist" — and it still could not be used,
+ * because nothing on this side said which company was active.
+ *
+ * THE OTHERS ARE THE HALF THAT DISCRIMINATES. Knowing only the active company
+ * says the screen is incomplete; knowing another one is available says what to
+ * do about it. Capped because this object is serialized and CUT at 8000
+ * characters upstream: a base with fifty companies would eat the rest of the
+ * context, and the point is to name the alternative, not to list a directory.
+ */
+export function companyInPlay() {
+    const activa = user?.activeCompany;
+    if (!activa?.name) {
+        return null;
+    }
+    const info = { active: activa.name };
+    const permitidas = Object.values(user?.allowedCompanies || {}).filter((c) => c?.name);
+    const otras = permitidas.filter((c) => c.id !== activa.id).map((c) => c.name);
+    if (otras.length) {
+        info.canSwitchTo = otras.slice(0, 8);
+        if (otras.length > 8) {
+            info.canSwitchToTotal = otras.length;
+        }
+    }
+    return info;
 }
 
 /**
@@ -1153,7 +1190,18 @@ export const tuquiAssistantService = {
                 // SIEMPRE un odoo_context, así el backend trata el turno como embed
                 // y expone open_odoo_view (navegar desde el home). Ver _build_odoo_
                 // context_note (rama kind=="none") y el panel (_postContext on open).
-                return ultimaMarca ? { kind: "none", lastMark: { ...ultimaMarca } } : { kind: "none" };
+                // La compañía va TAMBIÉN acá, y no es un detalle: la pantalla de
+                // ajustes cae en esta rama, y es la pantalla donde la compañía
+                // activa decide qué bloques existen.
+                const sinPantalla = { kind: "none" };
+                const cualEmpresa = companyInPlay();
+                if (cualEmpresa) {
+                    sinPantalla.company = cualEmpresa;
+                }
+                if (ultimaMarca) {
+                    sinPantalla.lastMark = { ...ultimaMarca };
+                }
+                return sinPantalla;
             }
             const ctx = { ...state.context };
             // Los BOTONES que la persona tiene delante, en CUALQUIER pantalla y no
@@ -1164,6 +1212,13 @@ export const tuquiAssistantService = {
             // valores: el consumidor CORTA este objeto en 8000 caracteres, así que
             // la última clave es la primera en desaparecer — y sería justo lo que
             // no se puede reconstruir del otro lado. Pesa poco.
+            // ANTES QUE TODO LO DEMÁS, por el mismo motivo de truncado que se
+            // explica abajo: pesa dos renglones y es lo único de acá que del otro
+            // lado no se puede reconstruir ni preguntando.
+            const cualEmpresa = companyInPlay();
+            if (cualEmpresa) {
+                ctx.company = cualEmpresa;
+            }
             ctx.buttons = botonesEnPantalla();
             // Y si hay una marca puesta, si la persona ya la usó. Viaja acá y no
             // por un canal propio porque no hace falta que llegue EN EL MOMENTO:
