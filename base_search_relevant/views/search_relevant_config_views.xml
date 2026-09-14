@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_search_relevant_config_list" model="ir.ui.view">
+        <field name="name">search.relevant.config.list</field>
+        <field name="model">search.relevant.config</field>
+        <field name="arch" type="xml">
+            <list string="Relevance Search" decoration-muted="not active">
+                <field name="active" column_invisible="True"/>
+                <field name="model_id"/>
+                <field name="field_ids" widget="many2many_tags"/>
+                <field name="state" widget="badge"
+                       decoration-info="state == 'indexing'"
+                       decoration-success="state == 'ready'"/>
+                <field name="backfill_progress" widget="progressbar"/>
+                <field name="backfill_reached"/>
+                <field name="sync_watermark"/>
+                <field name="document_count"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_search_relevant_config_form" model="ir.ui.view">
+        <field name="name">search.relevant.config.form</field>
+        <field name="model">search.relevant.config</field>
+        <field name="arch" type="xml">
+            <form string="Relevance Search">
+                <header>
+                    <button name="action_reindex" type="object" string="Re-index"
+                            invisible="not id or not active"
+                            confirm="Rebuild the index of this model in the background? Search keeps working with the current index meanwhile."/>
+                    <field name="state" widget="statusbar" invisible="not id"/>
+                </header>
+                <sheet>
+                    <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger" invisible="active"/>
+                    <group>
+                        <group>
+                            <field name="active" invisible="1"/>
+                            <field name="model_id" readonly="id" options="{'no_create': True}"/>
+                            <field name="field_ids" widget="many2many_tags" options="{'no_create': True}"
+                                   readonly="not model_id"/>
+                            <field name="model" invisible="1"/>
+                            <field name="domain" widget="domain" options="{'model': 'model', 'in_dialog': True}"
+                                   invisible="not model_id"/>
+                        </group>
+                        <group invisible="not id">
+                            <field name="backfill_progress" widget="progressbar"/>
+                            <field name="backfill_reached" invisible="state == 'ready'"/>
+                            <field name="document_count"/>
+                            <field name="sync_watermark"/>
+                        </group>
+                    </group>
+                    <div class="text-muted">
+                        The text of these fields is searched, and the records ranked by relevance.
+                        A domain, if you set one, narrows what is indexed to part of the model.
+                        Results always follow each user's own permissions: the index decides the
+                        order, never who sees what. Indexing runs in the background, newest records
+                        first, without locking the model's table.
+                    </div>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_search_relevant_config" model="ir.actions.act_window">
+        <field name="name">Relevance Search</field>
+        <field name="res_model">search.relevant.config</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Enable relevance search on a model</p>
+            <p>
+                Pick a model and the text fields to search. The index is built in
+                the background; until it finishes, the most recent records are searchable first.
+            </p>
+        </field>
+    </record>
+
+    <!--
+        Under Settings > Technical: the index is a technical setting of the
+        database, not an app. A consumer of the search (Tuqui, for one) may add
+        its own entry point; none is needed to use this module.
+    -->
+    <menuitem id="menu_search_relevant_config"
+              name="Relevance Search"
+              parent="base.menu_custom"
+              action="action_search_relevant_config"
+              groups="base.group_system"
+              sequence="30"/>
+
+</odoo>

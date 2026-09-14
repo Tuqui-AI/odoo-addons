@@ -12,7 +12,23 @@ _PROTOCOL_VERSION = "2.0"
 _CAPABILITIES = [
     "rpc.execute_kw",
     "access_log",
+    # tuqui.search.search_relevant: ranked search over the models an admin
+    # enabled. Advertised whenever the module is installed; whether a given
+    # model is searchable is answered per call (coverage.state).
+    "search_relevant",
 ]
+
+
+def _warnings(env):
+    """Things an administrator should act on. Empty when there is nothing to say.
+
+    Only the search index for now: when its cron stops, nothing breaks in the
+    open — the index ages and every answer quietly turns ``partial`` — so this
+    probe is where a person finds out. Whatever is added here has to stay as
+    cheap as the rest of the body: the endpoint is public and polled often, so
+    no scan of a model's table, and no name that a stranger should not read.
+    """
+    return env["search.relevant.config"].sudo()._stale_report()
 
 
 def _module_version(env):
@@ -41,6 +57,7 @@ class TuquiHealth(http.Controller):
             "protocol_version": _PROTOCOL_VERSION,
             "odoo_version": release.version,
             "capabilities": caps,
+            "warnings": _warnings(env),
         }
         return Response(
             json.dumps(body),

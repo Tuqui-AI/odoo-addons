@@ -110,3 +110,8 @@ class ResConfigSettings(models.TransientModel):
 
     def action_tuqui_open_events(self):
         return self.env["ir.actions.act_window"]._for_xml_id("tuqui.action_tuqui_event")
+
+    def action_tuqui_open_search_configs(self):
+        # The screen belongs to base_search_relevant; the button is here because
+        # Settings is the only Tuqui surface an administrator navigates.
+        return self.env["ir.actions.act_window"]._for_xml_id("base_search_relevant.action_search_relevant_config")

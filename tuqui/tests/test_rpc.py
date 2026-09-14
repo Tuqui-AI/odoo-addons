@@ -208,12 +208,44 @@ class TestTuquiRpcGateway(HttpCase):
             "search_count",
             "fields_get",
             "get_view",
+            # tuqui.search.search_relevant — read-only by name, see tuqui_search.py.
+            "search_relevant",
         )
         writes = ("create", "write", "unlink", "copy")
         for method in reads:
             self.assertEqual(_classify(method), "read", f"{method} must classify as a read")
         for method in writes:
             self.assertEqual(_classify(method), "write", f"{method} must classify as a write")
+
+    def test_search_relevant_passes_the_read_only_gate_as_the_member(self):
+        """The companion method is reachable through the gateway on the most
+        restricted member path (read-only), and runs as that member."""
+        partner = self.env["res.partner"].create({"name": "Gateway quenapox azulino"})
+        fields_ = self.env["ir.model.fields"].search([("model", "=", "res.partner"), ("name", "=", "name")])
+        config = (
+            self.env["search.relevant.config"]
+            .sudo()
+            .create({"model_id": self.env["ir.model"]._get_id("res.partner"), "field_ids": [(6, 0, fields_.ids)]})
+        )
+        while config.backfill_cursor:
+            config._backfill_batch(1000)
+        self.client.write({"read_only": True})
+
+        resp = self._rpc(
+            "tuqui.search",
+            "search_relevant",
+            args=["res.partner", "quenapox azulino"],
+            kwargs={"limit": 5},
+            acting_uid=self.basic_user.id,
+            expect_status=200,
+        )
+        data = resp.json()["data"]
+        self.assertEqual(data["engine"], "companion_fts")
+        self.assertEqual(data["coverage"]["state"], "complete")
+        self.assertEqual([record["id"] for record in data["records"]], [partner.id])
+        log = self._latest_log(method="search_relevant")
+        self.assertEqual(log.operation_type, "read")
+        self.assertEqual(log.acting_user_id, self.basic_user)
 
     # ─── Perimeter ───────────────────────────────────────────────────
 

@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_search_relevant_config_admin,search.relevant.config.admin,model_search_relevant_config,base.group_system,1,1,1,1
+access_search_relevant_document_none,search.relevant.document.none,model_search_relevant_document,base.group_system,0,0,0,0

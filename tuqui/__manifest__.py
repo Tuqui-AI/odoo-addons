@@ -1,6 +1,6 @@
 {
     "name": "Tuqui Companion",
-    "version": "19.0.0.21.0",
+    "version": "19.0.0.22.0",
     "category": "Productivity",
     "summary": "One-click activation for Tuqui: registers this instance and handles the OAuth connection from Settings. For Odoo.sh and On-Premise.",
     "author": "Tuqui-AI",
@@ -11,6 +11,9 @@
         "base",
         "base_setup",
         "web",
+        # The search index, its configuration and the ranking: a module of its
+        # own, with no Tuqui in it. Here lives only the RPC contract over it.
+        "base_search_relevant",
     ],
     "data": [
         "security/ir.model.access.csv",
