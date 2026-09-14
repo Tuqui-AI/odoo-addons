@@ -1,5 +1,5 @@
 /** @odoo-module **/
-import { describe, expect, test } from "@odoo/hoot";
+import { describe, expect, getFixture, test } from "@odoo/hoot";
 import { animationFrame } from "@odoo/hoot-mock";
 import { queryAll, queryAllTexts } from "@odoo/hoot-dom";
 import { mountWithCleanup } from "@web/../tests/web_test_helpers";
@@ -20,6 +20,24 @@ import { findSpotlightTarget, makeSpotlight, escucharElClic } from "@tuqui_assis
 function dom(html) {
     const root = document.createElement("div");
     root.innerHTML = html;
+    return root;
+}
+
+/**
+ * Como `dom`, pero dibujado de verdad para que los elementos tengan caja.
+ *
+ * Hace falta cuando lo que se prueba depende de si algo se VE: en un nodo
+ * desprendido `getBoundingClientRect` devuelve 0×0 para todo, así que un test
+ * armado con `dom` no distingue un control visible de uno escondido.
+ *
+ * VA EN EL FIXTURE DE HOOT y no en `document.body`: el body sobrevive al test y
+ * los nombres de campo se repiten entre casos, así que un `[name=x]` dejado
+ * colgado se lo lleva el `querySelector` del test siguiente. Pasó: dejó en rojo
+ * un test de `makeSpotlight` que no habíamos tocado.
+ */
+function enPantalla(html) {
+    const root = dom(html);
+    getFixture().appendChild(root);
     return root;
 }
 
@@ -130,12 +148,33 @@ describe("findSpotlightTarget", () => {
         // la columna. La gota se centra sobre lo que se le apunte: apuntarle a la
         // caja la deja flotando lejos del dato, señalando una zona en vez de un
         // lugar — que es justo lo que la gota vino a evitar.
-        const root = dom(`
+        //
+        // VA PEGADO AL DOCUMENTO y no en un `div` suelto: la decisión depende de
+        // si el control se VE, y un nodo desprendido mide 0×0. Con el DOM suelto
+        // el test pasaba igual sin mirar la caja, y así se colaba el caso de abajo.
+        const root = enPantalla(`
             <div name="l10n_ar_afip_pos_number" class="la-caja">
                 <input class="el-control" />
             </div>
         `);
         expect(findSpotlightTarget({ field: "l10n_ar_afip_pos_number" }, root)?.className).toBe("el-control");
+    });
+
+    test("un control ESCONDIDO no es el lugar: la gota no va a la esquina", () => {
+        // El caso medido: `certificate.certificate` dibuja el campo binario como
+        // un botón "Upload your file" MÁS un `input[type=file]` escondido, que
+        // mide 0×0 en el origen. La marca se centraba sobre esa caja vacía y
+        // aterrizaba en (0, 6) — arriba a la izquierda de la pantalla, encima del
+        // ícono de la aplicación — mientras el campo estaba en (196, 201). Quien
+        // lo vivió lo contó así: "la flechita verde me apunta a Settings, que no
+        // tiene nada que ver".
+        const root = enPantalla(`
+            <div name="content" class="la-caja">
+                <button class="el-boton">Upload your file</button>
+                <input type="file" class="el-escondido" style="display:none" />
+            </div>
+        `);
+        expect(findSpotlightTarget({ field: "content" }, root)?.className).toBe("el-boton");
     });
 
     test("en un campo de sólo lectura marca la caja, que es todo lo que hay", () => {

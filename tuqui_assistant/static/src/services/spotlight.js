@@ -277,18 +277,31 @@ export function findSpotlightTarget(payload, root = document) {
  * En un campo de sólo lectura no hay control: ahí queda la caja, que sigue siendo
  * lo correcto porque es todo lo que hay.
  */
+function tieneCaja(el) {
+    const r = el?.getBoundingClientRect?.();
+    return !!r && r.width > 0 && r.height > 0;
+}
+
 function afinar(el) {
+    // `tieneCaja` y no sólo "existe un control": un campo binario —un certificado,
+    // un adjunto— se dibuja como un botón "Upload your file" MÁS un
+    // `input[type=file]` escondido, y ese input mide 0×0 en el origen. Sin el
+    // chequeo, la gota se centraba sobre esa caja vacía y aterrizaba en la esquina
+    // superior izquierda de la pantalla, encima del ícono de la aplicación. Medido
+    // en el formulario de `certificate.certificate`: el campo estaba en (196, 201)
+    // y la gota caía en (0, 6). El mismo patrón aplica a cualquier control que el
+    // widget esconde, así que la condición va sobre la caja, no sobre el tipo.
     const control = el?.querySelector?.("input, textarea, select");
-    if (control) {
+    if (control && tieneCaja(control)) {
         return control;
     }
-    // Sin control no significa "apuntá al contenedor". Un campo en modo lectura
-    // —un teléfono ya cargado, un m2o, un link— muestra su valor en un hijo, y el
-    // contenedor ocupa media columna: la gota terminaba flotando a la derecha del
-    // dato, señalando una zona. Se baja al primer hijo que tenga texto visible.
+    // Sin control visible no significa "apuntá al contenedor". Un campo en modo
+    // lectura —un teléfono ya cargado, un m2o, un link— muestra su valor en un
+    // hijo, y el contenedor ocupa media columna: la gota terminaba flotando a la
+    // derecha del dato, señalando una zona. Se baja al primer hijo que se vea y
+    // tenga texto.
     for (const hijo of el?.children || []) {
-        const r = hijo.getBoundingClientRect?.();
-        if (r && r.width > 0 && r.height > 0 && (hijo.textContent || "").trim()) {
+        if (tieneCaja(hijo) && (hijo.textContent || "").trim()) {
             return hijo;
         }
     }
