@@ -3,3 +3,5 @@ access_tuqui_oauth_client_admin,tuqui.oauth.client.admin,model_tuqui_oauth_clien
 access_tuqui_access_log_admin,tuqui.access.log.admin,model_tuqui_access_log,base.group_system,1,1,1,1
 access_tuqui_activation_nonce_admin,tuqui.activation.nonce.admin,model_tuqui_activation_nonce,base.group_system,1,1,1,1
 access_tuqui_event_admin,tuqui.event.admin,model_tuqui_event,base.group_system,1,1,1,1
+access_tuqui_search_config_admin,tuqui.search.config.admin,model_tuqui_search_config,base.group_system,1,1,1,1
+access_tuqui_search_document_none,tuqui.search.document.none,model_tuqui_search_document,base.group_system,0,0,0,0

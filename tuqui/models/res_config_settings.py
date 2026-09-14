@@ -110,3 +110,6 @@ class ResConfigSettings(models.TransientModel):
 
     def action_tuqui_open_events(self):
         return self.env["ir.actions.act_window"]._for_xml_id("tuqui.action_tuqui_event")
+
+    def action_tuqui_open_search_configs(self):
+        return self.env["ir.actions.act_window"]._for_xml_id("tuqui.action_tuqui_search_config")

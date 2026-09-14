@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+    <!--
+        Maintains the relevance search index (tuqui.search.config).
+
+        Off until an administrator enables a model, and it switches itself off
+        again when none is left: databases that never use search pay nothing.
+        While a backfill has records left it reports progress and Odoo runs it
+        again right away; once the index is complete, each run every five
+        minutes is a freshness pass over recently written records.
+    -->
+    <record id="ir_cron_tuqui_search_index" model="ir.cron">
+        <field name="name">Tuqui: maintain the search index</field>
+        <field name="model_id" ref="model_tuqui_search_config"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_index()</field>
+        <field name="interval_number">5</field>
+        <field name="interval_type">minutes</field>
+        <field name="active">False</field>
+    </record>
+
+</odoo>

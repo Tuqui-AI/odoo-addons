@@ -12,6 +12,10 @@ _PROTOCOL_VERSION = "2.0"
 _CAPABILITIES = [
     "rpc.execute_kw",
     "access_log",
+    # tuqui.search.search_relevant: ranked search over the models an admin
+    # enabled. Advertised whenever the module is installed; whether a given
+    # model is searchable is answered per call (coverage.state).
+    "search_relevant",
 ]
 
 

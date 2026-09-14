@@ -4,3 +4,6 @@ from . import tuqui_activation_nonce
 from . import tuqui_event
 from . import ir_actions_server
 from . import res_config_settings
+from . import tuqui_search_config
+from . import tuqui_search_document
+from . import tuqui_search
