@@ -44,6 +44,7 @@
 import { registry } from "@web/core/registry";
 import { reactive } from "@odoo/owl";
 import { isNested } from "@tuqui_assistant/nested_guard";
+import { whenTheScreenSettles } from "@tuqui_assistant/screen_settled";
 import { runOdooAction } from "@tuqui_assistant/odoo_actions";
 
 /** What we answer to; what we send as. Same strings as the panel's protocol. */
@@ -147,42 +148,6 @@ export function makeOriginResolver(tuquiAssistant) {
     };
 }
 
-/** Cuántos elementos señalables hay dibujados ahora mismo. */
-function cuantosSeñalables(doc = document) {
-    return doc.querySelectorAll("button, a.btn").length;
-}
-
-/**
- * Correr `fn` cuando la pantalla DEJE DE MOVERSE, no cuando el estado cambió.
- *
- * POR QUÉ NO ALCANZA UN FRAME. El aviso de que la pantalla cambió llega antes de
- * que se dibuje, así que leerla ahí lee la anterior. Pero esperar un frame
- * tampoco alcanza: en un formulario el chatter lo monta otro componente, más
- * tarde. Medido en una ficha de contacto — lo que se publicaba era `["New"]`, el
- * botón de la barra de alrededor, mientras el formulario tenía
- * `["New", "Send message", "Log note", "Activity"]` un momento después. Con eso
- * el agente no puede ofrecer "Log note", que es de los más pedidos.
- *
- * SE MIDE, NO SE ADIVINA. En vez de un número mágico de milisegundos, se mira si
- * la cantidad de cosas señalables dejó de cambiar entre dos vistazos. Con tope,
- * porque una pantalla que se mueve sola —un contador, un reloj— no puede
- * postergar el aviso para siempre.
- */
-function cuandoSeAsiente(fn, { pasos = 12, cada = 60 } = {}) {
-    let anterior = -1;
-    let quedan = pasos;
-    const mirar = () => {
-        const ahora = cuantosSeñalables();
-        if (ahora === anterior || quedan-- <= 0) {
-            fn();
-            return;
-        }
-        anterior = ahora;
-        setTimeout(mirar, cada);
-    };
-    requestAnimationFrame(mirar);
-}
-
 export const tuquiNestedBridgeService = {
     dependencies: ["tuquiAssistant"],
     start(env, { tuquiAssistant }) {
@@ -252,7 +217,7 @@ export const tuquiNestedBridgeService = {
                 return;
             }
             agendado = true;
-            cuandoSeAsiente(() => {
+            whenTheScreenSettles(() => {
                 agendado = false;
                 const key = contextKey(observed.context);
                 // The first publish is unconditional: a screen that was already

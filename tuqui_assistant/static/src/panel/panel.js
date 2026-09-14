@@ -4,6 +4,7 @@ import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 import { runOdooAction } from "@tuqui_assistant/odoo_actions";
+import { whenTheScreenSettles } from "@tuqui_assistant/screen_settled";
 import { isNested } from "@tuqui_assistant/nested_guard";
 import { OPEN_SIGNAL_KEY } from "@tuqui_assistant/storage_keys";
 
@@ -341,6 +342,14 @@ export class TuquiPanel extends Component {
     }
 
     _postContext() {
+        // Se espera a que la pantalla termine de dibujarse. El efecto que llama
+        // acá corre cuando el estado cambió, que es antes de que el formulario
+        // esté completo: así viajaban botones de menos y —peor— campos marcados
+        // como ocultos que en realidad se ven. Ver `screen_settled`.
+        whenTheScreenSettles(() => this._postContextAhora());
+    }
+
+    _postContextAhora() {
         const win = this.iframeRef.el?.contentWindow;
         if (!win) {
             return;
