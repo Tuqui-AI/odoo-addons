@@ -12,6 +12,7 @@ import { evaluateBooleanExpr } from "@web/core/py_js/py";
 import { user } from "@web/core/user";
 import { OPEN_SIGNAL_KEY, PANEL_STATE_KEY } from "@tuqui_assistant/storage_keys";
 import { isNested } from "@tuqui_assistant/nested_guard";
+import { whenTheScreenSettles } from "@tuqui_assistant/screen_settled";
 
 import { makeSpotlight } from "./spotlight";
 
@@ -321,6 +322,29 @@ export async function porQueNoSePudoAbrir(e, model, orm) {
         }
     }
     return motivo;
+}
+
+/**
+ * Which sections the Settings screen is actually offering, by their technical key.
+ *
+ * WHY IT IS READ FROM THE SCREEN and not from the list of installed modules: they
+ * are not the same list, and the difference is exactly where this goes wrong.
+ * Measured on a real database — `sale` is installed, and there is no `sale`
+ * section; the one that exists is `sale_management`. Asking for the wrong key is
+ * not an error in Odoo: Settings opens with NO section selected, which reads as
+ * "I took you there" on both sides while the person stares at a screen that
+ * answers nothing.
+ *
+ * `data-key` is the settings tab's own attribute, the same one it uses to decide
+ * which block to show, so this reads the authority instead of a copy of it.
+ *
+ * @returns {string[]} empty when this is not the Settings screen
+ */
+export function settingsSectionsOnScreen(root = document) {
+    const claves = [...(root.querySelectorAll?.(".settings_tab [data-key]") || [])]
+        .map((e) => e.dataset?.key)
+        .filter(Boolean);
+    return [...new Set(claves)];
 }
 
 /**
@@ -1220,6 +1244,14 @@ export const tuquiAssistantService = {
                 ctx.company = cualEmpresa;
             }
             ctx.buttons = botonesEnPantalla();
+            // Y en la pantalla de Ajustes, QUÉ SECCIONES HAY. Es el mismo problema
+            // que resolvían los botones: sin la lista, el nombre de la sección se
+            // adivina, y se adivina mal de la forma más creíble posible (`sale`
+            // por `sale_management`). Fuera de Ajustes queda vacío y no viaja.
+            const secciones = settingsSectionsOnScreen();
+            if (secciones.length) {
+                ctx.settingsSections = secciones;
+            }
             // Y si hay una marca puesta, si la persona ya la usó. Viaja acá y no
             // por un canal propio porque no hace falta que llegue EN EL MOMENTO:
             // sólo importa cuando el chat va a hablar, y eso siempre pasa después
@@ -1938,7 +1970,73 @@ export const tuquiAssistantService = {
          *
          * @param {{model?: string, mode?: string, viewType?: string, domain?: any[], defaults?: object, title?: string}} payload
          */
-        async function navigate({ model, mode, viewType, domain, defaults, title, resId } = {}) {
+        async function navigate({ model, mode, viewType, domain, defaults, title, resId, section } = {}) {
+            if (mode === "settings") {
+                // Los AJUSTES no se abren como los demás: `res.config.settings` es
+                // un modelo transitorio, no tiene filas, y por eso el trío
+                // record/new/browse no llega nunca — pedir "el registro" exige un
+                // id que no existe y buscarlo devuelve cero para siempre. Se abre
+                // por su acción, que es la única puerta que tiene.
+                //
+                // Y LA SECCIÓN VA EN EL CONTEXTO, que es el mecanismo propio de
+                // Odoo: `SettingsFormController` lee `context.module` para elegir
+                // qué app mostrar abierta. Con eso "llevame a los ajustes de
+                // contabilidad" es un nombre de módulo y no una pantalla nueva por
+                // cada caso.
+                //
+                // Sin esto, media implementación quedaba fuera de alcance: casi
+                // toda configuración de Odoo vive en esta pantalla. Medido en una
+                // renovación de certificado de AFIP, donde el asistente intentó
+                // llegar, no pudo, y terminó mandando a la persona a otra parte.
+                //
+                // SE DESPACHA EL act_window A MANO y no por el xmlid de Ajustes
+                // generales: esa acción trae `{'module': 'general_settings'}` en su
+                // propio contexto, y el contexto de la acción PISA al que uno le
+                // agrega — así que por ese camino todo terminaba en la sección
+                // general, cualquiera fuese la pedida (medido: `account` y `sale`
+                // daban las dos "General Settings"). Cada app de Odoo declara su
+                // acción de ajustes con exactamente esta forma y lo único que
+                // cambia entre ellas es ese `module`; acá se arma la misma con el
+                // que se pidió, que es lo que la vuelve una sola puerta para todas.
+                try {
+                    await action.doAction({
+                        type: "ir.actions.act_window",
+                        name: title || _t("Settings"),
+                        res_model: "res.config.settings",
+                        views: [[false, "form"]],
+                        target: "current",
+                        context: { module: section ? String(section) : "general_settings", bin_size: false },
+                    });
+                } catch (e) {
+                    notification.add(
+                        _t("Could not open Odoo settings: %s", await porQueNoSePudoAbrir(e, "res.config.settings", orm)),
+                        { type: "danger" }
+                    );
+                    return false;
+                }
+                // Y SE COMPRUEBA QUE LA SECCIÓN EXISTA, porque pedir una que no
+                // está no es un error para Odoo: abre Ajustes sin ninguna sección
+                // elegida. Eso se lee como "te llevé" de los dos lados mientras la
+                // persona mira una pantalla que no contesta nada. La lista real
+                // sale de la pantalla y no de los módulos instalados: no son la
+                // misma lista — `sale` está instalado y la sección se llama
+                // `sale_management`.
+                if (section) {
+                    whenTheScreenSettles(() => {
+                        const hay = settingsSectionsOnScreen();
+                        if (hay.length && !hay.includes(String(section))) {
+                            notification.add(
+                                _t(
+                                    "Opened Odoo settings, but there is no '%(pedida)s' section. Available: %(hay)s.",
+                                    { pedida: String(section), hay: hay.join(", ") }
+                                ),
+                                { type: "warning" }
+                            );
+                        }
+                    });
+                }
+                return true;
+            }
             if (typeof model !== "string" || !model.trim()) {
                 notification.add(
                     _t("Cannot navigate: missing Odoo model to open."),
