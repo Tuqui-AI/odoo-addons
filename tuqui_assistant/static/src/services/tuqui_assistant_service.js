@@ -1807,38 +1807,61 @@ export const tuquiAssistantService = {
          *
          * @returns {Promise<boolean>} true si guardó
          */
+        /**
+         * Guardar el formulario abierto, y decir QUÉ PASÓ.
+         *
+         * POR QUÉ DEVUELVE UN MOTIVO Y NO UN BOOLEANO. Estas cuatro cosas son
+         * respuestas distintas para quien está guiando a alguien, y las cuatro
+         * colapsaban en `false`: no hay formulario, no hay nada para guardar,
+         * Odoo rechazó por campos obligatorios, y algo falló. Sin el motivo, el
+         * chat sólo podía decir "pedí que se guarde" — y lo que decía después era
+         * una suposición.
+         *
+         * Medido cuatro veces, en cuatro implementaciones distintas: el asistente
+         * afirmó que algo estaba guardado cuando no lo estaba. En la última la
+         * pantalla mostraba "Missing required fields" con dos campos obligatorios
+         * vacíos, y el chat decía "ya deberías ver el botón Save marcado". El dato
+         * estaba acá, de este lado del vidrio, y se lo comunicábamos sólo a la
+         * persona con un cartel.
+         */
         async function saveRecord() {
             if (!activeRecord) {
                 notification.add(_t("Open a form (1 record) to save it from here."), {
                     type: "warning",
                 });
-                return false;
+                return { ok: false, reason: "no_form" };
             }
             if (!activeRecord.dirty) {
                 notification.add(_t("Nothing to save — the form has no pending changes."), {
                     type: "info",
                 });
-                return false;
+                return { ok: false, reason: "nothing_to_save" };
             }
             let saved = false;
             try {
                 saved = await activeRecord.save();
             } catch (e) {
-                notification.add(_t("Could not save: %s", e.message || e), { type: "danger" });
-                return false;
+                const detail = String(e?.message || e || "").slice(0, 300);
+                notification.add(_t("Could not save: %s", detail), { type: "danger" });
+                return { ok: false, reason: "error", detail };
             }
             if (!saved) {
-                // Odoo ya avisó: el único camino por el que `save()` devuelve false
-                // es `_checkValidity({ displayNotification: true })`, que muestra
-                // "Missing required fields" y marca los campos en rojo. Un toast
-                // nuestro encima decía lo mismo, más vago y tapando el panel.
-                // Devolvemos false igual: es la señal interna, no un aviso.
-                return false;
+                // Odoo ya avisó a la persona: el único camino por el que `save()`
+                // devuelve false es `_checkValidity({ displayNotification: true })`,
+                // que muestra "Missing required fields" y marca los campos en rojo.
+                // Un toast nuestro encima decía lo mismo, más vago y tapando el
+                // panel. Lo que faltaba no era otro cartel: era que el motivo
+                // volviera al chat.
+                return {
+                    ok: false,
+                    reason: "rejected",
+                    detail: "Odoo refused the save: required fields are missing or a value is invalid.",
+                };
             }
             // Guardado: el registro dejó de estar sucio y los computados cambiaron.
             refreshRecordContext();
             notification.add(_t("Form saved."), { type: "success" });
-            return true;
+            return { ok: true, reason: "saved" };
         }
 
         /**

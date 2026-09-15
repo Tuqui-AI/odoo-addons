@@ -373,6 +373,33 @@ export class TuquiPanel extends Component {
         }
     }
 
+    /**
+     * Contarle al chat qué pasó con la orden que mandó.
+     *
+     * Es la vuelta del camino: la orden baja por este mismo puente y hasta ahora
+     * lo que pasaba con ella se quedaba de este lado. `callId` es el que el chat
+     * ya usa para identificar cada llamada a una herramienta, así que viaja de
+     * ida y vuelta sin agregar un identificador propio.
+     */
+    _postAcuse(callId, tipo, resultado) {
+        const win = this.iframeRef.el?.contentWindow;
+        if (!win || !callId) {
+            return;
+        }
+        try {
+            win.postMessage(
+                {
+                    source: "tuqui-odoo",
+                    type: "ack",
+                    payload: { callId, action: tipo, result: resultado || null },
+                },
+                this._spaOrigin
+            );
+        } catch (e) {
+            console.warn("[tuqui_assistant] Could not post ack to iframe:", e);
+        }
+    }
+
     _postNewChat() {
         // Ask the SPA (already mounted and hydrated) to open a new chat as an
         // INTERNAL navigation (no src change → no second SSO nonce spent). Handled
@@ -389,7 +416,7 @@ export class TuquiPanel extends Component {
         }
     }
 
-    _handleMessage(ev) {
+    async _handleMessage(ev) {
         const data = ev.data;
         if (!data || data.source !== "tuqui-spa") {
             return;
@@ -417,7 +444,13 @@ export class TuquiPanel extends Component {
         // que sólo tiene sentido para quien MUESTRA el chat: dónde está
         // parada la conversación, un link que se va a abrir, el iframe
         // avisando que ya montó.
-        if (runOdooAction(this.tuquiAssistant, data.type, data.payload || {})) {
+        const despacho = await runOdooAction(this.tuquiAssistant, data.type, data.payload || {});
+        if (despacho.handled) {
+            // EL ACUSE, que es lo que cierra el circuito. Sin esto el chat sólo
+            // sabe que pidió algo, y lo que afirme después es una suposición.
+            // Va con el `callId` que vino con la orden: el chat ya identifica sus
+            // llamadas con ese id, así que no hay correlación nueva que inventar.
+            this._postAcuse(data.callId, data.type, despacho.result);
             return;
         }
         switch (data.type) {

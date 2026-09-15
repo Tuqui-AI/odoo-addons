@@ -188,7 +188,17 @@ export const tuquiNestedBridgeService = {
             }
             // The same dispatcher the panel uses in the other direction, so a
             // new instruction works on both doors the day it is written.
-            runOdooAction(tuquiAssistant, ev.data.type, ev.data.payload || {});
+            // Mismo acuse que en el panel, por la otra puerta. Que las dos
+            // direcciones del embebido contesten igual es el motivo por el que el
+            // despachador es uno solo.
+            const despacho = await runOdooAction(tuquiAssistant, ev.data.type, ev.data.payload || {});
+            if (despacho.handled && ev.data.callId) {
+                await post("ack", {
+                    callId: ev.data.callId,
+                    action: ev.data.type,
+                    result: despacho.result || null,
+                });
+            }
         });
 
         // The reactive state is read inside the callback so OWL re-subscribes on
