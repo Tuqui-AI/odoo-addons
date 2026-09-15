@@ -175,14 +175,27 @@ class TestTuquiNotifyAction(TransactionCase):
         ):
             assert self.Action._tuqui_agent_problem() == action_mod._UNREACHABLE
 
-    def test_a_workspace_without_agents_says_so(self):
-        """Nothing is broken here — the workspace is simply empty, which is how
-        every new one starts. It was the most misleading of the four."""
+    def test_a_list_with_nobody_offered_says_so(self):
+        """Nothing is broken here, and it is not "the workspace is empty" either.
+
+        Tuqui lists only the agents whose `odoo_action` channel is on, so this is
+        the normal state of a workspace where nobody has offered one yet — and
+        telling that admin to go and create an agent would send them to build a
+        second one next to the one they already have.
+        """
         with patch(
             "odoo.addons.tuqui.models.ir_actions_server.requests.get",
             return_value=_Response({"agents": []}),
         ):
-            assert self.Action._tuqui_agent_problem() == action_mod._NO_AGENTS
+            assert self.Action._tuqui_agent_problem() == action_mod._NONE_OFFERED
+
+    def test_the_empty_list_points_at_the_switch_that_fills_it(self):
+        """The fix lives in another product, on a tab this admin may never have
+        opened, so the message names it."""
+        message = self.Action._tuqui_problem_message(action_mod._NONE_OFFERED)
+
+        assert "Odoo action" in message
+        assert "Channels" in message
 
     def test_a_working_list_has_no_problem(self):
         with patch(
@@ -198,7 +211,7 @@ class TestTuquiNotifyAction(TransactionCase):
             action_mod._NOT_CONNECTED,
             action_mod._NO_SIGNING_KEY,
             action_mod._UNREACHABLE,
-            action_mod._NO_AGENTS,
+            action_mod._NONE_OFFERED,
         ]
         messages = {self.Action._tuqui_problem_message(p) for p in problems}
         titles = {self.Action._tuqui_problem_title(p) for p in problems}

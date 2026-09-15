@@ -30,11 +30,13 @@ _AGENT_FETCH_TIMEOUT = 5
 # second round trip to a Tuqui we just failed to reach.
 _agent_cache: dict[str, tuple[float, list, str | None]] = {}
 
-# Why the list came back empty. None means it did not.
+# Why the list came back empty. None means it did not. The last one is not a
+# failure: Tuqui only lists the agents whose `odoo_action` channel is on, so an
+# empty list usually means nobody has offered one yet.
 _NOT_CONNECTED = "not_connected"
 _NO_SIGNING_KEY = "no_signing_key"
 _UNREACHABLE = "unreachable"
-_NO_AGENTS = "no_agents"
+_NONE_OFFERED = "none_offered"
 
 
 class IrActionsServer(models.Model):
@@ -125,7 +127,7 @@ class IrActionsServer(models.Model):
             _agent_cache[cache_key] = (time.time(), [], _UNREACHABLE)
             return [], _UNREACHABLE
 
-        problem = None if choices else _NO_AGENTS
+        problem = None if choices else _NONE_OFFERED
         _agent_cache[cache_key] = (time.time(), choices, problem)
         return choices, problem
 
@@ -186,7 +188,7 @@ class IrActionsServer(models.Model):
             _NOT_CONNECTED: _("Tuqui is not connected"),
             _NO_SIGNING_KEY: _("Tuqui credentials need renewing"),
             _UNREACHABLE: _("Tuqui unavailable"),
-            _NO_AGENTS: _("No agents in Tuqui yet"),
+            _NONE_OFFERED: _("No agent is offered to Odoo yet"),
         }.get(problem, _("Tuqui unavailable"))
 
     @api.model
@@ -202,10 +204,16 @@ class IrActionsServer(models.Model):
                 "signing key yet. Tuqui asks for one on its own within the hour; to do it now, "
                 "disconnect and activate again from Settings > Tuqui."
             )
-        if problem == _NO_AGENTS:
+        if problem == _NONE_OFFERED:
+            # Not "there are no agents": since Tuqui grew the `odoo_action`
+            # channel the list is what somebody DECLARED, not everything that
+            # exists, and a workspace full of agents can legitimately answer
+            # empty. Telling that admin to create an agent would send them to
+            # build a second one next to the one they already have.
             return _(
-                "The connection works, but your Tuqui workspace has no agents yet. Create one "
-                "in Tuqui and it will show up here within a few minutes."
+                "The connection works, but no Tuqui agent is offered to Odoo actions yet. "
+                'In Tuqui, a workspace admin turns on the agent\'s "Odoo action" channel — '
+                "Agents > the agent > Channels — and it shows up here within a few minutes."
             )
         return _(
             "Tuqui did not answer, so the list could not be loaded. The action can still be "
