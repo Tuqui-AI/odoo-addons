@@ -12,12 +12,22 @@
                 más". No URL to paste, no token, no model mapping: the trigger
                 condition is already expressed by the automation this action
                 hangs from.
+
+                IN A NESTED `group`, like every other per-type field of this form
+                (`object_create`, `object_copy`): that is what puts the label
+                beside the field instead of above it. And AFTER the container of
+                `state`, not after the field itself — `state` sits inside a
+                `<div class="d-flex flex-column">` that carries its own label, so
+                landing in there left the dropdown with no name at all.
             -->
-            <xpath expr="//field[@name='state']" position="after">
-                <field name="tuqui_agent_id"
-                       invisible="state != 'tuqui_notify'"
-                       required="state == 'tuqui_notify'"
-                       options="{'no_create': True}"/>
+            <xpath expr="//field[@name='state']/.." position="after">
+                <group invisible="state != 'tuqui_notify'">
+                    <group>
+                        <field name="tuqui_agent_id"
+                               required="state == 'tuqui_notify'"
+                               options="{'no_create': True}"/>
+                    </group>
+                </group>
                 <div class="text-muted" invisible="state != 'tuqui_notify'">
                     Tuqui is notified through a durable queue: if it is
                     unreachable the event is retried, and a delivery that never
