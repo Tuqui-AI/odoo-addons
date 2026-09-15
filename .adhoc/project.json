@@ -1,0 +1,8 @@
+{
+  "publish": {
+    "modo": "PR",
+    "motivo": "Módulos Odoo de Tuqui que se instalan en bases de clientes.",
+    "flujo": "A",
+    "base": "19.0"
+  }
+}
