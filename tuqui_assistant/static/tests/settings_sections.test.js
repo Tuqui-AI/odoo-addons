@@ -1,7 +1,10 @@
 /** @odoo-module **/
 import { describe, expect, getFixture, test } from "@odoo/hoot";
 
-import { settingsSectionsOnScreen } from "@tuqui_assistant/services/tuqui_assistant_service";
+import {
+    openSettingsSection,
+    settingsSectionsOnScreen,
+} from "@tuqui_assistant/services/tuqui_assistant_service";
 
 /**
  * Qué secciones ofrece la pantalla de Ajustes.
@@ -67,5 +70,37 @@ describe("settingsSectionsOnScreen", () => {
             </div>
         `);
         expect(settingsSectionsOnScreen(root)).toEqual(["general_settings"]);
+    });
+});
+
+describe("openSettingsSection", () => {
+    test("dice cuál está abierta, no sólo cuáles hay", () => {
+        // EL CASO MEDIDO. Ajustes es UNA pantalla con muchas secciones, y el
+        // contexto la identifica por modelo —`res.config.settings`— para todas.
+        // Parado en la general y parado en contabilidad se ven idénticos desde
+        // afuera, así que quien necesita contabilidad lee "ya estás en ajustes" y
+        // no navega. Diez conversaciones con el mismo mensaje inicial: llegó a la
+        // sección correcta 3 veces, y las 7 que fallaron arrancaban en Ajustes.
+        const root = pantalla(`
+            <div class="settings_tab">
+                <div data-key="general_settings" class="selected">General Settings</div>
+                <div data-key="account">Invoicing</div>
+            </div>
+        `);
+        expect(openSettingsSection(root)).toBe("general_settings");
+    });
+
+    test("fuera de Ajustes no hay ninguna abierta", () => {
+        const root = pantalla(`<div class="o_form_view"><div data-key="algo" class="selected">x</div></div>`);
+        expect(openSettingsSection(root)).toBe(null);
+    });
+
+    test("y en Ajustes sin nada elegido tampoco inventa una", () => {
+        // Pasa de verdad: pedir una sección que no existe abre Ajustes sin
+        // ninguna seleccionada. Devolver la primera sería afirmar algo falso.
+        const root = pantalla(`
+            <div class="settings_tab"><div data-key="account">Invoicing</div></div>
+        `);
+        expect(openSettingsSection(root)).toBe(null);
     });
 });

@@ -348,6 +348,25 @@ export function settingsSectionsOnScreen(root = document) {
 }
 
 /**
+ * Which settings section is OPEN right now, by its technical key.
+ *
+ * WHY THE OPEN ONE AND NOT JUST THE LIST. Settings is one screen with many
+ * sections, and the page context identifies it by model — `res.config.settings`
+ * — for every one of them. Someone standing on the general section and someone
+ * standing on accounting look identical from here, so an assistant that needs
+ * the accounting one reads "you are already on the settings screen" and does not
+ * navigate. Measured over ten conversations with the same opening message: it
+ * went to the right section 3 times, and the 7 that failed all started on the
+ * settings screen already.
+ *
+ * @returns {string|null} null when this is not the Settings screen
+ */
+export function openSettingsSection(root = document) {
+    const abierta = root.querySelector?.(".settings_tab [data-key].selected");
+    return abierta?.dataset?.key || null;
+}
+
+/**
  * Which company the person is looking at, and which others they could switch to.
  *
  * WHY IT TRAVELS WITH EVERY SCREEN: half of Odoo's configuration is
@@ -1250,6 +1269,10 @@ export const tuquiAssistantService = {
             // por `sale_management`). Fuera de Ajustes queda vacío y no viaja.
             const secciones = settingsSectionsOnScreen();
             if (secciones.length) {
+                // CUÁL ESTÁ ABIERTA va primero: sin eso, todas las secciones de
+                // ajustes se ven iguales desde afuera —el modelo es el mismo— y
+                // quien necesite otra cree que ya llegó.
+                ctx.settingsSection = openSettingsSection();
                 ctx.settingsSections = secciones;
             }
             // Y si hay una marca puesta, si la persona ya la usó. Viaja acá y no
