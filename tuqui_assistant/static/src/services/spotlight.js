@@ -474,6 +474,56 @@ function esDeUnAncla(m) {
  * @param {object} [deps] `onStepDone` avisa cuando la persona HIZO lo que se le
  *   marcó; el resto es sólo para tests (reemplaza el componente real)
  */
+/**
+ * Llevar la pantalla hasta lo que se va a marcar.
+ *
+ * POR QUÉ HACE FALTA, y no lo suponíamos: cuando el objetivo está fuera del
+ * viewport, `web_tour` deja el puntero en el BORDE del área scrolleable a
+ * propósito — su convención es "la marca te dice que bajes, y clickeándola te
+ * lleva". En un onboarding eso está bien. En una guía asistida no: la persona no
+ * lee esa gota como "bajá", la lee como una marca puesta sobre lo que haya ahí.
+ *
+ * MEDIDO con la pantalla de Ajustes, que es la más larga de Odoo. La casilla de
+ * ubicaciones de almacenamiento está en y=2546 con una ventana de 900 px de
+ * alto; el objetivo se resolvía PERFECTO —nombre técnico exacto, un solo nodo,
+ * visible— y la gota caía en (706, 839), sobre el pie del viewport. Quien lo
+ * vivió lo contó así: "es la tercera vez que la marca verde me cae en el mismo
+ * título", y una vuelta después "la marca se me fue arriba de todo, encima del
+ * botón Save" — mientras el asistente le decía que bajara. Cinco marcas seguidas
+ * con el texto correcto y ninguna sirvió.
+ *
+ * SÓLO SI NO SE VE, y por dos razones. La de diseño: mover la pantalla de
+ * alguien que ya está mirando el campo es arrebatarle el control sin necesidad.
+ * Y la medida: scrollear dispara el oído de scroll que vuelve a apuntar, y cada
+ * re-apuntado dejaba un ancla nueva colgada —tres anclas donde tiene que haber
+ * una—, que es justo lo que sostiene la flecha del globo sobre el campo.
+ *
+ * `block: "center"` y no `"nearest"`: centrado deja contexto arriba y abajo del
+ * campo, que es lo que permite reconocer DÓNDE está. Y sin `behavior: "smooth"`
+ * a propósito — el scroll animado sigue corriendo mientras se calcula la
+ * posición, así que la gota se ubica contra una pantalla que todavía se mueve.
+ */
+function seVeEnPantalla(el) {
+    const r = el?.getBoundingClientRect?.();
+    if (!r || (!r.width && !r.height)) {
+        return false;
+    }
+    const alto = window.innerHeight || document.documentElement.clientHeight;
+    const ancho = window.innerWidth || document.documentElement.clientWidth;
+    return r.bottom > 0 && r.top < alto && r.right > 0 && r.left < ancho;
+}
+
+function llevarLaPantallaHasta(el) {
+    if (!el || seVeEnPantalla(el)) {
+        return;
+    }
+    try {
+        el.scrollIntoView?.({ block: "center", inline: "nearest" });
+    } catch {
+        // Un nodo sin layout no se puede scrollear y no es motivo para no marcar.
+    }
+}
+
 export function makeSpotlight(overlay, deps = {}) {
     const makePointer = deps.createPointerState || createPointerState;
     const Pointer = deps.Gota || Gota;
@@ -618,6 +668,10 @@ export function makeSpotlight(overlay, deps = {}) {
         clearTimeout(timer);
         apagarVigilancia();
         desatar?.();
+        // ANTES de apuntar, no después: el puntero calcula su posición contra el
+        // viewport, así que scrollear luego lo deja donde ya estaba hasta que algo
+        // vuelva a disparar el cálculo.
+        llevarLaPantallaHasta(el);
         const hint = payload?.hint || "";
         // La posición se valida como todo lo demás del payload: `computePosition`
         // de Owl revienta con "directions is not iterable" ante cualquier valor

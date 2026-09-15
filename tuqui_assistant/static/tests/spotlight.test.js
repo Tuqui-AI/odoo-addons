@@ -242,6 +242,62 @@ describe("makeSpotlight", () => {
         return { pointer, added, handle, calls };
     }
 
+    test("lleva la pantalla hasta lo que va a marcar", async () => {
+        // LA FALLA QUE ESTO ARREGLA, medida en la pantalla de Ajustes —la más
+        // larga de Odoo—: la casilla de ubicaciones de almacenamiento está a
+        // y=2546 con una ventana de 900 px, el objetivo se resolvía perfecto y la
+        // gota caía en (706, 839), sobre el pie del viewport. `web_tour` deja el
+        // puntero en el borde a propósito, porque su convención es "la marca te
+        // dice que bajes"; en una guía asistida eso se lee como una marca puesta
+        // sobre cualquier cosa. Quien lo vivió: "es la tercera vez que la marca
+        // verde me cae en el mismo título". Cinco marcas con el texto correcto y
+        // ninguna sirvió.
+        const llamadas = [];
+        const el = document.createElement("div");
+        // `defineProperty` sobre ESTA instancia y no un parche del prototipo:
+        // parchear `Element.prototype` se filtraba a los tests de anclas de más
+        // abajo y los dejaba en rojo. El espía tiene que morir con su nodo.
+        Object.defineProperty(el, "scrollIntoView", {
+            value: (opciones) => llamadas.push(opciones),
+            configurable: true,
+        });
+        el.setAttribute("name", "group_stock_multi_locations");
+        // FUERA DE PANTALLA, que es la condición del caso: el campo a y=2546 con
+        // una ventana de 900. Un nodo visible no se scrollea a propósito.
+        el.style.cssText = "position:absolute; top:4000px; width:20px; height:20px";
+        getFixture().appendChild(el);
+        const { handle } = harness();
+
+        expect(await handle.spotlight({ field: "group_stock_multi_locations" })).toBe(true);
+        expect(llamadas).toHaveLength(1);
+        // Centrado y no "nearest": deja contexto arriba y abajo, que es lo que
+        // permite reconocer DÓNDE está el campo y no sólo verlo.
+        expect(llamadas[0].block).toBe("center");
+
+        // APAGARLO NO ES OPCIONAL: la vigilancia es un loop, y dejarlo vivo
+        // seguía apuntando durante los tests de más abajo y les acumulaba anclas
+        // —tres donde esperaban una—. Costó un rato encontrarlo.
+        handle.destroy();
+    });
+
+    test("y no se cae si el nodo no se puede scrollear", async () => {
+        // Un nodo sin layout no tiene `scrollIntoView` útil, y eso no es motivo
+        // para no marcar: la marca sigue siendo mejor que nada.
+        const el = document.createElement("div");
+        Object.defineProperty(el, "scrollIntoView", {
+            value: () => {
+                throw new Error("sin layout");
+            },
+            configurable: true,
+        });
+        el.setAttribute("name", "campo_raro");
+        el.style.cssText = "position:absolute; top:4000px; width:20px; height:20px";
+        getFixture().appendChild(el);
+        const { handle } = harness();
+        expect(await handle.spotlight({ field: "campo_raro" })).toBe(true);
+        handle.destroy();
+    });
+
     test("apunta la gota al elemento y deja el texto listo para cuando se acerque", async () => {
         // La gota queda CERRADA: un punto que dice "acá", no un cartel. Un globo
         // abierto permanente taparía los campos vecinos justo cuando la persona
