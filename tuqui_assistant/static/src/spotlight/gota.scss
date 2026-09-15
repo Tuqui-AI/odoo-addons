@@ -1,0 +1,112 @@
+/* La gota — el puntero de Odoo teñido de salvia.
+ *
+ * Se tiñe redefiniendo LAS VARIABLES QUE EL PROPIO PUNTERO EXPONE, no pisando
+ * sus reglas: así la forma de gota, el rebote, el degradé y la expansión del
+ * globo siguen siendo los de Odoo, y una mejora suya nos llega gratis. Lo único
+ * nuestro es el color, que es lo que dice QUIÉN te está señalando.
+ */
+.o_tour_pointer.o_tuqui_gota {
+    --TourPointer__color: #344e41;
+    --TourPointer__color-accent: #3f5e4e;
+    --TourPointer__text-color: #ffffff;
+
+    .o_tour_pointer_content {
+        // El globo del hover, en salvia oscuro con texto blanco. El default de
+        // Odoo es claro con texto negro: contra la gota verde se leería como dos
+        // piezas distintas en vez de una sola marca.
+        background-color: var(--TourPointer__color);
+        color: var(--TourPointer__text-color);
+    }
+
+    &.o_open {
+        // Y LA FLECHITA TAMBIÉN. Al abrirse, el `tip` deja de ser la gota y pasa
+        // a ser el triangulito que señala el campo, y Odoo lo pinta blanco con
+        // borde gris —igual que el fondo del globo, que acá ya no es gris—. Sin
+        // esto la punta salía blanca colgando de un cartel verde. Va también el
+        // borde de la raíz, que es el marco del globo.
+        border-color: var(--TourPointer__color);
+        background-color: var(--TourPointer__color);
+
+        .o_tour_pointer_tip {
+            background: var(--TourPointer__color);
+            border-color: var(--TourPointer__color);
+        }
+    }
+}
+
+/* La cara de Tuqui sobre la marca — dos puntos cerrada, la cara entera al hablar.
+ *
+ * POR QUÉ NO ES DECORACIÓN. Esta marca aparece encima de la pantalla de otra
+ * persona, en medio de su trabajo. Sin nada que diga quién la puso, se lee como
+ * una función del sistema; con la cara de Tuqui se lee como que el asistente le
+ * está mostrando algo. Es lo mismo que decidió el color salvia, un paso más.
+ *
+ * CÓMO ES LA CARA, porque no es lo que uno supone: no son dos ojos arriba y una
+ * boca abajo. Son DOS PUNTOS GORDOS a los costados, a la misma altura, unidos
+ * por una curva que sube hacia ellos. Los puntos son grandes (radio 50 sobre un
+ * lienzo de 768) y la curva es fina (trazo 17). Esa proporción es la que decide
+ * todo lo de abajo.
+ *
+ * LOS PUNTOS ESTÁN SIEMPRE. Es marca, no una función de la interfaz: lo que hacen
+ * es decir de quién es esa cosa que apareció encima de la pantalla.
+ *
+ * LA CURVA NO ENTRA CERRADA, y el motivo es de tamaño y nada más. A los 28 px de
+ * la gota el radio 50 da 1,8 px: chicos pero existen. El trazo 17 da MEDIO PÍXEL
+ * — para que se viera habría que engordarlo tres veces, y ahí ya no sería la
+ * curva de la marca sino un dibujo nuevo que se le parece. Se pone lo que entra
+ * sin deformarse, y la curva vuelve apenas hay lugar.
+ *
+ * DÓNDE VAN, que costó una vuelta: la gota la dibuja el `tip`, y ese nodo está
+ * ROTADO 45 grados (es un cuadrado con una esquina en punta). Todo lo que se le
+ * ponga adentro sale torcido. Así que la cara va sobre la RAÍZ, que no rota.
+ */
+.o_tour_pointer.o_tuqui_gota {
+    &:not(.o_open)::after {
+        content: "";
+        position: absolute;
+        // Centrado sobre la parte redonda: la gota tiene la punta arriba, así
+        // que su centro óptico cae por debajo del centro de la caja.
+        left: 50%;
+        // El 72% no es tanteo: el `tip` que dibuja la gota está CORRIDO 8 px
+        // hacia abajo respecto de la caja de la raíz (y además escalado), así
+        // que el centro de la caja no es el centro del bulbo. Centrando en la
+        // caja, los puntos quedaban flotando arriba del dibujo.
+        top: 72%;
+        width: 58%;
+        height: 58%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        // El encuadre deja sólo los dos puntos, sin el aire del isotipo: con el
+        // lienzo entero adentro de 21 px quedaban en 1,8 px y se los comía el
+        // antialias contra el verde.
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='120 320 528 110'%3E%3Ccircle cx='205' cy='375' r='62' fill='%23fff'/%3E%3Ccircle cx='564' cy='375' r='62' fill='%23fff'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: center;
+        background-size: contain;
+    }
+
+    &.o_open .o_tour_pointer_content {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+
+        // Acá entra la cara entera, simplemente porque hay lugar: los mismos
+        // puntos de siempre, ahora con su curva.
+        //
+        // La curva va más gruesa que en el isotipo (33 en vez de 17), y es a
+        // propósito: a este tamaño el trazo original mide menos de un píxel y
+        // desaparece. Es la misma licencia que toma cualquier marca en su
+        // versión chica — el dibujo se ajusta para que siga leyéndose como lo
+        // que es. Los puntos, en cambio, van con su radio real.
+        &::before {
+            content: "";
+            flex: none;
+            width: 1.45rem;
+            height: 1.45rem;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='140 300 490 175'%3E%3Ccircle cx='205' cy='375' r='50' fill='%23fff'/%3E%3Ccircle cx='564' cy='375' r='50' fill='%23fff'/%3E%3Cpath d='M 230 399 C 343 458, 446 458, 538 399' stroke='%23fff' stroke-width='33' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: contain;
+        }
+    }
+}
