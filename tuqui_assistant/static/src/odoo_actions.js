@@ -71,9 +71,10 @@ export async function runOdooAction(service, type, payload = {}) {
         case "spotlight":
             // La gota: señalar en la pantalla dónde hay que hacer algo, con el
             // puntero de `web_tour` (el que la gente ya conoce del onboarding).
-            // Si no cae, `spotlightOrWarn` se lo dice a la persona.
-            service.spotlightOrWarn(payload);
-            return { handled: true, result: { ok: null, reason: "dispatched" } };
+            // DEVUELVE SI CAYÓ: hasta que esto volvió, el chat podía anunciar una
+            // marca que no existía, y lo hacía — cuatro veces en una misma
+            // conversación, con la pantalla sin moverse.
+            return { handled: true, result: await service.spotlightOrWarn(payload) };
         case "reload":
             // El turno escribió en Odoo por atrás: los datos de la vista quedaron
             // viejos. Relee sin recargar la página. El servicio se niega si el

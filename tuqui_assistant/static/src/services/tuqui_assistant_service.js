@@ -1925,23 +1925,35 @@ export const tuquiAssistantService = {
          * anidado, cuando Odoo está adentro de Tuqui. La marca es la misma y el
          * aviso también; lo único que cambia es por dónde entró el pedido.
          */
+        /**
+         * Señalar, y decir SI CAYÓ.
+         *
+         * El resultado ya se conocía acá y no volvía al chat: se le avisaba a la
+         * persona con un cartel y nada más. Por eso el asistente podía decir "ya
+         * te marqué el botón" cuatro veces seguidas con la pantalla inmóvil, que
+         * fue la queja textual de quien lo probó: «me estás diciendo que hiciste
+         * algo que no hiciste». Y lo más filoso de su relato: sabe leer la
+         * pantalla para desmentir a la persona cuando ella miente, pero no la
+         * leía para desmentirse a sí mismo al anunciar una marca.
+         */
         async function spotlightOrWarn(payload) {
-            // El try NO es defensa por si acaso: a esta función se la llama sin
-            // `await` (no hay a quién devolverle el resultado), así que un throw
-            // adentro se volvía un unhandled rejection y la persona se quedaba
-            // sin marca Y sin aviso — que es exactamente lo que esto existe para
-            // evitar. Un error señalando es indistinguible, para quien mira, de
-            // una marca que no cayó.
+            // El try NO es defensa por si acaso: un throw acá se volvía un
+            // unhandled rejection y la persona se quedaba sin marca Y sin aviso —
+            // que es exactamente lo que esto existe para evitar. Un error
+            // señalando es indistinguible, para quien mira, de una marca que no
+            // cayó.
             let marcado = false;
+            let fallo = null;
             try {
                 // Es `await` porque la marca puede tener que abrir una pestaña
                 // del formulario para llegar al campo, y eso pasa por un render.
                 marcado = await spotlight(payload);
             } catch (error) {
+                fallo = String(error?.message || error || "").slice(0, 200);
                 console.warn("tuqui_assistant: falló al señalar en la pantalla", error);
             }
             if (marcado) {
-                return true;
+                return { ok: true, reason: "marked" };
             }
             // `String()` porque el payload lo escribe el modelo: un objeto ahí
             // imprimía "[object Object]" en el cartel que lee la persona.
@@ -1952,7 +1964,11 @@ export const tuquiAssistantService = {
                     : _t("Tuqui quiso señalarte algo, pero no está en esta pantalla."),
                 { type: "warning" }
             );
-            return false;
+            return {
+                ok: false,
+                reason: fallo ? "error" : "not_on_screen",
+                detail: fallo || (que ? `"${que}" is not on the screen the user has open.` : null),
+            };
         }
 
         async function reloadView() {

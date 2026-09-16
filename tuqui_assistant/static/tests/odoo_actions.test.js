@@ -40,7 +40,12 @@ function fakeService() {
             calls.push(["saveRecord", ...args]);
             return Promise.resolve({ ok: false, reason: "rejected", detail: "faltan campos" });
         },
-        spotlightOrWarn: record("spotlightOrWarn"),
+        // La marca también sabe su resultado: el doble lo devuelve porque es lo
+        // que el despachador tiene que dejar pasar.
+        spotlightOrWarn: (...args) => {
+            calls.push(["spotlightOrWarn", ...args]);
+            return Promise.resolve({ ok: false, reason: "not_on_screen", detail: "no está en pantalla" });
+        },
         reloadView: record("reloadView"),
         navigate: record("navigate"),
     };
@@ -108,10 +113,22 @@ describe("what the chat can ask this Odoo to do", () => {
         // bien". Un `true` acá reconstruiría exactamente el problema que esto
         // viene a resolver, pero con una capa más de por medio.
         const service = fakeService();
-        for (const type of ["apply", "chatter", "spotlight", "reload", "navigate"]) {
+        for (const type of ["apply", "chatter", "reload", "navigate"]) {
             const despacho = await runOdooAction(service, type, {});
             expect(despacho.result.ok).toBe(null, { message: type });
             expect(despacho.result.reason).toBe("dispatched", { message: type });
         }
+    });
+
+    test("y la marca dice si CAYÓ, no que se pidió", async () => {
+        // EL CASO MEDIDO, y el peor de los cuatro: el asistente anunció "ya te
+        // marqué el botón" cuatro veces en una conversación con la pantalla sin
+        // moverse. Quien lo probó lo dijo así: «me estás diciendo que hiciste
+        // algo que no hiciste». El dato estaba de este lado y sólo llegaba a la
+        // persona, en un cartel.
+        const service = fakeService();
+        const despacho = await runOdooAction(service, "spotlight", { field: "x" });
+        expect(despacho.result.ok).toBe(false);
+        expect(despacho.result.reason).toBe("not_on_screen");
     });
 });
