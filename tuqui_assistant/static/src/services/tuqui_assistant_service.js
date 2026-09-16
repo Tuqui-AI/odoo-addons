@@ -14,7 +14,7 @@ import { OPEN_SIGNAL_KEY, PANEL_STATE_KEY } from "@tuqui_assistant/storage_keys"
 import { isNested } from "@tuqui_assistant/nested_guard";
 import { whenTheScreenSettles } from "@tuqui_assistant/screen_settled";
 
-import { makeSpotlight } from "./spotlight";
+import { findSpotlightTarget, makeSpotlight } from "./spotlight";
 
 // Luxon es un global en Odoo, no un import ESM — igual que en
 // web/static/src/core/l10n/dates.js.
@@ -364,6 +364,25 @@ export function settingsSectionsOnScreen(root = document) {
 export function openSettingsSection(root = document) {
     const abierta = root.querySelector?.(".settings_tab [data-key].selected");
     return abierta?.dataset?.key || null;
+}
+
+/**
+ * El texto visible de lo que quedó marcado, para poder contrastarlo con lo pedido.
+ *
+ * Se sube por los padres cuando el nodo no tiene texto propio —un input, un
+ * checkbox, un ícono— porque lo que la persona LEE está en la etiqueta de al
+ * lado, y es con eso con lo que va a comparar.
+ */
+function textoDeLoMarcado(el) {
+    let nodo = el;
+    for (let i = 0; i < 3 && nodo; i++) {
+        const t = (nodo.textContent || "").trim().replace(/\s+/g, " ");
+        if (t) {
+            return t.slice(0, 80);
+        }
+        nodo = nodo.parentElement;
+    }
+    return null;
 }
 
 /**
@@ -1977,7 +1996,23 @@ export const tuquiAssistantService = {
                 console.warn("tuqui_assistant: falló al señalar en la pantalla", error);
             }
             if (marcado) {
-                return { ok: true, reason: "marked" };
+                // SOBRE QUÉ CAYÓ, y no sólo que cayó. El resolver busca por texto
+                // incluido, así que puede acertar un elemento que NO es el que se
+                // pidió: medido, se pidió "Certificates" y la marca terminó sobre
+                // "Invite New Users" mientras el chat decía "ahí te marqué los
+                // certificados". Quien lo vivió lo dijo así: «yo confío en la marca
+                // verde, si me la pone, aprieto» — y apretar ahí invitaba usuarios
+                // a la empresa. Devolver el texto de lo marcado es lo que permite
+                // notar el desvío en vez de anunciarlo como un acierto.
+                // El elemento se le pide al MISMO resolver que puso la marca, en vez
+                // de cambiar lo que devuelve `spotlight`: así no se toca un
+                // contrato que veinte tests ya fijan, y la respuesta sale de la
+                // misma búsqueda, no de una reconstrucción parecida.
+                return {
+                    ok: true,
+                    reason: "marked",
+                    markedText: textoDeLoMarcado(findSpotlightTarget(payload || {})),
+                };
             }
             // `String()` porque el payload lo escribe el modelo: un objeto ahí
             // imprimía "[object Object]" en el cartel que lee la persona.
