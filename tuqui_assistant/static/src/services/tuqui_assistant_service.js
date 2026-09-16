@@ -2022,6 +2022,15 @@ export const tuquiAssistantService = {
                 activeRecord ? `${activeRecord.resModel}:${activeRecord.resId}` : null,
         });
         const spotlight = async (payload) => {
+            // A QUIÉN VA A REEMPLAZAR, leído ANTES de poner la nueva. Sólo puede
+            // haber una marca a la vez —cada una apaga a la anterior— y desde el
+            // chat eso no se ve: un turno puede pedir dos y las dos contestan que
+            // cayeron, así que el asistente anuncia las dos con toda la razón
+            // desde su lado. Medido: pidió la casilla "Storage Locations" y
+            // después "Save", dijo «ahí te marqué la casilla y el botón Save», y
+            // la persona contestó «me está señalando el botón Save, NO la
+            // casilla». Tenía razón ella.
+            const reemplazada = ultimaMarca && !ultimaMarca.done ? ultimaMarca.what : null;
             const puesta = await spotlightHandle.spotlight(payload);
             if (puesta) {
                 // Con el texto que se pidió señalar, no con un identificador: es
@@ -2035,6 +2044,10 @@ export const tuquiAssistantService = {
                 // desvío en vez de sostener que marcó lo que pidió.
                 const sobre = textoDeLoMarcado(puesta);
                 ultimaMarca = que ? { what: que, on: sobre || null, done: false } : null;
+                // Colgado del elemento y no devuelto aparte, por lo mismo que el
+                // texto de lo marcado: el dato tiene que venir de ESTA operación y
+                // no de una segunda lectura que ya ve otro DOM.
+                puesta.tuquiReemplazo = reemplazada;
             }
             return puesta;
         };
@@ -2092,7 +2105,14 @@ export const tuquiAssistantService = {
                 // de cambiar lo que devuelve `spotlight`: así no se toca un
                 // contrato que veinte tests ya fijan, y la respuesta sale de la
                 // misma búsqueda, no de una reconstrucción parecida.
-                return { ok: true, reason: "marked", markedText: textoDeLoMarcado(marcado) };
+                return {
+                    ok: true,
+                    reason: "marked",
+                    markedText: textoDeLoMarcado(marcado),
+                    // A quién apagó al aparecer, cuando había otra viva. Sin esto,
+                    // dos marcas en un turno se cuentan las dos como puestas.
+                    replaced: marcado.tuquiReemplazo || null,
+                };
             }
             // `String()` porque el payload lo escribe el modelo: un objeto ahí
             // imprimía "[object Object]" en el cartel que lee la persona.
