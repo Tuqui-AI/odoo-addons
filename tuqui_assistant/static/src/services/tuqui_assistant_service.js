@@ -394,18 +394,58 @@ export function openSettingsSection(root = document) {
 }
 
 /**
- * El texto visible de lo que quedó marcado, para poder contrastarlo con lo pedido.
+ * What the person READS where the mark landed, to contrast it with what was asked.
  *
- * Se sube por los padres cuando el nodo no tiene texto propio —un input, un
- * checkbox, un ícono— porque lo que la persona LEE está en la etiqueta de al
- * lado, y es con eso con lo que va a comparar.
+ * WHY IT IS NOT JUST THE NODE'S TEXT. What gets marked is very often a control
+ * with no text of its own — a checkbox, an input, an icon — and the words the
+ * person reads live in its LABEL, which is a sibling and not an ancestor.
+ * Measured live on the settings screen: marking the "Storage Locations" checkbox
+ * answered `marked_on: null`, so the whole check for a mark that landed on the
+ * wrong thing was inert exactly where it matters most.
+ *
+ * SO THE LABEL IS ASKED FOR THE WAY THE BROWSER ASKS: `aria-label`, then the
+ * `<label for=...>` that points at this control, then `title`/`placeholder` —
+ * the same links a screen reader follows, which is the same question ("what is
+ * this control called?") and already solved. Only when none of those exist does
+ * it climb, and then it climbs until it finds text instead of counting three
+ * levels: the depth between a checkbox and its row is a detail of Odoo's markup
+ * and changes between views, so counting it was guessing.
  */
-function textoDeLoMarcado(el) {
-    let nodo = el;
-    for (let i = 0; i < 3 && nodo; i++) {
-        const t = (nodo.textContent || "").trim().replace(/\s+/g, " ");
+export function textoDeLoMarcado(el) {
+    if (!el) {
+        return null;
+    }
+    const limpio = (t) => (t || "").trim().replace(/\s+/g, " ").slice(0, 80) || null;
+    const propio = limpio(el.textContent);
+    if (propio) {
+        return propio;
+    }
+    const porAria = limpio(el.getAttribute?.("aria-label"));
+    if (porAria) {
+        return porAria;
+    }
+    if (el.id) {
+        // `CSS.escape` porque los ids de Odoo llevan puntos y dos puntos
+        // (`group_stock_multi_locations_0`, pero también nombres calificados), y
+        // sin escapar el selector revienta y se pierde la etiqueta que SÍ estaba.
+        const etiqueta = el.ownerDocument?.querySelector?.(`label[for="${CSS.escape(el.id)}"]`);
+        const porLabel = limpio(etiqueta?.textContent);
+        if (porLabel) {
+            return porLabel;
+        }
+    }
+    const porAtributo = limpio(el.getAttribute?.("title") || el.getAttribute?.("placeholder"));
+    if (porAtributo) {
+        return porAtributo;
+    }
+    // Recién acá se sube, y hasta encontrar texto: el contenedor con las palabras
+    // puede estar a dos niveles en un formulario y a cinco en una casilla de
+    // ajustes. Se frena en el formulario para no devolver la pantalla entera.
+    let nodo = el.parentElement;
+    while (nodo && !nodo.matches?.(".o_form_view, .o_list_view, body")) {
+        const t = limpio(nodo.textContent);
         if (t) {
-            return t.slice(0, 80);
+            return t;
         }
         nodo = nodo.parentElement;
     }
