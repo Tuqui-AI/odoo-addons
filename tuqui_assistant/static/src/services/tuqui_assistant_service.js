@@ -14,7 +14,7 @@ import { OPEN_SIGNAL_KEY, PANEL_STATE_KEY } from "@tuqui_assistant/storage_keys"
 import { isNested } from "@tuqui_assistant/nested_guard";
 import { whenTheScreenSettles } from "@tuqui_assistant/screen_settled";
 
-import { findSpotlightTarget, makeSpotlight } from "./spotlight";
+import { makeSpotlight } from "./spotlight";
 
 // Luxon es un global en Odoo, no un import ESM — igual que en
 // web/static/src/core/l10n/dates.js.
@@ -340,6 +340,33 @@ export async function porQueNoSePudoAbrir(e, model, orm) {
  *
  * @returns {string[]} empty when this is not the Settings screen
  */
+/**
+ * Did asking for that settings section actually get the user anywhere?
+ *
+ * WHY THIS IS A DECISION AND NOT A CHECK. Odoo does not fail when you ask it for
+ * a settings section that does not exist: it opens Settings with none selected.
+ * So the dispatch succeeds, "I took you there" reads true on both sides, and the
+ * person is looking at a screen that answers nothing. Measured on a real
+ * certificate renewal, where the missing step was switching company.
+ *
+ * AN EMPTY LIST IS NOT A DENIAL. Not knowing which sections the screen offers —
+ * it has not drawn yet, or this is not the settings screen — is not evidence
+ * that the requested one is missing, and turning it into one would refuse
+ * navigations that worked. Doubt stays optimistic here; what the answer owes is
+ * the truth about what IS known.
+ *
+ * @param {string|undefined} pedida the section that was asked for
+ * @param {string[]} hay the sections the screen actually offers
+ * @returns {{ok: boolean, reason: string, detail: string}}
+ */
+export function didItLandOnTheSection(pedida, hay) {
+    const nombre = pedida ? String(pedida) : "general_settings";
+    if (pedida && hay.length && !hay.includes(nombre)) {
+        return { ok: false, reason: "no_such_section", detail: hay.join(", ") };
+    }
+    return { ok: true, reason: "opened", detail: nombre };
+}
+
 export function settingsSectionsOnScreen(root = document) {
     const claves = [...(root.querySelectorAll?.(".settings_tab [data-key]") || [])]
         .map((e) => e.dataset?.key)
@@ -1938,6 +1965,12 @@ export const tuquiAssistantService = {
                     ultimaMarca.done = true;
                 }
             },
+            // Cuando la marca se apaga, el dato se va con ella: describir una
+            // marca que no está en pantalla es peor que no decir nada, porque
+            // quien lee —la persona o el chat— actúa sobre algo que no existe.
+            onApagada: () => {
+                ultimaMarca = null;
+            },
             // La marca es de UN registro. Si la persona se va a otro, el campo se
             // llama igual y la gota lo señalaría con confianza en el lugar
             // equivocado; con esto se apaga sola.
@@ -1950,7 +1983,14 @@ export const tuquiAssistantService = {
                 // Con el texto que se pidió señalar, no con un identificador: es
                 // lo que el chat va a poder nombrar al hablar de eso.
                 const que = String(payload?.action || payload?.label || payload?.field || "").slice(0, 60);
-                ultimaMarca = que ? { what: que, done: false } : null;
+                // Y SOBRE QUÉ QUEDÓ, que no siempre es lo que se pidió: el
+                // resolver acierta por texto incluido. Medido en calibración:
+                // pedir el campo `phone` dejó la marca sobre los botones
+                // "Call/SMS" de al lado. Viaja en el contexto del turno siguiente,
+                // así que la próxima vez que la persona hable el chat puede ver el
+                // desvío en vez de sostener que marcó lo que pidió.
+                const sobre = textoDeLoMarcado(puesta);
+                ultimaMarca = que ? { what: que, on: sobre || null, done: false } : null;
             }
             return puesta;
         };
@@ -1985,7 +2025,7 @@ export const tuquiAssistantService = {
             // que es exactamente lo que esto existe para evitar. Un error
             // señalando es indistinguible, para quien mira, de una marca que no
             // cayó.
-            let marcado = false;
+            let marcado = null;
             let fallo = null;
             try {
                 // Es `await` porque la marca puede tener que abrir una pestaña
@@ -2008,11 +2048,7 @@ export const tuquiAssistantService = {
                 // de cambiar lo que devuelve `spotlight`: así no se toca un
                 // contrato que veinte tests ya fijan, y la respuesta sale de la
                 // misma búsqueda, no de una reconstrucción parecida.
-                return {
-                    ok: true,
-                    reason: "marked",
-                    markedText: textoDeLoMarcado(findSpotlightTarget(payload || {})),
-                };
+                return { ok: true, reason: "marked", markedText: textoDeLoMarcado(marcado) };
             }
             // `String()` porque el payload lo escribe el modelo: un objeto ahí
             // imprimía "[object Object]" en el cartel que lee la persona.
@@ -2133,7 +2169,7 @@ export const tuquiAssistantService = {
                         _t("Could not open Odoo settings: %s", await porQueNoSePudoAbrir(e, "res.config.settings", orm)),
                         { type: "danger" }
                     );
-                    return false;
+                    return { ok: false, reason: "error", detail: String(e && e.message ? e.message : e).slice(0, 200) };
                 }
                 // Y SE COMPRUEBA QUE LA SECCIÓN EXISTA, porque pedir una que no
                 // está no es un error para Odoo: abre Ajustes sin ninguna sección
@@ -2142,28 +2178,36 @@ export const tuquiAssistantService = {
                 // sale de la pantalla y no de los módulos instalados: no son la
                 // misma lista — `sale` está instalado y la sección se llama
                 // `sale_management`.
-                if (section) {
-                    whenTheScreenSettles(() => {
-                        const hay = settingsSectionsOnScreen();
-                        if (hay.length && !hay.includes(String(section))) {
-                            notification.add(
-                                _t(
-                                    "Opened Odoo settings, but there is no '%(pedida)s' section. Available: %(hay)s.",
-                                    { pedida: String(section), hay: hay.join(", ") }
-                                ),
-                                { type: "warning" }
-                            );
-                        }
-                    });
+                //
+                // Y EL RESULTADO LO DECIDE ESA COMPROBACIÓN, no el despacho. Odoo
+                // no falla al pedirle una sección que no existe: abre Ajustes sin
+                // ninguna elegida, así que el `doAction` sale bien y decir "te
+                // llevé" ahí es la mentira más fina de todas — la persona mira una
+                // pantalla que no contesta nada. Por eso se espera a que la
+                // pantalla deje de moverse antes de contestar.
+                const hay = section
+                    ? await new Promise((resolver) => {
+                          whenTheScreenSettles(() => resolver(settingsSectionsOnScreen()));
+                      })
+                    : [];
+                const llegada = didItLandOnTheSection(section, hay);
+                if (!llegada.ok) {
+                    notification.add(
+                        _t(
+                            "Opened Odoo settings, but there is no '%(pedida)s' section. Available: %(hay)s.",
+                            { pedida: String(section), hay: hay.join(", ") }
+                        ),
+                        { type: "warning" }
+                    );
                 }
-                return true;
+                return llegada;
             }
             if (typeof model !== "string" || !model.trim()) {
                 notification.add(
                     _t("Cannot navigate: missing Odoo model to open."),
                     { type: "danger" }
                 );
-                return false;
+                return { ok: false, reason: "no_model" };
             }
             if (mode === "record") {
                 // Abrir el formulario de UN registro que ya existe.
@@ -2179,7 +2223,7 @@ export const tuquiAssistantService = {
                         _t("Cannot open that record: missing or invalid id."),
                         { type: "danger" }
                     );
-                    return false;
+                    return { ok: false, reason: "bad_id" };
                 }
                 try {
                     await action.doAction({
@@ -2199,9 +2243,9 @@ export const tuquiAssistantService = {
                         _t("Could not open that record in Odoo: %s", await porQueNoSePudoAbrir(e, model, orm)),
                         { type: "danger" }
                     );
-                    return false;
+                    return { ok: false, reason: "error", detail: String(e && e.message ? e.message : e).slice(0, 200) };
                 }
-                return true;
+                return { ok: true, reason: "opened", detail: model };
             }
             if (mode === "browse") {
                 let vt = BROWSE_VIEW_TYPES.includes(viewType) ? viewType : "list";
@@ -2239,9 +2283,9 @@ export const tuquiAssistantService = {
                         _t("Could not open the view in Odoo: %s", await porQueNoSePudoAbrir(e, model, orm)),
                         { type: "danger" }
                     );
-                    return false;
+                    return { ok: false, reason: "error", detail: String(e && e.message ? e.message : e).slice(0, 200) };
                 }
-                return true;
+                return { ok: true, reason: "opened", detail: model };
             }
             // mode "new" (default): formulario vacío para crear un registro.
             const ctx = {};
@@ -2265,9 +2309,9 @@ export const tuquiAssistantService = {
                     _t("Could not open the new form in Odoo: %s", await porQueNoSePudoAbrir(e, model, orm)),
                     { type: "danger" }
                 );
-                return false;
+                return { ok: false, reason: "error", detail: String(e && e.message ? e.message : e).slice(0, 200) };
             }
-            return true;
+            return { ok: true, reason: "opened", detail: model };
         }
 
         return {

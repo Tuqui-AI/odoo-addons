@@ -2,6 +2,7 @@
 import { describe, expect, getFixture, test } from "@odoo/hoot";
 
 import {
+    didItLandOnTheSection,
     openSettingsSection,
     settingsSectionsOnScreen,
 } from "@tuqui_assistant/services/tuqui_assistant_service";
@@ -102,5 +103,41 @@ describe("openSettingsSection", () => {
             <div class="settings_tab"><div data-key="account">Invoicing</div></div>
         `);
         expect(openSettingsSection(root)).toBe(null);
+    });
+});
+
+describe("didItLandOnTheSection", () => {
+    test("una sección que la pantalla no ofrece NO es una llegada", () => {
+        // EL CASO MEDIDO, y el que hace falta un test para creer: Odoo abre
+        // Ajustes igual, sin ninguna sección elegida, así que el despacho sale
+        // bien. Sin esta decisión el chat decía "listo, ya abrí la pantalla de
+        // configuración de AFIP" sobre una pantalla que no contestaba nada.
+        const llegada = didItLandOnTheSection("l10n_ar", ["general_settings", "account"]);
+        expect(llegada.ok).toBe(false);
+        expect(llegada.reason).toBe("no_such_section");
+        // Y se dice QUÉ secciones hay: sin eso el asistente vuelve a probar a
+        // ciegas, que es lo que se midió cuatro veces seguidas.
+        expect(llegada.detail).toBe("general_settings, account");
+    });
+
+    test("la que sí está es una llegada", () => {
+        const llegada = didItLandOnTheSection("account", ["general_settings", "account"]);
+        expect(llegada.ok).toBe(true);
+        expect(llegada.reason).toBe("opened");
+        expect(llegada.detail).toBe("account");
+    });
+
+    test("no saber qué ofrece la pantalla no es una negativa", () => {
+        // El borde que no hay que convertir en pesimismo: una lista vacía es
+        // "no sé" —la pantalla no se dibujó, o no es la de Ajustes— y no prueba
+        // que la sección falte. Negar acá rechazaría navegaciones que sí
+        // funcionaron, que es el error más caro de los dos.
+        expect(didItLandOnTheSection("account", []).ok).toBe(true);
+    });
+
+    test("sin sección pedida, Ajustes generales es la llegada", () => {
+        const llegada = didItLandOnTheSection(undefined, []);
+        expect(llegada.ok).toBe(true);
+        expect(llegada.detail).toBe("general_settings");
     });
 });

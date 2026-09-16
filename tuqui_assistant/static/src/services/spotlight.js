@@ -744,7 +744,18 @@ export function makeSpotlight(overlay, deps = {}) {
             deps.onStepDone?.(payload || {});
             apagar();
         });
-        return true;
+        // SE DEVUELVE EL ELEMENTO MARCADO, no un `true`.
+        //
+        // Quien pregunta necesita saber SOBRE QUÉ cayó, no sólo que cayó: el
+        // resolver acierta por texto incluido y puede dar por buena una marca
+        // sobre otro elemento. Medido en calibración: pedir el campo `phone`
+        // dejó la marca sobre los botones "Call/SMS" de al lado.
+        //
+        // Y sale de ACÁ y no de resolver el payload una segunda vez, que es lo
+        // que se intentó primero: entre una resolución y la otra el DOM ya
+        // cambió —el ancla se insertó— y la segunda devolvía otra cosa, o nada.
+        // Un dato que no viene de la misma operación no describe esa operación.
+        return el;
     }
 
     /**
@@ -769,6 +780,12 @@ export function makeSpotlight(overlay, deps = {}) {
         pointer?.destroy?.();
         pointer = null;
         removeOverlay = null;
+        // SE AVISA QUE YA NO HAY MARCA. Sin esto, el dato de la última marca
+        // queda colgado: quien lo lee sigue creyendo que hay algo señalado y
+        // sobre qué. Lo notó quien probó esto —"`hay_una_marca_verde` decía false
+        // pero seguía diciendo que apuntaba a Manage Companies"—, y la misma
+        // mentira le llega al chat por el contexto del turno siguiente.
+        deps.onApagada?.();
     }
 
     return { spotlight, destroy: apagar };

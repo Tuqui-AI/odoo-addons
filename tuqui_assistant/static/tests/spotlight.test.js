@@ -268,7 +268,7 @@ describe("makeSpotlight", () => {
         getFixture().appendChild(el);
         const { handle } = harness();
 
-        expect(await handle.spotlight({ field: "group_stock_multi_locations" })).toBe(true);
+        expect(Boolean(await handle.spotlight({ field: "group_stock_multi_locations" }))).toBe(true);
         expect(llamadas).toHaveLength(1);
         // Centrado y no "nearest": deja contexto arriba y abajo, que es lo que
         // permite reconocer DÓNDE está el campo y no sólo verlo.
@@ -294,7 +294,7 @@ describe("makeSpotlight", () => {
         el.style.cssText = "position:absolute; top:4000px; width:20px; height:20px";
         getFixture().appendChild(el);
         const { handle } = harness();
-        expect(await handle.spotlight({ field: "campo_raro" })).toBe(true);
+        expect(Boolean(await handle.spotlight({ field: "campo_raro" }))).toBe(true);
         handle.destroy();
     });
 
@@ -307,7 +307,7 @@ describe("makeSpotlight", () => {
         document.body.appendChild(el);
         const { handle, calls } = harness();
 
-        expect(await handle.spotlight({ field: "l10n_ar_afip_pos_number", hint: "El número que te dio ARCA" })).toBe(true);
+        expect(Boolean(await handle.spotlight({ field: "l10n_ar_afip_pos_number", hint: "El número que te dio ARCA" }))).toBe(true);
         expect(apuntaA(calls[0].anchor, el)).toBe(true);
         // El apuntado va sin texto a propósito: el `usePosition` del puntero corre
         // antes del efecto que fija el ancho, así que cada dibujo se posiciona con
@@ -464,7 +464,7 @@ describe("makeSpotlight", () => {
         }
         const { handle, calls } = harness();
 
-        expect(await handle.spotlight({ field: "l10n_ar_afip_pos_number" })).toBe(true);
+        expect(Boolean(await handle.spotlight({ field: "l10n_ar_afip_pos_number" }))).toBe(true);
         expect(apuntaA(calls[0].anchor, form.querySelector(".el-campo"))).toBe(true);
 
         handle.destroy();
@@ -680,7 +680,7 @@ describe("mientras la marca vive", () => {
         // se declara éxito — el chat dice "te lo marqué" y no hay nada.
         const { form, handle, calls } = harnessConCampo();
 
-        expect(await handle.spotlight({ field: "campo_vivo" })).toBe(true);
+        expect(Boolean(await handle.spotlight({ field: "campo_vivo" }))).toBe(true);
         expect(apuntados(calls).length).toBe(1);
 
         await asentada();
@@ -784,7 +784,7 @@ describe("la marca es de UN registro", () => {
         // confianza el lugar correcto del registro equivocado. Un turno largo
         // entrega la marca justo así.
         const { form, handle, calls, estado } = harnessConRegistro();
-        expect(await handle.spotlight({ field: "campo_vivo" })).toBe(true);
+        expect(Boolean(await handle.spotlight({ field: "campo_vivo" }))).toBe(true);
         await animationFrame();
         calls.length = 0;
 
