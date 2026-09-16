@@ -109,7 +109,7 @@ _READ_METHODS = frozenset(
         "get_view",
         # `check_access_rights` is @api.deprecated in 19 — it stays here because
         # the deployed backend still calls it, but the caller should move to
-        # `has_access`. Two traps in that migration:
+        # `has_access`. Three traps in that migration:
         #   * Odoo's own deprecation message says "use check_access() instead",
         #     and that is bad advice for an RPC client: `check_access` is
         #     @api.private in 19, so `get_public_method` refuses it. Verified.
@@ -118,6 +118,14 @@ _READ_METHODS = frozenset(
         #     `["read"]`. On an empty recordset it answers the model-level
         #     question — measured identical to `check_access_rights` for
         #     read/create on 18 and 19.
+        #   * And a third, the one that bites without raising anything:
+        #     `check_access_rights(op)` with the default `raise_exception=True`
+        #     returns `self.browse().check_access(op)`, and `check_access`
+        #     returns None. Through this gateway that is `{"ok": true,
+        #     "data": null}` — a caller reading `null` as falsy reports "access
+        #     denied", which is the exact wrong-refusal this whole change exists
+        #     to remove, one keyword away. Same body on 18 and 19. Callers must
+        #     pass `raise_exception=False` (adapter.py does).
         "check_access_rights",
         "get_views",
         "has_access",

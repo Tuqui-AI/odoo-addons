@@ -216,7 +216,6 @@ class TestTuquiRpcGateway(HttpCase):
             "formatted_read_group",
             "search_count",
             "fields_get",
-            "get_view",
         )
         writes = ("create", "write", "unlink", "copy")
         # Reached through the generic execute()/execute_method(), not through a
@@ -227,7 +226,7 @@ class TestTuquiRpcGateway(HttpCase):
         )
         # Not called through THIS gateway yet, so they are here to be classified
         # right the day they are. Asserted one by one on purpose: a tuple that
-        # lists three of fourteen is a guard that does not guard — dropping any
+        # lists three of thirteen is a guard that does not guard — dropping any
         # of the others would leave the suite green.
         #
         # `has_group` belongs here and not above: workspaces/service.py does call
