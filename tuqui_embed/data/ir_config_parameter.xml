@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo noupdate="1">
+    <!--
+        The parameter is created EMPTY, with its description.
+
+        Two reasons. One: so it exists with a visible name under Settings →
+        Technical → System Parameters, instead of requiring the key to be typed
+        from memory. Two, the one that matters: so whoever sees it knows **what
+        it enables** before filling it in. Today it is a line of free text with
+        nothing beside it, and this is not a preference — it is the switch
+        between "normal Odoo" and "Odoo that lets itself be shown inside another
+        site". The session cookie is NOT touched (see the README): what is given
+        up is clickjacking protection, and only for the origins the
+        administrator declares here.
+
+        Empty changes nothing: the module installed with no origin loaded is
+        indistinguishable from not being installed.
+
+        It carries `noupdate="1"` at the root, and that is not cosmetic: without
+        it, every `-u tuqui_embed` would rewrite `value` with the XML's empty
+        one and switch the customer's embed off without saying anything.
+    -->
+    <record id="param_embed_origins" model="ir.config_parameter">
+        <field name="key">tuqui.embed_origins</field>
+        <field name="value"></field>
+    </record>
+</odoo>

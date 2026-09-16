@@ -76,6 +76,21 @@ async function mountPartnerForm() {
     return getService("tuquiAssistant");
 }
 
+/** Un formulario CON BOTONES, que es lo que el modelo tiene que poder nombrar. */
+const FORM_ARCH_BOTONES = `
+    <form>
+        <header>
+            <button name="action_open_share_project_wizard" type="object" string="Share Project"/>
+            <button name="action_sin_texto" type="object" string=""/>
+        </header>
+        <field name="name"/>
+    </form>`;
+
+async function mountFormConBotones() {
+    await mountView({ type: "form", resModel: "res.partner", resId: 1, arch: FORM_ARCH_BOTONES });
+    return getService("tuquiAssistant");
+}
+
 /** Un formulario con los tres estados que importan, y uno de ellos CONDICIONAL:
  *  `email` se esconde según el valor de otro campo, que es el caso que la
  *  definición estática del campo no puede contar. */
@@ -394,6 +409,30 @@ describe("contexto vivo", () => {
         expect(ctx.model).toBe("res.partner");
         expect(ctx.resId).toBe(1);
         expect(ctx.fields.name).toBe("Acme");
+    });
+
+    test("el contexto dice qué BOTONES tiene la pantalla, con su nombre técnico", async () => {
+        // Sin esto el modelo adivina cómo se llama un botón, y adivina mal de dos
+        // formas medidas contra un Odoo real: inventando uno que no existe —pidió
+        // "Action" en un proyecto que tiene "Share Project" a la vista— y
+        // traduciendo el texto —"Log internal note" contra un botón que dice
+        // "Log note"—. Las dos terminan con el agente diciendo "te lo resalté"
+        // sobre una pantalla donde no hay nada.
+        const assistant = await mountFormConBotones();
+        const ctx = assistant.getContextPayload();
+        const compartir = (ctx.buttons || []).find((b) => b.text === "Share Project");
+        expect(compartir).not.toBe(undefined);
+        expect(compartir.name).toBe("action_open_share_project_wizard");
+    });
+
+    test("y no manda los que nadie puede pedir por su nombre", async () => {
+        // Un botón sin texto —o que sólo dice un número o una fecha: un contador,
+        // el selector de un rango— no es algo que alguien nombre. Ocuparía lugar
+        // en un payload que se trunca.
+        const assistant = await mountFormConBotones();
+        const ctx = assistant.getContextPayload();
+        expect((ctx.buttons || []).some((b) => b.name === "action_sin_texto")).toBe(false);
+        expect((ctx.buttons || []).every((b) => /[a-zá-úñ]/i.test(b.text))).toBe(true);
     });
 
     test("el contexto dice qué campos NO están en la pantalla", async () => {
