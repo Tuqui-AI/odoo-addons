@@ -3,6 +3,10 @@ import { Component, useState, useRef, useEffect, onWillStart, onMounted, onWillU
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
+import { runOdooAction } from "@tuqui_assistant/odoo_actions";
+import { whenTheScreenSettles } from "@tuqui_assistant/screen_settled";
+import { isNested } from "@tuqui_assistant/nested_guard";
+import { OPEN_SIGNAL_KEY } from "@tuqui_assistant/storage_keys";
 
 
 /**
@@ -338,6 +342,14 @@ export class TuquiPanel extends Component {
     }
 
     _postContext() {
+        // Se espera a que la pantalla termine de dibujarse. El efecto que llama
+        // acá corre cuando el estado cambió, que es antes de que el formulario
+        // esté completo: así viajaban botones de menos y —peor— campos marcados
+        // como ocultos que en realidad se ven. Ver `screen_settled`.
+        whenTheScreenSettles(() => this._postContextAhora());
+    }
+
+    _postContextAhora() {
         const win = this.iframeRef.el?.contentWindow;
         if (!win) {
             return;
@@ -361,6 +373,33 @@ export class TuquiPanel extends Component {
         }
     }
 
+    /**
+     * Contarle al chat qué pasó con la orden que mandó.
+     *
+     * Es la vuelta del camino: la orden baja por este mismo puente y hasta ahora
+     * lo que pasaba con ella se quedaba de este lado. `callId` es el que el chat
+     * ya usa para identificar cada llamada a una herramienta, así que viaja de
+     * ida y vuelta sin agregar un identificador propio.
+     */
+    _postAcuse(callId, tipo, resultado) {
+        const win = this.iframeRef.el?.contentWindow;
+        if (!win || !callId) {
+            return;
+        }
+        try {
+            win.postMessage(
+                {
+                    source: "tuqui-odoo",
+                    type: "ack",
+                    payload: { callId, action: tipo, result: resultado || null },
+                },
+                this._spaOrigin
+            );
+        } catch (e) {
+            console.warn("[tuqui_assistant] Could not post ack to iframe:", e);
+        }
+    }
+
     _postNewChat() {
         // Ask the SPA (already mounted and hydrated) to open a new chat as an
         // INTERNAL navigation (no src change → no second SSO nonce spent). Handled
@@ -377,7 +416,7 @@ export class TuquiPanel extends Component {
         }
     }
 
-    _handleMessage(ev) {
+    async _handleMessage(ev) {
         const data = ev.data;
         if (!data || data.source !== "tuqui-spa") {
             return;
@@ -400,43 +439,25 @@ export class TuquiPanel extends Component {
         if (!spaOrigin || ev.origin !== spaOrigin) {
             return;
         }
+        // Lo que el chat le pide a ESTE Odoo lo resuelve el despachador que
+        // comparten las dos direcciones del puente. Lo que queda abajo es lo
+        // que sólo tiene sentido para quien MUESTRA el chat: dónde está
+        // parada la conversación, un link que se va a abrir, el iframe
+        // avisando que ya montó.
+        const despacho = await runOdooAction(this.tuquiAssistant, data.type, data.payload || {});
+        if (despacho.handled) {
+            // EL ACUSE, que es lo que cierra el circuito. Sin esto el chat sólo
+            // sabe que pidió algo, y lo que afirme después es una suposición.
+            // Va con el `callId` que vino con la orden: el chat ya identifica sus
+            // llamadas con ese id, así que no hay correlación nueva que inventar.
+            this._postAcuse(data.callId, data.type, despacho.result);
+            return;
+        }
         switch (data.type) {
             case "ready":
                 this.ui.embedReady = true;
                 this._postAuth(); // SSO: send nonce + client_id to iframe (before context)
                 this._postContext();
-                break;
-            case "apply":
-                // `baseRevision` (opcional): la revisión del contexto sobre la que
-                // el SPA razonó. Con eso el servicio detecta si el usuario tocó
-                // alguno de esos campos después y no lo pisa en silencio.
-                this.tuquiAssistant.applyProposal(data.payload?.changes || {}, {
-                    baseRevision: data.payload?.baseRevision,
-                });
-                break;
-            case "chatter":
-                // Chatter content proposal: opens the standard Odoo composer
-                // pre-filled (user reviews and sends). NEVER posted silently —
-                // human dispatch is structural.
-                this.tuquiAssistant.proposeChatter(data.payload || {});
-                break;
-            case "save":
-                // El usuario pidió guardar. Odoo valida; si rechaza, el servicio
-                // lo dice en vez de cantar victoria.
-                this.tuquiAssistant.saveRecord();
-                break;
-            case "reload":
-                // El turno escribió en Odoo por atrás: los datos de la vista
-                // quedaron viejos. Relee sin recargar la página. El servicio se
-                // niega si el form está sucio — no le pisamos al usuario lo que
-                // está escribiendo por refrescar un dato.
-                this.tuquiAssistant.reloadView();
-                break;
-            case "navigate":
-                // Odoo navigation from chat: opens a NEW form (create) or a
-                // filtered list/pivot/graph via standard act_window (checks
-                // permissions). Does NOT write anything.
-                this.tuquiAssistant.navigate(data.payload || {});
                 break;
             case "location":
                 // The SPA reports its current standalone-equivalent path
@@ -466,7 +487,7 @@ export class TuquiPanel extends Component {
                 // guards against stale signals in case the user opens a new Odoo tab
                 // independently later.
                 try {
-                    localStorage.setItem("tuqui_open_signal", JSON.stringify({ at: Date.now() }));
+                    localStorage.setItem(OPEN_SIGNAL_KEY, JSON.stringify({ at: Date.now() }));
                 } catch {
                     // Private browsing or quota exceeded — skip silently.
                 }
@@ -550,4 +571,12 @@ export class TuquiPanel extends Component {
 
 }
 
-registry.category("main_components").add("tuqui_assistant.Panel", { Component: TuquiPanel });
+// El panel no se monta cuando este Odoo está siendo mostrado adentro de otra
+// página. Es la garantía DURA contra el bucle —Tuqui muestra Odoo, ese Odoo abre
+// su Tuqui, ese Tuqui vuelve a mostrar Odoo— que cuelga el navegador entero, no
+// sólo la pestaña: sin componente no hay iframe que cargar, sin depender de que
+// el estado guardado diga que estaba cerrado. Lo demás del módulo sigue vivo, y
+// eso es a propósito: la capa de guía tiene que funcionar precisamente acá.
+if (!isNested()) {
+    registry.category("main_components").add("tuqui_assistant.Panel", { Component: TuquiPanel });
+}
