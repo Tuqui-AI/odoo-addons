@@ -338,7 +338,6 @@ class TestTuquiRpcGateway(HttpCase):
             "formatted_read_group",
             "search_count",
             "fields_get",
-            "get_view",
         )
         writes = ("create", "write", "unlink", "copy")
         # Reached through the generic execute()/execute_method(), not through a
