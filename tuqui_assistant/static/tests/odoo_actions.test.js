@@ -108,15 +108,22 @@ describe("what the chat can ask this Odoo to do", () => {
         expect(despacho.result.detail).toBe("faltan campos");
     });
 
-    test("y las que todavía no lo saben lo dicen, en vez de afirmar un ok", async () => {
-        // `ok: null` no es un detalle: es la diferencia entre "no sé" y "salió
-        // bien". Un `true` acá reconstruiría exactamente el problema que esto
-        // viene a resolver, pero con una capa más de por medio.
+    test("NINGUNA contesta con un gerundio: todas dicen qué pasó", async () => {
+        // Es la propiedad del canal, y lo que lo hace universal: acá pasa toda
+        // orden del chat, así que si el resultado sale de este switch con forma
+        // conocida, una acción nueva la hereda. Antes las que no sabían devolvían
+        // `dispatched` —"pedí que se haga"—, que es exactamente lo que el
+        // asistente después contaba como si fuera un resultado.
         const service = fakeService();
-        for (const type of ["apply", "chatter", "reload", "navigate"]) {
-            const despacho = await runOdooAction(service, type, {});
-            expect(despacho.result.ok).toBe(null, { message: type });
-            expect(despacho.result.reason).toBe("dispatched", { message: type });
+        for (const type of ["apply", "chatter", "save", "spotlight", "reload", "navigate"]) {
+            const { result } = await runOdooAction(service, type, {});
+            expect(typeof result.reason).toBe("string", { message: type });
+            expect(result.reason).not.toBe("dispatched", { message: type });
+            // `ok` es booleano o null, nunca ausente: `null` es "no sé" y hace
+            // falta que sea decible, porque un ok por omisión es el bug original.
+            expect(result.ok === true || result.ok === false || result.ok === null).toBe(true, {
+                message: type,
+            });
         }
     });
 

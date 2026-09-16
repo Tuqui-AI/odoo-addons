@@ -1337,13 +1337,13 @@ export const tuquiAssistantService = {
                     _t("Open a form (1 record) to apply changes from here."),
                     { type: "warning" }
                 );
-                return false;
+                return { ok: false, reason: "no_form" };
             }
             if (!changes || typeof changes !== "object" || Array.isArray(changes)) {
                 notification.add(_t("The proposal must be an object { field: value }."), {
                     type: "danger",
                 });
-                return false;
+                return { ok: false, reason: "bad_proposal" };
             }
             // Validar contra los campos del form: descartar inexistentes / readonly
             // antes de _update. Una propuesta con campos ajenos (p.ej. {email_from,
@@ -1449,7 +1449,11 @@ export const tuquiAssistantService = {
                     // Todo lo propuesto quedó obsoleto. Ya dijimos por qué; el
                     // mensaje genérico de abajo ("ningún campo aplica al form")
                     // sería falso — los campos aplican, el valor cambió.
-                    return false;
+                    return {
+                        ok: false,
+                        reason: "stale",
+                        detail: "The user changed those fields after the proposal was reasoned about.",
+                    };
                 }
             }
             if (!Object.keys(known).length) {
@@ -1457,7 +1461,11 @@ export const tuquiAssistantService = {
                     _t("No field from the proposal can be applied to the open form."),
                     { type: "warning" }
                 );
-                return false;
+                return {
+                    ok: false,
+                    reason: "no_applicable_field",
+                    detail: "None of the proposed fields exist on the open form, or all are readonly.",
+                };
             }
             // Normalizar x2many a tuplas-comando web: el LLM suele mandar la forma
             // amigable `[{product_id:1,…}]` (lista de objetos planos), pero
@@ -1556,7 +1564,11 @@ export const tuquiAssistantService = {
                 // acá para no llegar a `_update` con un payload vacío y cantar un
                 // "aplicado" verde. No hace falta re-publicar el contexto: a diferencia
                 // del camino de `notApplied`, acá NO se escribió nada en el record.
-                return false;
+                return {
+                    ok: false,
+                    reason: "nothing_applicable",
+                    detail: "Every remaining value was a date Odoo could not read.",
+                };
             }
             // Snapshot del count de los x2many que esperamos que CREZCAN (CREATE/LINK),
             // para el chequeo honesto post-apply: si pedimos agregar una línea y el
@@ -1623,7 +1635,13 @@ export const tuquiAssistantService = {
                 // usuario. Es el gemelo del camino de `notApplied` — y desde que el
                 // guard mira sólo CREATE, el que de verdad se recorre.
                 refreshRecordContext();
-                return false;
+                return {
+                    ok: false,
+                    reason: "partial",
+                    detail:
+                        "A new line failed, but the scalar fields of the same proposal DID go in: " +
+                        "the form is half-changed. Read it before saying anything.",
+                };
             }
             // Chequeo honesto: ¿aparecieron TODAS las líneas nuevas que se pidieron?
             // Se compara contra `before + adds`, no contra `before`: con el `after >
@@ -1657,7 +1675,13 @@ export const tuquiAssistantService = {
                 // abajo dice que el re-publish evita — sólo que este camino se
                 // iba antes de llegar ahí.
                 refreshRecordContext();
-                return false;
+                return {
+                    ok: false,
+                    reason: "partial",
+                    detail:
+                        "Some requested lines did not appear, while the rest of the proposal did: " +
+                        "the form is half-changed. Read it before saying anything.",
+                };
             }
             // Re-publicar: los valores que acabamos de aplicar son el nuevo estado
             // sobre el que el assistant tiene que razonar. Sin esto, una segunda
@@ -1668,7 +1692,7 @@ export const tuquiAssistantService = {
                 _t("Changes applied to the form (unsaved). Review and Save or Discard."),
                 { type: "success" }
             );
-            return true;
+            return { ok: true, reason: "applied" };
         }
 
         /**

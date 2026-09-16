@@ -83,7 +83,7 @@ describe("reloadView", () => {
         // viejo, esto escribiría en un datapoint desconectado: la pantalla no
         // cambia y `applyProposal` igual devuelve true. Un ok silencioso, que es
         // el defecto que esta tarea existe para eliminar.
-        expect(await assistant.applyProposal({ name: "Propuesto después del reload" })).toBe(true);
+        expect((await assistant.applyProposal({ name: "Propuesto después del reload" })).ok).toBe(true);
         await animationFrame();
         expect(".o_field_widget[name=name] input").toHaveValue("Propuesto después del reload");
     });

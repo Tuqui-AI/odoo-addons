@@ -229,9 +229,13 @@ async function mountFormReadonlyCondicional(resId = 1) {
  * VE antes de decidir si guarda.
  */
 async function applyAndRender(assistant, changes, options) {
-    const ok = await assistant.applyProposal(changes, options);
+    const resultado = await assistant.applyProposal(changes, options);
     await animationFrame();
-    return ok;
+    // Se devuelve el booleano porque es lo que estos tests verifican: si la
+    // propuesta entró al formulario. El MOTIVO —que la acción pasó a devolver
+    // para que el chat pueda contarlo— se prueba aparte, más abajo: mezclarlo acá
+    // haría cuarenta y siete aserciones sobre algo que no es lo que miden.
+    return resultado?.ok ?? false;
 }
 
 describe("applyProposal — campos simples", () => {
@@ -331,8 +335,8 @@ describe("applyProposal — lo que NO se puede aplicar", () => {
     });
 
     test("una propuesta que no es un objeto se rechaza", async () => {
-        expect(await assistant.applyProposal(["name", "Acme"])).toBe(false);
-        expect(await assistant.applyProposal(null)).toBe(false);
+        expect((await assistant.applyProposal(["name", "Acme"])).ok).toBe(false);
+        expect((await assistant.applyProposal(null)).ok).toBe(false);
     });
 });
 
@@ -844,5 +848,35 @@ describe("applyProposal — lo que Luxon acepta y no debería", () => {
         const ok = await applyAndRender(assistant, { fecha: "2026" });
         expect(ok).toBe(false);
         expect(".o_field_date input").toHaveValue("");
+    });
+});
+
+describe("applyProposal — el motivo, que es lo que el chat cuenta", () => {
+    let assistant;
+    beforeEach(async () => {
+        assistant = await mountPartnerForm();
+    });
+
+    test("una propuesta que entra dice que entró", async () => {
+        const r = await assistant.applyProposal({ name: "Acme SA" });
+        expect(r.ok).toBe(true);
+        expect(r.reason).toBe("applied");
+    });
+
+    test("y una que no aplica dice POR QUÉ, no sólo que no", async () => {
+        // ES LA DIFERENCIA QUE IMPORTA. Con un booleano, el chat contaba lo mismo
+        // cuando la propuesta entró, cuando ningún campo existía en el formulario
+        // y cuando entró la mitad. Los tres tienen un paso siguiente distinto, y
+        // el del medio se veía igual que el éxito: medido, terminó con un producto
+        // creado que nadie había pedido.
+        const r = await assistant.applyProposal({ campo_que_no_existe: 1 });
+        expect(r.ok).toBe(false);
+        expect(r.reason).toBe("no_applicable_field");
+        expect(typeof r.detail).toBe("string");
+    });
+
+    test("una propuesta que no es un objeto se rechaza con su propio motivo", async () => {
+        expect((await assistant.applyProposal(null)).reason).toBe("bad_proposal");
+        expect((await assistant.applyProposal(["name", "x"])).reason).toBe("bad_proposal");
     });
 });
