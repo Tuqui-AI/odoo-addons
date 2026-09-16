@@ -2030,7 +2030,7 @@ export const tuquiAssistantService = {
             // después "Save", dijo «ahí te marqué la casilla y el botón Save», y
             // la persona contestó «me está señalando el botón Save, NO la
             // casilla». Tenía razón ella.
-            const reemplazada = ultimaMarca && !ultimaMarca.done ? ultimaMarca.what : null;
+            const replacedMark = ultimaMarca && !ultimaMarca.done ? ultimaMarca.what : null;
             const puesta = await spotlightHandle.spotlight(payload);
             if (puesta) {
                 // Con el texto que se pidió señalar, no con un identificador: es
@@ -2047,7 +2047,7 @@ export const tuquiAssistantService = {
                 // Colgado del elemento y no devuelto aparte, por lo mismo que el
                 // texto de lo marcado: el dato tiene que venir de ESTA operación y
                 // no de una segunda lectura que ya ve otro DOM.
-                puesta.tuquiReemplazo = reemplazada;
+                puesta.tuquiReplacedMark = replacedMark;
             }
             return puesta;
         };
@@ -2111,7 +2111,7 @@ export const tuquiAssistantService = {
                     markedText: textoDeLoMarcado(marcado),
                     // A quién apagó al aparecer, cuando había otra viva. Sin esto,
                     // dos marcas en un turno se cuentan las dos como puestas.
-                    replaced: marcado.tuquiReemplazo || null,
+                    replaced: marcado.tuquiReplacedMark || null,
                 };
             }
             // `String()` porque el payload lo escribe el modelo: un objeto ahí
