@@ -1830,7 +1830,7 @@ export const tuquiAssistantService = {
                     _t("Open a form (1 record) to post to the chatter."),
                     { type: "warning" }
                 );
-                return false;
+                return { ok: false, reason: "no_record" };
             }
             // Default a nota interna; solo "message" notifica a seguidores.
             const isMessage = mode === "message";
@@ -1881,9 +1881,13 @@ export const tuquiAssistantService = {
                     _t("Could not open the chatter composer: %s", e.message || e),
                     { type: "danger" }
                 );
-                return false;
+                return { ok: false, reason: "error", detail: String(e && e.message ? e.message : e).slice(0, 200) };
             }
-            return true;
+            // `composer_open` Y NO "posted": el compositor quedó abierto y escrito,
+            // y nada se publica hasta que la persona le dé Enviar. Esa distinción
+            // es estructural acá —que lo dispare un humano— así que el nombre del
+            // resultado tiene que sostenerla y no dejar que se lea como publicado.
+            return { ok: true, reason: "composer_open" };
         }
 
         // View types que el frontend puede abrir en modo browse. En sync con la
