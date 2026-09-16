@@ -1085,6 +1085,11 @@ export const tuquiAssistantService = {
             }
             _owner = owner;
             activeRecord = record || null;
+            // Otro registro, otra ficha: lo que el asistente propuso en la
+            // anterior no dice nada de esta. Sin esto, abrir una ficha nueva
+            // avisaría de un pisado que no ocurrió — el mismo error que la marca
+            // que sobrevivía a su registro.
+            camposPropuestosSinGuardar = new Set();
             // Record nuevo → revisión nueva, y la firma arranca de sus valores
             // actuales (un focusout inmediato sin edición no debe re-publicar).
             _revision += 1;
@@ -1417,6 +1422,18 @@ export const tuquiAssistantService = {
          * Requiere modo "record" (hay activeRecord). Origen: panel (fallback) o
          * iframe del SPA (tool propose_odoo_form_changes vía postMessage).
          */
+        //: Los campos que la última propuesta dejó puestos y TODAVÍA no se
+        //: guardaron. Existe por el gemelo del bug de la doble marca: un turno
+        //: puede proponer dos valores para el mismo campo —"Fondo" y después
+        //: "Entrepiso" sobre la misma ficha— y las dos propuestas contestan que
+        //: entraron, porque las dos entraron: la segunda pisando a la primera.
+        //: Desde el chat eso se lee como dos ubicaciones creadas, y es una.
+        //:
+        //: Quien lo probó lo vio antes que nosotros: «le pregunté si no estaba
+        //: pisando lo anterior. Le pregunté dos veces y me contestó las dos veces
+        //: con el mismo texto calcado».
+        let camposPropuestosSinGuardar = new Set();
+
         async function applyProposal(changes, options) {
             if (!activeRecord) {
                 notification.add(
@@ -1778,6 +1795,16 @@ export const tuquiAssistantService = {
                 _t("Changes applied to the form (unsaved). Review and Save or Discard."),
                 { type: "success" }
             );
+            // ¿ESTA PROPUESTA PISÓ ALGO QUE LA ANTERIOR DEJÓ SIN GUARDAR? Se mira
+            // contra los campos de la propuesta previa y no contra el valor del
+            // formulario: lo que importa no es que el campo tuviera algo, es que
+            // el ASISTENTE ya había puesto un valor ahí y va a contar los dos.
+            const aplicados = Object.keys(normalized);
+            const pisados = aplicados.filter((f) => camposPropuestosSinGuardar.has(f));
+            camposPropuestosSinGuardar = new Set([...camposPropuestosSinGuardar, ...aplicados]);
+            if (pisados.length) {
+                return { ok: true, reason: "applied", replacedFields: pisados };
+            }
             return { ok: true, reason: "applied" };
         }
 
@@ -1975,6 +2002,10 @@ export const tuquiAssistantService = {
             // Guardado: el registro dejó de estar sucio y los computados cambiaron.
             refreshRecordContext();
             notification.add(_t("Form saved."), { type: "success" });
+            // Lo propuesto dejó de estar sin guardar, así que la próxima
+            // propuesta sobre el mismo campo NO pisa nada del asistente: pisa un
+            // valor ya confirmado, que es una situación distinta.
+            camposPropuestosSinGuardar = new Set();
             return { ok: true, reason: "saved" };
         }
 
