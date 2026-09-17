@@ -367,6 +367,60 @@ export function didItLandOnTheSection(pedida, hay) {
     return { ok: true, reason: "opened", detail: nombre };
 }
 
+/**
+ * Which checkboxes the person can SEE on the settings screen, and whether each
+ * one is already ticked.
+ *
+ * WHY THIS EXISTS, and it is a capability gap and not a behaviour one. The page
+ * context told the assistant the NAMES of 109 fields and, for each, only whether
+ * it was invisible / readonly / required — never a value. And it left out the
+ * ones that are plainly visible and editable, because a field with nothing
+ * unusual about it produced an empty state and got dropped. So the one field the
+ * whole task hinged on — the storage-locations checkbox — was not in there at
+ * all.
+ *
+ * WHAT THAT COST, measured twice in a row with the production model. Once the
+ * assistant concluded "it is already enabled" from the person's complaint,
+ * because it had no way to check; the option was off. The other time it sent her
+ * to tick a box that was ALREADY ticked, and she turned it off. She caught it
+ * herself, by noticing a button disappear, and said the part that matters: «if I
+ * had not spotted that, we would have kept going thinking it was fine when we
+ * had broken it.»
+ *
+ * READ FROM THE SCREEN, NOT FROM THE RECORD, for two reasons that happen to
+ * point the same way. The record carries every section's fields at once (109 of
+ * them) and the context is CUT at 8000 characters, so sending them all would
+ * push out everything else; and what matters is what the person is looking at,
+ * which is exactly one section. The DOM already answers both questions.
+ *
+ * @param {Document|Element} root
+ * @returns {Object<string, boolean>} technical field name → ticked or not
+ */
+/** La pantalla de Ajustes de Odoo. Es un modelo transitorio —no tiene filas— y
+ *  por eso se trata aparte en varios lugares de este archivo. */
+const SETTINGS_MODEL = "res.config.settings";
+
+export function checkboxesOnScreen(root = document) {
+    const out = {};
+    for (const caja of root.querySelectorAll?.(".o_setting_box input[type=checkbox]") || []) {
+        // El nombre técnico vive en el widget que envuelve al input, no en el
+        // input (Odoo le pone un id generado). Sin nombre no sirve de nada:
+        // el asistente no puede hablar de un campo que no puede nombrar.
+        const nombre = caja.closest?.("[name]")?.getAttribute?.("name");
+        if (!nombre) {
+            continue;
+        }
+        // Una casilla escondida no es algo que la persona vea, y mandarla
+        // invitaría a hablar de un control que no está en su pantalla — el
+        // error que la marca ya aprendió a no cometer.
+        if (caja.offsetParent === null && caja.getClientRects?.().length === 0) {
+            continue;
+        }
+        out[nombre] = Boolean(caja.checked);
+    }
+    return out;
+}
+
 export function settingsSectionsOnScreen(root = document) {
     const claves = [...(root.querySelectorAll?.(".settings_tab [data-key]") || [])]
         .map((e) => e.dataset?.key)
@@ -1394,6 +1448,29 @@ export const tuquiAssistantService = {
                 // del otro lado el prompt deja de leer "ausente" como "normal".
                 if (!evaluadoresDisponibles(activeRecord)) {
                     ctx.fieldStateUnavailable = true;
+                }
+                // QUÉ CASILLAS VE, Y CUÁLES YA ESTÁN TILDADAS. Sólo en Ajustes, y
+                // por una razón medida: es la única pantalla donde el trabajo
+                // ENTERO consiste en tildar una casilla, y donde los valores no
+                // viajaban. `fields` trae los del registro —que en
+                // `res.config.settings` son los de TODAS las secciones a la vez,
+                // 109 en una base chica— y el estado sólo decía si eran
+                // editables. La casilla de ubicaciones no estaba en ninguno de
+                // los dos, porque no tenía nada de raro.
+                //
+                // Con eso el asistente mandó a tildar una casilla YA TILDADA y la
+                // persona la apagó. Lo notó ella, no él: «si no me hubiera fijado
+                // en ese detalle, seguíamos creyendo que estaba bien cuando lo
+                // habíamos roto».
+                //
+                // Va DESPUÉS del estado y ANTES de los valores por el mismo
+                // criterio de corte: lo que se pierda al truncar tiene que ser lo
+                // reconstruible desde el otro lado, y esto no lo es.
+                if (activeRecord.resModel === SETTINGS_MODEL) {
+                    const casillas = checkboxesOnScreen();
+                    if (Object.keys(casillas).length) {
+                        ctx.checkboxes = casillas;
+                    }
                 }
                 ctx.fields = serializeRecordFields(activeRecord);
             }
