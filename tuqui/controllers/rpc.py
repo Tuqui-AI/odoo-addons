@@ -77,9 +77,9 @@ def _is_absolutely_blocked(method: str) -> bool:
 #     `check_access_rights` broke the embedded "create a record" flow outright.
 #   * a WRITE not listed → also ``execute`` → still gated the same way, so only
 #     its audit row gets mislabelled.
-# This classifier is the audit label, NOT the authorization boundary: writes
-# are really gated by the backend whitelist (workspace_write_models) and the
-# acting user's Odoo ACL.
+# This classifier is the coarse read_only edge gate + audit label, NOT the
+# authorization boundary: writes are really gated by the backend whitelist
+# (workspace_write_models) and the acting user's Odoo ACL.
 _WRITE_METHODS = frozenset({"create", "write", "unlink", "copy", "name_create"})
 # Reads that don't begin with the search/read prefix must be listed explicitly
 # (e.g. ``formatted_read_group``, the Odoo 19 grouped read).

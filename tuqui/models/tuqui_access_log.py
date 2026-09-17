@@ -89,8 +89,9 @@ class TuquiAccessLog(models.Model):
     )
     policy_denied_reason = fields.Char(
         help=(
-            "Why the policy gate blocked the call, in the order the gates run: "
-            "method_blocked, private_method_blocked, forbidden_acting_user, "
+            "Why the call was blocked, in the order the gates run: "
+            "forbidden_acting_user (resolved before the policy gate, and only "
+            "on the member path), then method_blocked, private_method_blocked, "
             "connection_read_only, requires_acting_user, read_only_mode. "
             "Empty when policy_allowed is True."
         ),
