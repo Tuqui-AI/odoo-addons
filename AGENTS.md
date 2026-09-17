@@ -12,6 +12,7 @@ su Odoo para conectarse a Tuqui, y el asistente embebido en el backend.
 | `tuqui` | `18.0`, `19.0` | Connector companion: activación en un click + `CompanionTransport` (el transporte que usa el backend de Tuqui contra el Odoo del cliente). |
 | `tuqui_assistant` | `18.0`, `19.0` | Panel embebido del asistente en el backend de Odoo (chat contextual + propose-then-apply sobre el formulario activo). Depende de `tuqui`. |
 | `tuqui_mcp` | `16.0`–`19.0` | Data-only para Odoo Apps: registra los parámetros de conexión. Compatible con Odoo Online. |
+| `base_search_relevant` | `19.0` | Búsqueda de texto rankeada activable por modelo: índice propio, cron y ranking. Sin marca y sin Tuqui adentro (depende sólo de `base`); `tuqui` la expone por RPC. |
 
 Es un repo de **módulos Odoo**, no de la app. El backend (FastAPI) vive en
 `Tuqui-AI/tuqui`; este repo es la contraparte del lado del cliente.
