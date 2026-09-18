@@ -424,7 +424,13 @@ export function checkboxesOnScreen(root = document) {
         // dos. No tenía cómo saber que son lo mismo: nadie le dijo cómo se llama
         // en la pantalla. Y es lo único que puede nombrarle a la persona, porque
         // el nombre técnico no está escrito en ningún lado que ella pueda ver.
-        out[nombre] = { on: Boolean(caja.checked), label: etiquetaDeLaCasilla(caja) };
+        // `checked` Y NO `on`, y no es cosmética: en YAML 1.1 la palabra `on` ES un
+        // booleano, así que un caso de prueba escrito `{on: true}` se parsea como
+        // `{True: True}` y el lector encuentra la clave vacía. Medido: la nota
+        // salía diciendo que TODAS las casillas estaban apagadas, el turno leía
+        // eso y contestaba «está desactivado» sobre una que estaba encendida —
+        // el daño exacto que este dato vino a evitar, causado por el dato mismo.
+        out[nombre] = { checked: Boolean(caja.checked), label: etiquetaDeLaCasilla(caja) };
     }
     return out;
 }

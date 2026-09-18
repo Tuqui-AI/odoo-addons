@@ -41,8 +41,8 @@ describe("checkboxesOnScreen", () => {
             </div>
         `);
         expect(checkboxesOnScreen(root)).toEqual({
-            group_stock_multi_locations: { on: true, label: "Storage Locations" },
-            group_stock_adv_location: { on: false, label: "Multi-Step Routes" },
+            group_stock_multi_locations: { checked: true, label: "Storage Locations" },
+            group_stock_adv_location: { checked: false, label: "Multi-Step Routes" },
         });
     });
 
@@ -81,7 +81,7 @@ describe("checkboxesOnScreen", () => {
                 <div class="o_field_widget" name="group_x"><input type="checkbox" checked/></div>
             </div>
         `);
-        expect(checkboxesOnScreen(root)).toEqual({ group_x: { on: true, label: null } });
+        expect(checkboxesOnScreen(root)).toEqual({ group_x: { checked: true, label: null } });
     });
 
     test("la etiqueta es el NOMBRE, no la explicación de abajo", () => {
