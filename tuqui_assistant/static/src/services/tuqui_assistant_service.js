@@ -416,9 +416,44 @@ export function checkboxesOnScreen(root = document) {
         if (caja.offsetParent === null && caja.getClientRects?.().length === 0) {
             continue;
         }
-        out[nombre] = Boolean(caja.checked);
+        // Y LA ETIQUETA QUE LA PERSONA LEE, no sólo el nombre técnico. Medido:
+        // con `group_stock_multi_locations: true` en el contexto, el turno
+        // escribió «ya tenés activadas las ubicaciones múltiples» y en la misma
+        // respuesta «la opción que necesitás se llama Storage Locations y está
+        // desactivada, la marqué» — hablando de la MISMA casilla como si fueran
+        // dos. No tenía cómo saber que son lo mismo: nadie le dijo cómo se llama
+        // en la pantalla. Y es lo único que puede nombrarle a la persona, porque
+        // el nombre técnico no está escrito en ningún lado que ella pueda ver.
+        out[nombre] = { on: Boolean(caja.checked), label: etiquetaDeLaCasilla(caja) };
     }
     return out;
+}
+
+/**
+ * Cómo se llama esa casilla en la pantalla, que es lo único que la persona lee.
+ *
+ * Se pregunta como pregunta el navegador —`label[for]`, `aria-label`— y recién
+ * después se mira el bloque de ajustes que la envuelve, donde Odoo pone el
+ * título arriba y la explicación abajo: interesa la primera línea, que es el
+ * nombre; el párrafo de abajo es la descripción y ocupa contexto sin agregar
+ * nada que se pueda nombrar.
+ */
+function etiquetaDeLaCasilla(caja) {
+    const limpio = (t) => (t || "").trim().replace(/\s+/g, " ").slice(0, 60) || null;
+    if (caja.id) {
+        const etiqueta = caja.ownerDocument?.querySelector?.(`label[for="${CSS.escape(caja.id)}"]`);
+        const porLabel = limpio(etiqueta?.textContent);
+        if (porLabel) {
+            return porLabel;
+        }
+    }
+    const porAria = limpio(caja.getAttribute?.("aria-label"));
+    if (porAria) {
+        return porAria;
+    }
+    const caja_de_ajuste = caja.closest?.(".o_setting_box");
+    const suelta = caja_de_ajuste?.querySelector?.("label");
+    return limpio(suelta?.textContent) || limpio(caja_de_ajuste?.textContent?.split("\n")[0]);
 }
 
 export function settingsSectionsOnScreen(root = document) {

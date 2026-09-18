@@ -29,20 +29,20 @@ describe("checkboxesOnScreen", () => {
         const root = pantalla(`
             <div class="o_setting_box">
                 <div class="o_field_widget" name="group_stock_multi_locations">
-                    <input type="checkbox" checked/>
+                    <input type="checkbox" id="cb_multi" checked/>
                 </div>
-                <label>Storage Locations</label>
+                <label for="cb_multi">Storage Locations</label>
             </div>
             <div class="o_setting_box">
                 <div class="o_field_widget" name="group_stock_adv_location">
-                    <input type="checkbox"/>
+                    <input type="checkbox" id="cb_adv"/>
                 </div>
-                <label>Multi-Step Routes</label>
+                <label for="cb_adv">Multi-Step Routes</label>
             </div>
         `);
         expect(checkboxesOnScreen(root)).toEqual({
-            group_stock_multi_locations: true,
-            group_stock_adv_location: false,
+            group_stock_multi_locations: { on: true, label: "Storage Locations" },
+            group_stock_adv_location: { on: false, label: "Multi-Step Routes" },
         });
     });
 
@@ -70,5 +70,31 @@ describe("checkboxesOnScreen", () => {
         // Quien lo consume distingue "no hay casillas" de "no se pudo leer", y
         // eso sólo funciona si la ausencia tiene una forma estable.
         expect(checkboxesOnScreen(pantalla(`<div class="o_form_view"></div>`))).toEqual({});
+    });
+
+    test("sin etiqueta la casilla viaja igual, con label nulo", () => {
+        // El valor es lo que evita el daño; la etiqueta es para poder NOMBRARLA.
+        // Perder la casilla entera por no encontrarle el nombre sería cambiar un
+        // problema de redacción por uno de seguridad.
+        const root = pantalla(`
+            <div class="o_setting_box">
+                <div class="o_field_widget" name="group_x"><input type="checkbox" checked/></div>
+            </div>
+        `);
+        expect(checkboxesOnScreen(root)).toEqual({ group_x: { on: true, label: null } });
+    });
+
+    test("la etiqueta es el NOMBRE, no la explicación de abajo", () => {
+        // Odoo pone el título arriba y un párrafo explicativo debajo. El párrafo
+        // ocupa contexto y no se puede nombrar: lo que la persona busca con los
+        // ojos es el título.
+        const root = pantalla(`
+            <div class="o_setting_box">
+                <div class="o_field_widget" name="group_y"><input type="checkbox" id="cb_y"/></div>
+                <label for="cb_y">Storage Locations</label>
+                <div class="text-muted">Track product location in your warehouse</div>
+            </div>
+        `);
+        expect(checkboxesOnScreen(root).group_y.label).toBe("Storage Locations");
     });
 });
